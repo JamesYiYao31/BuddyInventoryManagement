@@ -4,36 +4,37 @@ import { Analytics } from '@vercel/analytics/next'
 import { ThemeProvider } from "@/components/theme-provider"
 import './globals.css'
 
-const _geist = Geist({ subsets: ["latin"] });
-const _geistMono = Geist_Mono({ subsets: ["latin"] });
+// Initializing the professional Geist fonts
+const geistSans = Geist({
+  subsets: ["latin"],
+  variable: "--font-geist-sans",
+});
+
+const geistMono = Geist_Mono({
+  subsets: ["latin"],
+  variable: "--font-geist-mono",
+});
 
 export const metadata: Metadata = {
   title: 'BuddyLab Tracker | Reagent & Inventory Management',
   description: 'Professional clinical laboratory reagent and inventory tracking system for compliance and efficiency',
-  generator: 'v0.app',
   icons: {
     icon: [
-      {
-        url: '/icon-light-32x32.png',
-        media: '(prefers-color-scheme: light)',
-      },
-      {
-        url: '/icon-dark-32x32.png',
-        media: '(prefers-color-scheme: dark)',
-      },
-      {
-        url: '/icon.svg',
-        type: 'image/svg+xml',
-      },
+      { url: '/icon-light-32x32.png', media: '(prefers-color-scheme: light)' },
+      { url: '/icon-dark-32x32.png', media: '(prefers-color-scheme: dark)' },
+      { url: '/icon.svg', type: 'image/svg+xml' },
     ],
     apple: '/apple-icon.png',
   },
 }
 
-export default function RootLayout({ children }) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning> 
-      <body className="font-sans antialiased">
+      <body 
+        className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased`}
+        suppressHydrationWarning
+      >
         <ThemeProvider
           attribute="class"
           defaultTheme="system"
@@ -41,6 +42,7 @@ export default function RootLayout({ children }) {
           disableTransitionOnChange
         >
           {children}
+          <Analytics />
         </ThemeProvider>
       </body>
     </html>
