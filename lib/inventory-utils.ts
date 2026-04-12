@@ -1,4 +1,7 @@
 import { supabase } from "./supabase"
+import { getEarliestExpiry } from "./expiry-utils.ts"
+
+export { getEarliestExpiry }
 
 export type SidebarPage = "dashboard" | "inventory" | "lotinuse" | "requests" | "activitylog" | "analytics" | "labsharing"
 export type InventoryStatus = "In Storage" | "Low Stock" | "Expiring Soon" | "Expired" | "Watchlist"
@@ -94,14 +97,6 @@ export const LOT_IN_USE_STYLES: Record<string, string> = {
   "Low Volume": "bg-orange-500/10 text-orange-600 dark:text-orange-400",
   "Expiring Soon": "bg-red-500/10 text-red-600 dark:text-red-400",
   "Expired": "bg-zinc-500/10 text-zinc-600 dark:text-zinc-400",
-}
-
-export const getEarliestExpiry = (date1: string, date2: string): string => {
-  if (!date1) return date2
-  if (!date2) return date1
-  const d1 = new Date(date1).getTime()
-  const d2 = new Date(date2).getTime()
-  return d1 < d2 ? date1 : date2
 }
 
 export type RequestStatus = "Pending" | "Approved" | "Ordered" | "Received"

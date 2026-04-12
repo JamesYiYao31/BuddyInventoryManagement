@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { getEarliestExpiry } from './inventory-utils.ts';
+import { getEarliestExpiry } from './expiry-utils.ts';
 
 describe('getEarliestExpiry', () => {
   test('returns date1 if it is earlier than date2', () => {
