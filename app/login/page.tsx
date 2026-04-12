@@ -4,6 +4,7 @@ import { useState } from "react"
 import { Loader2, ShieldCheck, X, UserCircle, Key } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { useRouter } from "next/navigation"
+import Image from "next/image"
 
 export default function LoginPage() {
   const [isRegistering, setIsRegistering] = useState(false)
@@ -103,7 +104,7 @@ export default function LoginPage() {
 
             <div className="p-14 md:p-16 space-y-10">
               <div className="flex flex-col items-center text-center">
-                 <img src="/buddy-logo.png" alt="Logo" className="h-16 w-auto mb-8 drop-shadow-md" />
+                 <Image src="/buddy-logo.png" alt="Logo" width={64} height={64} className="h-16 w-auto mb-8 drop-shadow-md" priority />
                  <h1 className="text-4xl font-black tracking-tight text-foreground">{isRegistering ? "Account Registration" : "Oakwood Clinical Portal"}</h1>
                  <p className="text-lg text-muted-foreground mt-2 font-medium">{isRegistering ? "Register your clinical credentials" : "Authorized Personnel Access Only"}</p>
               </div>
