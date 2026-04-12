@@ -162,19 +162,21 @@ export default function InventoryTab({ inventory, sortedFlatInventory, labSettin
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-foreground">Inventory List</h1>
         <div className="flex gap-3">
+          {/* Settings is hidden from Techs */}
           {userRole === 'manager' && (
             <button onClick={() => setShowSettings(!showSettings)} className={`flex items-center gap-2 rounded-xl border px-6 py-2.5 text-sm font-bold transition-all ${showSettings ? "bg-primary text-primary-foreground border-primary shadow-md" : "bg-card border-border text-foreground hover:bg-muted"}`}>
               <Settings2 className="size-5" /> Criteria
             </button>
           )}
+          
           <button onClick={() => setShowBarcodeModal(true)} className="flex items-center gap-2 rounded-xl bg-primary text-primary-foreground px-6 py-2.5 text-sm font-bold shadow-md hover:opacity-90 transition-all">
             <Scan className="size-5" /> Scan Reagent
           </button>
-          {userRole === 'manager' && (
-            <button onClick={openManualEntry} className="flex items-center gap-2 rounded-xl border border-border bg-card px-6 py-2.5 text-sm font-bold text-foreground hover:bg-muted transition-all">
-              <Plus className="size-5" /> Add Manually
-            </button>
-          )}
+          
+          {/* FIXED: Removed the Manager requirement here so Techs can add items */}
+          <button onClick={openManualEntry} className="flex items-center gap-2 rounded-xl border border-border bg-card px-6 py-2.5 text-sm font-bold text-foreground hover:bg-muted transition-all">
+            <Plus className="size-5" /> Add Manually
+          </button>
         </div>
       </div>
 
@@ -234,7 +236,9 @@ export default function InventoryTab({ inventory, sortedFlatInventory, labSettin
                       <button onClick={() => deleteLot(lot)} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-destructive transition-all"><Trash2 className="size-4" /></button>
                     </>
                   ) : (
+                    <span title="Manager Only">
                     <ShieldAlert className="size-4 text-muted-foreground/30" />
+                  </span>
                   )}
                 </div>
               </div>
@@ -267,9 +271,7 @@ export default function InventoryTab({ inventory, sortedFlatInventory, labSettin
                       <button onClick={() => triggerScan(barcodeInput)} className="px-8 bg-primary text-primary-foreground rounded-2xl font-bold text-lg hover:opacity-90 transition-all shadow-sm shadow-primary/20">Look up</button>
                     </div>
                   </div>
-                  {userRole === 'manager' && (
-                    <button onClick={openManualEntry} className="text-sm font-semibold text-muted-foreground hover:text-primary underline underline-offset-8">Barcode unreadable? Click to enter manually</button>
-                  )}
+                  <button onClick={openManualEntry} className="text-sm font-semibold text-muted-foreground hover:text-primary underline underline-offset-8">Barcode unreadable? Click to enter manually</button>
                 </>
               ) : (
                 <div className="bg-primary/5 border-2 border-primary/20 p-8 rounded-[2rem] space-y-6 text-left">
