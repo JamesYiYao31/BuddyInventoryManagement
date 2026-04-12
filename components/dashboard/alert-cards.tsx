@@ -1,43 +1,93 @@
 "use client"
 
-import { AlertTriangle, Clock } from "lucide-react"
+import { DashboardStats } from "@/lib/inventory-utils"
+import { AlertTriangle, Timer, PackageSearch, CreditCard, ArrowRight, XCircle } from "lucide-react"
 
-export function AlertCards() {
+interface AlertCardsProps {
+  stats: DashboardStats | null
+}
+
+export function AlertCards({ stats }: AlertCardsProps) {
+  // ── 1. KPI DATA MAPPING ──
+  const kpis = [
+    { 
+      label: "Expired Lots", 
+      value: stats?.expiredCount || 0, 
+      color: "text-red-500", 
+      icon: XCircle, 
+      bg: "bg-red-500/10",
+      border: "border-red-500/20"
+    },
+    { 
+      label: "Expiring < 7 Days", 
+      value: stats?.urgentCount || 0, 
+      color: "text-orange-500", 
+      icon: Timer, 
+      bg: "bg-orange-500/10",
+      border: "border-orange-500/20"
+    },
+    { 
+      label: "Low Stock Items", 
+      value: stats?.lowStockCount || 0, 
+      color: "text-yellow-600", 
+      icon: PackageSearch, 
+      bg: "bg-yellow-500/10",
+      border: "border-yellow-500/20"
+    },
+    { 
+      label: "Pending Requests", 
+      value: stats?.pendingRequests || 0, 
+      color: "text-blue-600", 
+      icon: CreditCard, 
+      bg: "bg-blue-500/10",
+      border: "border-blue-500/20"
+    },
+  ]
+
   return (
-    <div className="grid gap-4 md:grid-cols-2">
-      <div className="flex items-start gap-4 rounded-lg border border-destructive/30 bg-destructive/10 p-4">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-destructive/20">
-          <Clock className="h-5 w-5 text-destructive" />
+    <div className="space-y-6">
+      
+      {/* ── 2. LIVE ACTION BANNERS (Conditional) ── */}
+      {(stats?.expiredCount || 0) > 0 && (
+        <div className="flex items-center justify-between p-6 rounded-[2rem] bg-red-600 text-white shadow-xl shadow-red-600/20 animate-in slide-in-from-top duration-500">
+          <div className="flex items-center gap-5">
+            <div className="p-3 bg-white/20 rounded-2xl backdrop-blur-md">
+              <AlertTriangle className="size-8 text-white" />
+            </div>
+            <div>
+              <h3 className="text-xl font-black uppercase tracking-tight">Critical Action Required</h3>
+              <p className="text-red-100 text-sm font-medium">There are {stats?.expiredCount} expired lots that must be disposed of and logged immediately.</p>
+            </div>
+          </div>
+          <button className="px-6 py-3 bg-white text-red-600 rounded-xl font-bold text-sm hover:bg-red-50 transition-colors flex items-center gap-2">
+            Go to Inventory <ArrowRight className="size-4" />
+          </button>
         </div>
-        <div className="flex-1">
-          <p className="text-sm font-semibold text-destructive">Urgent</p>
-          <p className="mt-0.5 text-sm text-foreground">
-            2 Reagents Expiring within 7 Days
-          </p>
-          <p className="mt-1.5 text-xs text-muted-foreground">
-            Review expiring items immediately to prevent waste
-          </p>
-        </div>
-        <button className="shrink-0 rounded-md bg-destructive/20 px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/30 transition-colors">
-          View All
-        </button>
-      </div>
-      <div className="flex items-start gap-4 rounded-lg border border-warning/30 bg-warning/10 p-4">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-warning/20">
-          <AlertTriangle className="h-5 w-5 text-warning" />
-        </div>
-        <div className="flex-1">
-          <p className="text-sm font-semibold text-warning">Warning</p>
-          <p className="mt-0.5 text-sm text-foreground">
-            Lot #4928 (SuperMix) is below 10% volume
-          </p>
-          <p className="mt-1.5 text-xs text-muted-foreground">
-            Consider reordering to maintain stock levels
-          </p>
-        </div>
-        <button className="shrink-0 rounded-md bg-warning/20 px-3 py-1.5 text-xs font-medium text-warning hover:bg-warning/30 transition-colors">
-          Reorder
-        </button>
+      )}
+
+      {/* ── 3. KPI STATS GRID ── */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {kpis.map((item, i) => (
+          <div 
+            key={i} 
+            className={`group bg-card border-2 ${item.border} p-8 rounded-[2.5rem] flex flex-col gap-4 shadow-sm transition-all hover:shadow-md hover:scale-[1.01]`}
+          >
+            <div className="flex items-center justify-between">
+              <div className={`p-4 rounded-[1.5rem] ${item.bg} group-hover:scale-110 transition-transform`}>
+                <item.icon className={`size-8 ${item.color}`} />
+              </div>
+              <div className={`text-5xl font-black tracking-tighter ${item.color}`}>
+                {item.value}
+              </div>
+            </div>
+            <div>
+              <p className="text-[10px] font-black uppercase text-muted-foreground tracking-[0.2em]">
+                {item.label}
+              </p>
+              <div className="mt-1 h-1 w-8 bg-border rounded-full group-hover:w-full group-hover:bg-primary/30 transition-all duration-500" />
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   )

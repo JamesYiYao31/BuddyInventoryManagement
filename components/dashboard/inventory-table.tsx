@@ -1,9 +1,11 @@
 "use client"
 
+import { supabase } from "@/lib/supabase"
 import { useState, useRef, useEffect } from "react"
-import { Scan, Plus, Pencil, Camera, X, CheckCircle2, Settings2, Trash2 } from "lucide-react"
+import { Scan, Plus, Pencil, Camera, X, CheckCircle2, Settings2, Trash2, ShieldAlert } from "lucide-react"
 import { 
-  LotEntry, STATUS_STYLES, totalCountLabel, daysUntilExpiry, emptyLotForm 
+  LotEntry, STATUS_STYLES, totalCountLabel, daysUntilExpiry, emptyLotForm,
+  logActivity, InventoryGroup, LabSettings 
 } from "@/lib/inventory-utils"
 
 const KNOWN_ITEMS: Record<string, { name: string; vendor: string }> = {
@@ -11,9 +13,17 @@ const KNOWN_ITEMS: Record<string, { name: string; vendor: string }> = {
   "26542": { name: "BioBall", vendor: "Merck" },
 }
 
-export default function InventoryTab({ inventory, setInventory, sortedFlatInventory, labSettings }: any) {
+interface InventoryTabProps {
+  inventory: InventoryGroup[]
+  sortedFlatInventory: any[]
+  labSettings: LabSettings
+  refreshData: () => Promise<void> | void
+  userRole: "manager" | "technician"
+}
+
+export default function InventoryTab({ inventory, sortedFlatInventory, labSettings, refreshData, userRole }: InventoryTabProps) {
   
-  // ── 1. CRITERIA STATE (Synced to Lab Settings) ──
+  // ── 1. CRITERIA STATE ──
   const [thresholds, setThresholds] = useState({ 
     urgentDays: labSettings?.expiryUrgentDays || 7, 
     warningDays: labSettings?.expiryWarnDays || 30 
@@ -24,7 +34,6 @@ export default function InventoryTab({ inventory, setInventory, sortedFlatInvent
   const [showItemModal, setShowItemModal] = useState(false)
   const [showBarcodeModal, setShowBarcodeModal] = useState(false)
   const [editingLot, setEditingLot] = useState<any>(null)
-  
   const [isNewGroup, setIsNewGroup] = useState(true)
   const [newItemName, setNewItemName] = useState("")
   const [selectedGroupId, setSelectedGroupId] = useState("")
@@ -48,6 +57,30 @@ export default function InventoryTab({ inventory, setInventory, sortedFlatInvent
   }
 
   // ── 4. ACTIONS ──
+  const handleAutoReorder = async (lot: any) => {
+    const confirmOrder = confirm(`Auto-generate reorder request for ${lot.itemName}?`);
+    if (!confirmOrder) return;
+
+    const { error } = await supabase
+      .from('requests')
+      .insert([{
+        item_id: lot.itemId,
+        item_name: lot.itemName,
+        vendor: lot.vendor,
+        catalog_number: lot.lot, 
+        order_qty: 1, 
+        status: "Pending",
+        notes: "Auto-generated due to low stock/watchlist levels."
+      }]);
+
+    if (error) alert("Error creating request: " + error.message);
+    else {
+      await logActivity("Ordered", lot.itemName, lot.lot, "Auto-generated reorder request")
+      alert("Reorder request sent to manager!");
+      await refreshData()
+    }
+  };
+
   const triggerScan = (code: string) => {
     const parseBarcode = (rawCode: string) => {
       let parsed = { lot: "", expiry: "", itemCode: "", type: "1D" }
@@ -75,32 +108,73 @@ export default function InventoryTab({ inventory, setInventory, sortedFlatInvent
     setShowBarcodeModal(false); setEditingLot(null); setIsNewGroup(true); setLotForm(emptyLotForm()); setShowItemModal(true)
   }
 
-  const saveItem = () => {
-    const newLot = { ...lotForm, lotId: Date.now().toString() } as LotEntry
-    if (!isNewGroup && selectedGroupId) {
-      setInventory((prev: any) => prev.map((g: any) => g.itemId === selectedGroupId ? { ...g, lots: editingLot ? g.lots.map((l: any) => l.lotId === editingLot.lotId ? newLot : l) : [...g.lots, newLot] } : g))
-    } else {
-      setInventory((prev: any) => [...prev, { itemId: Date.now().toString(), name: newItemName, lots: [newLot] }])
+  const deleteLot = async (lot: any) => {
+    if (userRole !== 'manager') return alert("Unauthorized: Only managers can delete inventory.")
+    if(!confirm('Are you sure you want to delete this lot?')) return
+    
+    const { error } = await supabase.from('inventory_lots').delete().eq('id', lot.lotId)
+    if (error) alert(error.message)
+    else {
+      await logActivity("Disposed", lot.itemName, lot.lot, "Manually deleted from inventory")
+      await refreshData()
     }
+  }
+
+  const saveItem = async () => {
+    if (!lotForm.lot) return alert("Lot number is required")
+    let finalItemId = selectedGroupId
+    let finalItemName = newItemName
+
+    if (isNewGroup) {
+      const { data: newItem, error: itemError } = await supabase.from('items').insert([{ name: newItemName, vendor: lotForm.vendor }]).select().single()
+      if (itemError) return alert("Error creating item: " + itemError.message)
+      finalItemId = newItem.id
+    } else {
+      const existing = inventory.find((g: any) => g.itemId === selectedGroupId)
+      finalItemName = existing?.name || "Unknown"
+    }
+
+    const { error: lotError } = await supabase.from('inventory_lots').insert([{
+        item_id: finalItemId, 
+        lot_number: lotForm.lot, 
+        expiry_date: lotForm.expiry, 
+        received_date: lotForm.receivedDate,
+        storage_location: lotForm.storage, 
+        quantity_type: lotForm.quantityType, 
+        units: lotForm.units,
+        unit_label: lotForm.unitLabel, 
+        count: lotForm.count, 
+        count_label: lotForm.countLabel,
+        notes: lotForm.notes, 
+        status: lotForm.status
+      }])
+
+    if (lotError) return alert("Error saving lot: " + lotError.message)
+
+    await logActivity("Added", finalItemName, lotForm.lot, `Received ${lotForm.units} ${lotForm.unitLabel} into ${lotForm.storage}`)
+    await refreshData()
     setShowItemModal(false)
   }
 
   return (
     <div className="relative flex flex-col gap-6">
-      
       {/* ── HEADER ── */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-foreground">Inventory List</h1>
         <div className="flex gap-3">
-          <button onClick={() => setShowSettings(!showSettings)} className={`flex items-center gap-2 rounded-xl border px-6 py-2.5 text-sm font-bold transition-all ${showSettings ? "bg-primary text-primary-foreground border-primary shadow-md" : "bg-card border-border text-foreground hover:bg-muted"}`}>
-            <Settings2 className="size-5" /> Criteria
-          </button>
+          {userRole === 'manager' && (
+            <button onClick={() => setShowSettings(!showSettings)} className={`flex items-center gap-2 rounded-xl border px-6 py-2.5 text-sm font-bold transition-all ${showSettings ? "bg-primary text-primary-foreground border-primary shadow-md" : "bg-card border-border text-foreground hover:bg-muted"}`}>
+              <Settings2 className="size-5" /> Criteria
+            </button>
+          )}
           <button onClick={() => setShowBarcodeModal(true)} className="flex items-center gap-2 rounded-xl bg-primary text-primary-foreground px-6 py-2.5 text-sm font-bold shadow-md hover:opacity-90 transition-all">
             <Scan className="size-5" /> Scan Reagent
           </button>
-          <button onClick={openManualEntry} className="flex items-center gap-2 rounded-xl border border-border bg-card px-6 py-2.5 text-sm font-bold text-foreground hover:bg-muted transition-all">
-            <Plus className="size-5" /> Add Manually
-          </button>
+          {userRole === 'manager' && (
+            <button onClick={openManualEntry} className="flex items-center gap-2 rounded-xl border border-border bg-card px-6 py-2.5 text-sm font-bold text-foreground hover:bg-muted transition-all">
+              <Plus className="size-5" /> Add Manually
+            </button>
+          )}
         </div>
       </div>
 
@@ -145,10 +219,23 @@ export default function InventoryTab({ inventory, setInventory, sortedFlatInvent
                 <span className="text-muted-foreground/80">{lot.receivedDate}</span>
                 <span className="font-medium text-foreground/90">{lot.expiry}</span>
                 <span className="font-semibold text-foreground">{totalCountLabel(lot)}</span>
-                <span className={`inline-flex w-fit px-3 py-1 rounded-full text-[10px] font-bold ${statusColor}`}>{status}</span>
+                
+                <div className="flex flex-col gap-1 items-start">
+                   <span className={`inline-flex px-3 py-1 rounded-full text-[10px] font-bold ${statusColor}`}>{status}</span>
+                   {(status === "Watchlist" || status === "Expiring Soon") && (
+                     <button onClick={(e) => { e.stopPropagation(); handleAutoReorder(lot); }} className="text-[9px] font-black text-primary uppercase hover:underline ml-1">+ Reorder</button>
+                   )}
+                </div>
+
                 <div className="flex justify-end gap-2">
-                  <button onClick={() => { setEditingLot(lot); setLotForm(lot); setSelectedGroupId(lot.itemId); setIsNewGroup(false); setShowItemModal(true); }} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-primary transition-all"><Pencil className="size-4" /></button>
-                  <button onClick={() => { if(confirm('Delete lot?')) setInventory((prev: any) => prev.map((g: any) => g.itemId === lot.itemId ? { ...g, lots: g.lots.filter((l: any) => l.lotId !== lot.lotId) } : g).filter((g: any) => g.lots.length > 0)) }} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-destructive transition-all"><Trash2 className="size-4" /></button>
+                  {userRole === 'manager' ? (
+                    <>
+                      <button onClick={() => { setEditingLot(lot); setLotForm(lot); setSelectedGroupId(lot.itemId); setIsNewGroup(false); setShowItemModal(true); }} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-primary transition-all"><Pencil className="size-4" /></button>
+                      <button onClick={() => deleteLot(lot)} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-destructive transition-all"><Trash2 className="size-4" /></button>
+                    </>
+                  ) : (
+                    <ShieldAlert className="size-4 text-muted-foreground/30" />
+                  )}
                 </div>
               </div>
             )
@@ -158,7 +245,7 @@ export default function InventoryTab({ inventory, setInventory, sortedFlatInvent
         )}
       </div>
 
-      {/* ── POP-OUT: SCAN BARCODE (1.5x BIGGER) ── */}
+      {/* ── MODALS (Giant 1.5x Style) ── */}
       {showBarcodeModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-md p-4">
           <div className="w-full max-w-xl rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95">
@@ -177,10 +264,12 @@ export default function InventoryTab({ inventory, setInventory, sortedFlatInvent
                     <label className="text-xs font-bold uppercase text-muted-foreground tracking-widest block text-left ml-2">Manual Entry / Lot Number</label>
                     <div className="flex gap-3">
                       <input ref={barcodeRef} value={barcodeInput} onChange={e => setBarcodeInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && triggerScan(barcodeInput)} placeholder="00124985..." className="flex-1 h-16 border border-input bg-background rounded-2xl px-6 text-lg focus:ring-4 focus:ring-primary/10 focus:border-primary outline-none transition-all" />
-                      <button onClick={() => triggerScan(barcodeInput)} className="px-8 bg-primary text-primary-foreground rounded-2xl font-bold text-lg hover:opacity-90 transition-all shadow-sm">Look up</button>
+                      <button onClick={() => triggerScan(barcodeInput)} className="px-8 bg-primary text-primary-foreground rounded-2xl font-bold text-lg hover:opacity-90 transition-all shadow-sm shadow-primary/20">Look up</button>
                     </div>
                   </div>
-                  <button onClick={openManualEntry} className="text-sm font-semibold text-muted-foreground hover:text-primary underline underline-offset-8">Barcode unreadable? Click to enter manually</button>
+                  {userRole === 'manager' && (
+                    <button onClick={openManualEntry} className="text-sm font-semibold text-muted-foreground hover:text-primary underline underline-offset-8">Barcode unreadable? Click to enter manually</button>
+                  )}
                 </>
               ) : (
                 <div className="bg-primary/5 border-2 border-primary/20 p-8 rounded-[2rem] space-y-6 text-left">
@@ -197,7 +286,6 @@ export default function InventoryTab({ inventory, setInventory, sortedFlatInvent
         </div>
       )}
 
-      {/* ── POP-OUT: ADD MANUALLY (1.5x BIGGER & WIDE) ── */}
       {showItemModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-md p-4">
           <div className="w-full max-w-7xl rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
@@ -210,10 +298,9 @@ export default function InventoryTab({ inventory, setInventory, sortedFlatInvent
             </div>
 
             <div className="p-12 grid grid-cols-3 gap-12">
-              {/* Column 1: Identity */}
               <div className="space-y-8 border-r border-border pr-12">
                 <div className="space-y-4">
-                  <p className="text-xs font-black text-primary uppercase tracking-[0.2em]">1. Reagent Identity</p>
+                  <p className="text-xs font-black text-primary uppercase tracking-[0.2em]">1. Identity</p>
                   <div className="flex p-1.5 bg-muted rounded-2xl border border-border">
                     <button onClick={() => setIsNewGroup(true)} className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all ${isNewGroup ? "bg-card shadow-lg text-foreground border border-border" : "text-muted-foreground"}`}>New Item</button>
                     <button onClick={() => setIsNewGroup(false)} className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all ${!isNewGroup ? "bg-card shadow-lg text-foreground border border-border" : "text-muted-foreground"}`}>Existing</button>
@@ -233,9 +320,8 @@ export default function InventoryTab({ inventory, setInventory, sortedFlatInvent
                 </div>
               </div>
 
-              {/* Column 2: Logistics */}
               <div className="space-y-8 border-r border-border pr-12">
-                <p className="text-xs font-black text-primary uppercase tracking-[0.2em]">2. Dates & Vendor</p>
+                <p className="text-xs font-black text-primary uppercase tracking-[0.2em]">2. Logistics</p>
                 <div className="space-y-5">
                   <div className="space-y-2"><label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-1">Expiry Date</label><input type="date" value={lotForm.expiry} onChange={e => setLotForm({...lotForm, expiry: e.target.value})} className="w-full h-14 border border-input bg-background rounded-2xl px-6 text-base" /></div>
                   <div className="space-y-2"><label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-1">Vendor</label><input value={lotForm.vendor} onChange={e => setLotForm({...lotForm, vendor: e.target.value})} placeholder="e.g. Sigma Aldrich" className="w-full h-14 border border-input bg-background rounded-2xl px-6 text-base" /></div>
@@ -243,7 +329,6 @@ export default function InventoryTab({ inventory, setInventory, sortedFlatInvent
                 </div>
               </div>
 
-              {/* Column 3: Quantity & Status */}
               <div className="space-y-8">
                 <p className="text-xs font-black text-primary uppercase tracking-[0.2em]">3. Quantity & Status</p>
                 <div className="p-6 bg-muted/40 rounded-3xl border border-border space-y-6">
