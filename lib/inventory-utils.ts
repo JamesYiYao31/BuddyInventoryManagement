@@ -5,10 +5,24 @@ export { getEarliestExpiry }
 
 export type SidebarPage = "dashboard" | "inventory" | "lotinuse" | "requests" | "activitylog" | "analytics" | "labsharing"
 export type InventoryStatus = "In Storage" | "Low Stock" | "Expiring Soon" | "Expired" | "Watchlist"
-export type QuantityType = "units_and_count" | "units_only" | "count_only"
+
+/** Single lowest-trackable count. Legacy DB rows (boxes × units) are normalized when reading. */
+export const totalUnitsFromInventoryRow = (row: {
+  quantity_type?: string | null
+  units?: number | null
+  count?: number | null
+}): number => {
+  const qt = row.quantity_type
+  const u = Number(row.units) || 0
+  const c = Number(row.count) || 0
+  if (qt === "units_and_count") return u * c
+  if (qt === "units_only") return u
+  return c
+}
 
 export interface LotEntry {
   lotId: string
+  itemId: string
   lot: string
   expiry: string
   receivedDate: string
@@ -16,12 +30,8 @@ export interface LotEntry {
   storage: string
   status: InventoryStatus
   notes: string
-  quantityType: QuantityType
-  units: number
-  unitLabel: string
-  count: number
-  countLabel: string
-  itemName?: string // Optional helper
+  totalUnits: number
+  itemName?: string
 }
 
 export interface InventoryGroup {
@@ -44,12 +54,6 @@ export const STATUS_STYLES: Record<string, string> = {
   "Watchlist": "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400",
 }
 
-export const totalCountLabel = (lot: LotEntry | Omit<LotEntry, "lotId">): string => {
-  if (lot.quantityType === "units_only") return `${lot.units} ${lot.unitLabel}`
-  if (lot.quantityType === "count_only") return `${lot.count} ${lot.countLabel}`
-  return `${lot.units} ${lot.unitLabel} / ${lot.count} ${lot.countLabel}`
-}
-
 export const daysUntilExpiry = (expiry: string): number => {
   if (!expiry) return 999
   const d = new Date(expiry)
@@ -57,11 +61,7 @@ export const daysUntilExpiry = (expiry: string): number => {
   return Math.ceil((d.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
 }
 
-export const getLotTotalCount = (lot: LotEntry): number => {
-  if (lot.quantityType === "units_only") return lot.units
-  if (lot.quantityType === "count_only") return lot.count
-  return lot.units * lot.count
-}
+export const getLotTotalCount = (lot: LotEntry): number => lot.totalUnits
 
 export const getLotStatus = (lot: LotEntry, settings: LabSettings): InventoryStatus => {
   if (!lot.expiry) return "In Storage"
@@ -73,9 +73,9 @@ export const getLotStatus = (lot: LotEntry, settings: LabSettings): InventorySta
 }
 
 export const emptyLotForm = (): Omit<LotEntry, "lotId"> => ({
+  itemId: "",
   lot: "", expiry: "", receivedDate: new Date().toLocaleDateString(), vendor: "", storage: "",
-  status: "In Storage", notes: "", quantityType: "units_and_count",
-  units: 1, unitLabel: "box", count: 1, countLabel: "units",
+  status: "In Storage", notes: "", totalUnits: 1,
 })
 
 export type LotInUseStatus = "Active" | "Low Volume" | "Expiring Soon" | "Expired"
@@ -86,9 +86,9 @@ export interface LotInUseEntry {
   itemName: string
   lotNumber: string
   openedDate: string
-  workingExpiryDate: string 
-  actualExpiryDate: string  
-  quantityLeft: string      
+  workingExpiryDate: string
+  actualExpiryDate: string
+  quantityLeft: string
   status: LotInUseStatus
 }
 
@@ -122,10 +122,10 @@ export const REQUEST_STATUS_STYLES: Record<RequestStatus, string> = {
 }
 
 export const CATALOG_DB: Record<string, { name: string; vendor: string; price: number }> = {
-  "CAT-100124": { name: "IAST Culture Bottle", vendor: "Thermo Fisher", price: 45.00 },
-  "CAT-26542": { name: "BioBall", vendor: "Merck", price: 120.50 },
-  "CAT-25510": { name: "DMSO", vendor: "Sigma Aldrich", price: 35.00 },
-  "CAT-99887": { name: "FACS Clean", vendor: "BD Biosciences", price: 85.00 },
+  "CAT-100124": { name: "IAST Culture Bottle", vendor: "Thermo Fisher", price: 45.0 },
+  "CAT-26542": { name: "BioBall", vendor: "Merck", price: 120.5 },
+  "CAT-25510": { name: "DMSO", vendor: "Sigma Aldrich", price: 35.0 },
+  "CAT-99887": { name: "FACS Clean", vendor: "BD Biosciences", price: 85.0 },
 }
 
 export type ActivityActionType = "Added" | "Opened" | "Used" | "Disposed" | "Ordered" | "Received" | "Edited"
@@ -152,22 +152,24 @@ export const ACTION_STYLES: Record<string, string> = {
   "Disposed": "bg-red-500/10 text-red-600 dark:text-red-400",
 }
 
-// ── NEW: DATABASE FETCHING WITH AUTOMATIC MAPPING ──
-
 export const fetchInventoryFromSupabase = async (): Promise<InventoryGroup[]> => {
   const { data, error } = await supabase
-    .from('inventory_lots')
+    .from("inventory_lots")
     .select(`*, items(name, vendor)`)
-  
-  if (error) { console.error(error); return []; }
+
+  if (error) {
+    console.error(error)
+    return []
+  }
 
   const groups: Record<string, InventoryGroup> = {}
 
   data.forEach((row: any) => {
     const name = row.items?.name || "Unknown"
-    // Map database snake_case to frontend camelCase
+
     const lot: LotEntry = {
       lotId: row.id,
+      itemId: row.item_id,
       lot: row.lot_number,
       expiry: row.expiry_date,
       receivedDate: row.received_date,
@@ -175,12 +177,8 @@ export const fetchInventoryFromSupabase = async (): Promise<InventoryGroup[]> =>
       storage: row.storage_location,
       status: row.status,
       notes: row.notes,
-      quantityType: row.quantity_type,
-      units: row.units,
-      unitLabel: row.unit_label,
-      count: row.count,
-      countLabel: row.count_label,
-      itemName: name
+      totalUnits: totalUnitsFromInventoryRow(row),
+      itemName: name,
     }
 
     if (!groups[name]) {
@@ -191,58 +189,58 @@ export const fetchInventoryFromSupabase = async (): Promise<InventoryGroup[]> =>
 
   return Object.values(groups)
 }
-// ADD TO THE BOTTOM OF lib/inventory-utils.ts
 
 export const logActivity = async (
-  actionType: ActivityActionType, 
-  itemName: string, 
-  lotNumber: string, 
+  actionType: ActivityActionType,
+  itemName: string,
+  lotNumber: string,
   details: string
 ) => {
-  const { error } = await supabase
-    .from('activity_logs')
-    .insert([{
-      user_name: "James", // This will be dynamic once we add Auth
+  const { error } = await supabase.from("activity_logs").insert([
+    {
+      user_name: "James",
       user_initials: "JM",
       action_type: actionType,
       item_name: itemName,
       lot_number: lotNumber,
-      details: details
-    }])
-  
+      details: details,
+    },
+  ])
+
   if (error) console.error("Logging failed:", error)
 }
 
-// Function to fetch logs for the table
 export const fetchLogsFromSupabase = async (): Promise<ActivityLogEntry[]> => {
-  const { data, error } = await supabase
-    .from('activity_logs')
-    .select('*')
-    .order('created_at', { ascending: false })
+  const { data, error } = await supabase.from("activity_logs").select("*").order("created_at", { ascending: false })
 
-  if (error) { console.error(error); return []; }
+  if (error) {
+    console.error(error)
+    return []
+  }
 
   return data.map((log: any) => ({
     id: log.id,
     date: new Date(log.created_at).toLocaleDateString(),
-    time: new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    time: new Date(log.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     user: log.user_name,
     userInitials: log.user_initials,
     actionType: log.action_type,
     itemName: log.item_name,
     lotNumber: log.lot_number,
-    details: log.details
+    details: log.details,
   }))
 }
-// --- ADD TO lib/inventory-utils.ts ---
 
 export const fetchActiveLotsFromSupabase = async (): Promise<LotInUseEntry[]> => {
   const { data, error } = await supabase
-    .from('active_lots')
+    .from("active_lots")
     .select(`*, items(name)`)
-    .order('opened_date', { ascending: false });
+    .order("opened_date", { ascending: false })
 
-  if (error) { console.error(error); return []; }
+  if (error) {
+    console.error(error)
+    return []
+  }
 
   return data.map((row: any) => ({
     id: row.id,
@@ -253,57 +251,58 @@ export const fetchActiveLotsFromSupabase = async (): Promise<LotInUseEntry[]> =>
     workingExpiryDate: row.working_expiry_date,
     actualExpiryDate: row.actual_expiry_date,
     quantityLeft: row.quantity_left,
-    status: row.status
-  }));
+    status: row.status,
+  }))
 }
 
+/** Move lowest-trackable units from storage to bench. */
 export const openNewLotInSupabase = async (
   inventoryLotId: string,
   itemId: string,
   lotNumber: string,
   actualExpiry: string,
   workingExpiry: string,
-  quantityToMove: number, // How many "boxes/containers" from inventory
-  yieldPerContainer: number, // How many "units" that results in on bench
-  unitLabel: string
+  unitsToMove: number
 ) => {
-  // 1. Decrement the count in inventory_lots
   const { data: invLot, error: fetchErr } = await supabase
-    .from('inventory_lots')
-    .select('count')
-    .eq('id', inventoryLotId)
-    .single();
+    .from("inventory_lots")
+    .select("count, units, quantity_type")
+    .eq("id", inventoryLotId)
+    .single()
 
-  if (fetchErr || !invLot) throw new Error("Could not find inventory lot.");
+  if (fetchErr || !invLot) throw new Error("Could not find inventory lot.")
 
-  const newInventoryCount = invLot.count - quantityToMove;
+  const current = totalUnitsFromInventoryRow(invLot)
+  const newInventoryCount = current - unitsToMove
 
-  if (newInventoryCount < 0) throw new Error("Insufficient stock in inventory.");
+  if (newInventoryCount < 0) throw new Error("Insufficient stock in inventory.")
 
-  // Update Inventory
   await supabase
-    .from('inventory_lots')
-    .update({ count: newInventoryCount })
-    .eq('id', inventoryLotId);
+    .from("inventory_lots")
+    .update({
+      count: newInventoryCount,
+      quantity_type: "count_only",
+      units: 0,
+      unit_label: "units",
+      count_label: "units",
+    })
+    .eq("id", inventoryLotId)
 
-  // 2. Add to active_lots (Bench)
-  const totalBenchUnits = quantityToMove * yieldPerContainer;
-  const { error: activeErr } = await supabase
-    .from('active_lots')
-    .insert([{
+  const { error: activeErr } = await supabase.from("active_lots").insert([
+    {
       item_id: itemId,
       lot_number: lotNumber,
-      opened_date: new Date().toISOString().split('T')[0],
+      opened_date: new Date().toISOString().split("T")[0],
       working_expiry_date: workingExpiry,
       actual_expiry_date: actualExpiry,
-      quantity_left: `${totalBenchUnits} ${unitLabel}`,
-      status: 'Active'
-    }]);
+      quantity_left: `${unitsToMove} units`,
+      status: "Active",
+    },
+  ])
 
-  if (activeErr) throw activeErr;
+  if (activeErr) throw activeErr
 
-  // 3. Log Activity
-  await logActivity("Opened", "Item", lotNumber, `Opened ${quantityToMove} containers for bench use.`);
+  await logActivity("Opened", "Item", lotNumber, `Opened ${unitsToMove} units for bench use.`)
 }
 
 export const logUsageInSupabase = async (
@@ -313,35 +312,33 @@ export const logUsageInSupabase = async (
   itemName: string,
   lotNumber: string
 ) => {
-  const parts = currentQtyString.split(" ");
-  const currentVal = parseInt(parts[0]);
-  const label = parts.slice(1).join(" ");
-  const newVal = currentVal - deductAmount;
+  const parts = currentQtyString.split(" ")
+  const currentVal = parseInt(parts[0], 10)
+  const label = parts.slice(1).join(" ")
+  const newVal = currentVal - deductAmount
 
   if (newVal <= 0) {
-    // Archive/Delete if empty
-    await supabase.from('active_lots').delete().eq('id', activeLotId);
-    await logActivity("Used", itemName, lotNumber, `Used remaining ${currentVal} ${label}. Lot cleared.`);
+    await supabase.from("active_lots").delete().eq("id", activeLotId)
+    await logActivity("Used", itemName, lotNumber, `Used remaining ${currentVal} ${label}. Lot cleared.`)
   } else {
     await supabase
-      .from('active_lots')
-      .update({ 
+      .from("active_lots")
+      .update({
         quantity_left: `${newVal} ${label}`,
-        status: newVal < 5 ? 'Low Volume' : 'Active' // Simple logic for status update
+        status: newVal < 5 ? "Low Volume" : "Active",
       })
-      .eq('id', activeLotId);
-    
-    await logActivity("Used", itemName, lotNumber, `Deducted ${deductAmount} ${label}.`);
+      .eq("id", activeLotId)
+
+    await logActivity("Used", itemName, lotNumber, `Deducted ${deductAmount} ${label}.`)
   }
 }
-// --- ADD TO lib/inventory-utils.ts ---
 
 export interface DashboardStats {
-  expiredCount: number;
-  urgentCount: number;
-  lowStockCount: number;
-  pendingRequests: number;
-  totalMonthlySpend: number;
+  expiredCount: number
+  urgentCount: number
+  lowStockCount: number
+  pendingRequests: number
+  totalMonthlySpend: number
 }
 
 export const calculateDashboardStats = (
@@ -350,42 +347,39 @@ export const calculateDashboardStats = (
   requests: ReorderRequest[],
   settings: LabSettings
 ): DashboardStats => {
-  const now = new Date();
-  
-  // 1. Expired (Freezer + Bench)
-  const expiredInventory = inventory.flatMap(g => g.lots).filter(l => daysUntilExpiry(l.expiry) <= 0).length;
-  const expiredBench = activeLots.filter(l => daysUntilExpiry(getEarliestExpiry(l.workingExpiryDate, l.actualExpiryDate)) <= 0).length;
+  const now = new Date()
 
-  // 2. Urgent (Next 7 days)
-  const urgentInventory = inventory.flatMap(g => g.lots).filter(l => {
-    const days = daysUntilExpiry(l.expiry);
-    return days > 0 && days <= settings.expiryUrgentDays;
-  }).length;
-  
-  // 3. Low Stock
-  const lowStock = inventory.filter(g => {
-    const totalCount = g.lots.reduce((acc, lot) => acc + (lot.count || 0), 0);
-    return totalCount <= settings.lowStockCount;
-  }).length;
+  const expiredInventory = inventory.flatMap((g) => g.lots).filter((l) => daysUntilExpiry(l.expiry) <= 0).length
+  const expiredBench = activeLots.filter(
+    (l) => daysUntilExpiry(getEarliestExpiry(l.workingExpiryDate, l.actualExpiryDate)) <= 0
+  ).length
 
-  // 4. Pending Requests
-  const pending = requests.filter(r => r.status === "Pending").length;
+  const urgentInventory = inventory.flatMap((g) => g.lots).filter((l) => {
+    const days = daysUntilExpiry(l.expiry)
+    return days > 0 && days <= settings.expiryUrgentDays
+  }).length
 
-  // 5. Total Monthly Spend
-  const currentMonth = now.getMonth();
-  const currentYear = now.getFullYear();
+  const lowStock = inventory.filter((g) => {
+    const totalCount = g.lots.reduce((acc, lot) => acc + (lot.totalUnits || 0), 0)
+    return totalCount <= settings.lowStockCount
+  }).length
+
+  const pending = requests.filter((r) => r.status === "Pending").length
+
+  const currentMonth = now.getMonth()
+  const currentYear = now.getFullYear()
   const monthlySpend = requests
-    .filter(r => {
-      const d = new Date(r.dateRequested);
-      return d.getMonth() === currentMonth && d.getFullYear() === currentYear && r.status !== "Pending";
+    .filter((r) => {
+      const d = new Date(r.dateRequested)
+      return d.getMonth() === currentMonth && d.getFullYear() === currentYear && r.status !== "Pending"
     })
-    .reduce((sum, r) => sum + r.totalPrice, 0);
+    .reduce((sum, r) => sum + r.totalPrice, 0)
 
   return {
     expiredCount: expiredInventory + expiredBench,
     urgentCount: urgentInventory,
     lowStockCount: lowStock,
     pendingRequests: pending,
-    totalMonthlySpend: monthlySpend
-  };
-};
+    totalMonthlySpend: monthlySpend,
+  }
+}

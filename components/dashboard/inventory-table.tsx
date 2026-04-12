@@ -4,7 +4,7 @@ import { supabase } from "@/lib/supabase"
 import { useState, useRef, useEffect } from "react"
 import { Scan, Plus, Pencil, Camera, X, CheckCircle2, Settings2, Trash2, ShieldAlert } from "lucide-react"
 import { 
-  LotEntry, STATUS_STYLES, totalCountLabel, daysUntilExpiry, emptyLotForm,
+  LotEntry, STATUS_STYLES, daysUntilExpiry, emptyLotForm,
   logActivity, InventoryGroup, LabSettings 
 } from "@/lib/inventory-utils"
 
@@ -46,6 +46,8 @@ export default function InventoryTab({ inventory, sortedFlatInventory, labSettin
   useEffect(() => {
     if (showBarcodeModal && barcodeRef.current) setTimeout(() => barcodeRef.current?.focus(), 100)
   }, [showBarcodeModal])
+
+  const visibleInventoryLots = sortedFlatInventory.filter((lot: LotEntry) => (lot.totalUnits ?? 0) > 0)
 
   // ── 3. DYNAMIC STATUS LOGIC ──
   const getDynamicStatus = (lot: LotEntry) => {
@@ -122,6 +124,7 @@ export default function InventoryTab({ inventory, sortedFlatInventory, labSettin
 
   const saveItem = async () => {
     if (!lotForm.lot) return alert("Lot number is required")
+    if (!lotForm.totalUnits || lotForm.totalUnits < 1) return alert("Total units received must be at least 1.")
     let finalItemId = selectedGroupId
     let finalItemName = newItemName
 
@@ -140,18 +143,18 @@ export default function InventoryTab({ inventory, sortedFlatInventory, labSettin
         expiry_date: lotForm.expiry, 
         received_date: lotForm.receivedDate,
         storage_location: lotForm.storage, 
-        quantity_type: lotForm.quantityType, 
-        units: lotForm.units,
-        unit_label: lotForm.unitLabel, 
-        count: lotForm.count, 
-        count_label: lotForm.countLabel,
+        quantity_type: "count_only",
+        units: 0,
+        unit_label: "units",
+        count: lotForm.totalUnits,
+        count_label: "units",
         notes: lotForm.notes, 
         status: lotForm.status
       }])
 
     if (lotError) return alert("Error saving lot: " + lotError.message)
 
-    await logActivity("Added", finalItemName, lotForm.lot, `Received ${lotForm.units} ${lotForm.unitLabel} into ${lotForm.storage}`)
+    await logActivity("Added", finalItemName, lotForm.lot, `Received ${lotForm.totalUnits} units into ${lotForm.storage}`)
     await refreshData()
     setShowItemModal(false)
   }
@@ -202,11 +205,11 @@ export default function InventoryTab({ inventory, sortedFlatInventory, labSettin
 
       {/* ── MAIN TABLE ── */}
       <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
-        <div className="grid grid-cols-[2fr_1.5fr_1.2fr_1.2fr_1.5fr_1.2fr_0.5fr] border-b border-border bg-muted/30 px-6 py-4 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
-          <span>Item Name</span><span>Lot Number</span><span>Received</span><span>Expiry</span><span>Quantity</span><span>Status</span><span></span>
+        <div className="grid grid-cols-[2.5fr_1.2fr_1.2fr_1fr_1.2fr_0.5fr] border-b border-border bg-muted/30 px-6 py-4 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
+          <span>Item / Lot</span><span>Received</span><span>Expiry</span><span>Total units</span><span>Status</span><span></span>
         </div>
-        {sortedFlatInventory.length > 0 ? (
-          sortedFlatInventory.map((lot: any, idx: number, arr: any[]) => {
+        {visibleInventoryLots.length > 0 ? (
+          visibleInventoryLots.map((lot: LotEntry, idx: number, arr: LotEntry[]) => {
             const isFirst = idx === 0 || arr[idx - 1].itemName !== lot.itemName
             const status = getDynamicStatus(lot)
             
@@ -215,12 +218,14 @@ export default function InventoryTab({ inventory, sortedFlatInventory, labSettin
                                status === "Expired" ? "bg-zinc-500/10 text-zinc-600" : "bg-green-500/10 text-green-600 dark:text-green-400"
 
             return (
-              <div key={lot.lotId} className={`grid grid-cols-[2fr_1.5fr_1.2fr_1.2fr_1.5fr_1.2fr_0.5fr] px-6 py-4 items-center border-t border-border/50 text-sm hover:bg-muted/20 transition-colors ${isFirst && idx !== 0 ? "border-t-border border-t-2" : ""}`}>
-                <span className="font-bold text-foreground">{isFirst ? lot.itemName : ""}</span>
-                <span className="font-mono text-muted-foreground">{lot.lot}</span>
+              <div key={lot.lotId} className={`grid grid-cols-[2.5fr_1.2fr_1.2fr_1fr_1.2fr_0.5fr] px-6 py-4 items-center border-t border-border/50 text-sm hover:bg-muted/20 transition-colors ${isFirst && idx !== 0 ? "border-t-border border-t-2" : ""}`}>
+                <div className="flex flex-col gap-0.5 min-w-0">
+                  <span className="font-bold text-foreground truncate">{lot.itemName}</span>
+                  <span className="font-mono text-sm font-semibold text-primary">Lot {lot.lot}</span>
+                </div>
                 <span className="text-muted-foreground/80">{lot.receivedDate}</span>
                 <span className="font-medium text-foreground/90">{lot.expiry}</span>
-                <span className="font-semibold text-foreground">{totalCountLabel(lot)}</span>
+                <span className="font-semibold text-foreground tabular-nums">{lot.totalUnits}</span>
                 
                 <div className="flex flex-col gap-1 items-start">
                    <span className={`inline-flex px-3 py-1 rounded-full text-[10px] font-bold ${statusColor}`}>{status}</span>
@@ -334,36 +339,9 @@ export default function InventoryTab({ inventory, sortedFlatInventory, labSettin
               <div className="space-y-8">
                 <p className="text-xs font-black text-primary uppercase tracking-[0.2em]">3. Quantity & Status</p>
                 <div className="p-6 bg-muted/40 rounded-3xl border border-border space-y-6">
-                  <div className="flex gap-2">
-                    {["units_and_count", "units_only", "count_only"].map((v) => (
-                      <button key={v} onClick={() => setLotForm({...lotForm, quantityType: v as any})} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${lotForm.quantityType === v ? "bg-primary text-primary-foreground shadow-lg" : "bg-card text-muted-foreground"}`}>{v.replace(/_/g, ' ')}</button>
-                    ))}
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    {(lotForm.quantityType === "units_and_count" || lotForm.quantityType === "units_only") && (
-                      <>
-                        <div className="space-y-2">
-                          <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest ml-1">Outer Qty</label>
-                          <input type="number" value={lotForm.units} onChange={e => setLotForm({...lotForm, units: Number(e.target.value)})} placeholder="0" className="w-full h-12 border border-input bg-background rounded-xl px-4 text-base font-bold" />
-                        </div>
-                        <div className="space-y-2">
-                          <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest ml-1">Unit Type</label>
-                          <input value={lotForm.unitLabel} onChange={e => setLotForm({...lotForm, unitLabel: e.target.value})} placeholder="box" className="w-full h-12 border border-input bg-background rounded-xl px-4 text-base" />
-                        </div>
-                      </>
-                    )}
-                    {(lotForm.quantityType === "units_and_count" || lotForm.quantityType === "count_only") && (
-                      <>
-                        <div className="space-y-2">
-                          <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest ml-1">Inner Count</label>
-                          <input type="number" value={lotForm.count} onChange={e => setLotForm({...lotForm, count: Number(e.target.value)})} placeholder="0" className="w-full h-12 border border-input bg-background rounded-xl px-4 text-base font-bold" />
-                        </div>
-                        <div className="space-y-2">
-                          <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest ml-1">Count Type</label>
-                          <input value={lotForm.countLabel} onChange={e => setLotForm({...lotForm, countLabel: e.target.value})} placeholder="vials" className="w-full h-12 border border-input bg-background rounded-xl px-4 text-base" />
-                        </div>
-                      </>
-                    )}
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest ml-1">Total units received</label>
+                    <input type="number" min={1} value={lotForm.totalUnits} onChange={e => setLotForm({...lotForm, totalUnits: Number(e.target.value)})} className="w-full h-12 border border-input bg-background rounded-xl px-4 text-base font-bold" />
                   </div>
                 </div>
                 <div className="space-y-2">

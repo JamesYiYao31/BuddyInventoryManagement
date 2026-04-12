@@ -84,9 +84,11 @@ export default function RequestsTab({ requests, refreshRequests, userRole }: Req
         lot_number: receiveLot,
         expiry_date: receiveExpiry,
         received_date: new Date().toISOString().split('T')[0],
-        vendor: showReceiveModal.vendor,
-        units: showReceiveModal.orderQty,
-        unit_label: "boxes",
+        quantity_type: "count_only",
+        units: 0,
+        unit_label: "units",
+        count: showReceiveModal.orderQty,
+        count_label: "units",
         status: "In Storage"
       }])
 

@@ -1,13 +1,14 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
-import { Printer, PackageOpen, AlertCircle, Scan, Minus, Camera, X, CheckCircle2, ShieldAlert } from "lucide-react"
+import { Printer, PackageOpen, AlertCircle, Scan, Minus, Camera, X, CheckCircle2, ShieldAlert, List } from "lucide-react"
 import { 
   LotInUseEntry, 
   LOT_IN_USE_STYLES, 
   daysUntilExpiry, 
   getEarliestExpiry, 
   InventoryGroup,
+  LotEntry,
   logUsageInSupabase,
   openNewLotInSupabase
 } from "@/lib/inventory-utils"
@@ -24,6 +25,10 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
   const [showScanModal, setShowScanModal] = useState(false)
   const [scanMode, setScanMode] = useState<"use" | "open">("use") 
   
+  const [showManualModal, setShowManualModal] = useState(false)
+  const [manualMode, setManualMode] = useState<"use" | "open">("use")
+  const [selectedManualLotId, setSelectedManualLotId] = useState("")
+
   const [showUsageModal, setShowUsageModal] = useState<LotInUseEntry | null>(null)
   const [deductAmount, setDeductAmount] = useState<number>(1)
   const [usageLabel, setUsageLabel] = useState<string>("units")
@@ -64,9 +69,9 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
   // ── LOGIC: OPEN NEW LOT (Freezer -> Bench) ──
   const handleConfirmOpen = async () => {
     if (!showOpenModal) return;
-    
-    const yieldPer = showOpenModal.quantityType === "units_and_count" ? showOpenModal.count : 1;
-    const label = showOpenModal.quantityType === "units_and_count" ? showOpenModal.countLabel : showOpenModal.unitLabel;
+
+    if (openAmount < 1) return alert("Enter at least 1 unit to move to the bench.");
+    if (openAmount > showOpenModal.totalUnits) return alert("Cannot move more units than are in storage for this lot.");
 
     try {
       await openNewLotInSupabase(
@@ -75,15 +80,42 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
         showOpenModal.lot,
         showOpenModal.expiry,
         workingExpiry || showOpenModal.expiry,
-        openAmount,
-        yieldPer,
-        label
+        openAmount
       );
       setShowOpenModal(null);
       setWorkingExpiry("");
       await refreshData();
     } catch (error: any) {
       alert(error.message);
+    }
+  };
+
+  // ── LOGIC: MANUAL BROWSE SELECT ──
+  const handleManualSubmit = () => {
+    if (!selectedManualLotId) return;
+    
+    if (manualMode === "use") {
+      // Find the active lot on the bench
+      const found = activeLots.find(l => l.id === selectedManualLotId);
+      if (found) {
+        setShowManualModal(false);
+        setSelectedManualLotId("");
+        triggerManualUsage(found);
+      }
+    } else {
+      // Find the freezer lot in inventory
+      let foundLot = null;
+      let foundName = "";
+      for (const group of inventory) {
+        const match = group.lots.find(l => l.lotId === selectedManualLotId);
+        if (match) { foundLot = match; foundName = group.name; break; }
+      }
+      if (foundLot) {
+        setShowManualModal(false);
+        setSelectedManualLotId("");
+        setOpenAmount(1);
+        setShowOpenModal({ ...foundLot, itemName: foundName });
+      }
     }
   };
 
@@ -135,6 +167,9 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
         <div className="flex gap-3">
           <button onClick={() => { setScanMode("use"); setShowScanModal(true); setBarcodeInput(""); }} className="flex items-center gap-2 rounded-xl bg-primary text-primary-foreground px-6 py-2.5 text-sm font-bold shadow-md hover:opacity-90 transition-all">
             <Scan className="size-5" /> Scan Reagent
+          </button>
+          <button onClick={() => { setManualMode("use"); setShowManualModal(true); setSelectedManualLotId(""); }} className="flex items-center gap-2 rounded-xl border border-border bg-card px-6 py-2.5 text-sm font-bold text-foreground hover:bg-muted transition-all">
+            <List className="size-5" /> Manual Select
           </button>
           <button onClick={handlePrint} className="flex items-center gap-2 rounded-xl border border-border bg-card text-foreground px-6 py-2.5 text-sm font-bold hover:bg-muted transition-all">
             <Printer className="size-5 text-muted-foreground" /> Print Report
@@ -227,6 +262,67 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
 
       {/* ── MODALS (Hidden on Print) ── */}
       <div className="print:hidden">
+        
+        {/* UNIFIED MANUAL SELECTION MODAL */}
+        {showManualModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-md p-4">
+            <div className="w-full max-w-2xl rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+              <div className="flex justify-between items-center px-10 py-8 border-b border-border bg-muted/20">
+                <div className="flex items-center gap-4 font-bold text-2xl text-foreground">
+                  <div className="p-3 bg-primary/10 rounded-2xl">
+                    <List className="size-8 text-primary" />
+                  </div>
+                  Manual Selection
+                </div>
+                <button onClick={() => setShowManualModal(false)} className="p-2 rounded-full hover:bg-muted text-muted-foreground"><X className="size-6" /></button>
+              </div>
+              
+              <div className="p-10 space-y-8">
+                <div className="flex p-1.5 bg-muted rounded-2xl border border-border">
+                  <button onClick={() => { setManualMode("use"); setSelectedManualLotId(""); }} className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all ${manualMode === "use" ? "bg-card shadow-md text-foreground border border-border" : "text-muted-foreground"}`}>Log Usage </button>
+                  <button onClick={() => { setManualMode("open"); setSelectedManualLotId(""); }} className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all ${manualMode === "open" ? "bg-card shadow-md text-foreground border border-border" : "text-muted-foreground"}`}>Open New Lot </button>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-2">
+                    {manualMode === "use" ? "Select Reagent from Bench" : "Select Reagent from Freezer"}
+                  </label>
+                  <select 
+                    value={selectedManualLotId} 
+                    onChange={e => setSelectedManualLotId(e.target.value)} 
+                    className="w-full h-16 border border-input bg-background rounded-2xl px-6 text-lg font-medium outline-none focus:ring-4 focus:ring-primary/10"
+                  >
+                    <option value="">— Select an Item —</option>
+                    {manualMode === "use" ? (
+                      activeLots.map(lot => (
+                        <option key={lot.id} value={lot.id}>
+                          {lot.itemName} (Lot: {lot.lotNumber}) - {lot.quantityLeft} left
+                        </option>
+                      ))
+                    ) : (
+                      inventory.map(group => (
+                        <optgroup key={group.itemId} label={group.name}>
+                          {group.lots.filter((lot: LotEntry) => lot.totalUnits > 0).map(lot => (
+                            <option key={lot.lotId} value={lot.lotId}>
+                              Lot: {lot.lot} | Exp: {lot.expiry} | Stock: {lot.totalUnits} units
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))
+                    )}
+                  </select>
+                </div>
+              </div>
+              <div className="flex justify-end gap-5 px-10 py-8 border-t border-border bg-muted/20">
+                 <button onClick={() => setShowManualModal(false)} className="px-8 py-4 rounded-2xl border border-border bg-card font-bold text-muted-foreground hover:bg-muted transition-all">Cancel</button>
+                 <button onClick={handleManualSubmit} disabled={!selectedManualLotId} className="px-12 py-4 rounded-2xl bg-primary text-primary-foreground font-black text-lg shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50">
+                   {manualMode === "use" ? "Proceed to Deduct" : "Proceed to Bench"}
+                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Scanner Modal */}
         {showScanModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-md p-4">
@@ -317,17 +413,14 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
                    <h3 className="text-lg font-bold text-foreground flex items-center gap-2"><div className="w-2 h-6 bg-primary rounded-full" /> 2. Bench Allocation</h3>
                    <div className="space-y-6">
                       <div className="space-y-2">
-                        <label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-2">Containers to Transfer</label>
-                        <div className="flex gap-4">
-                          <input type="number" min={1} value={openAmount} onChange={(e) => setOpenAmount(Number(e.target.value))} className="flex-1 h-16 border-2 border-primary/20 bg-background rounded-2xl px-6 text-2xl font-black outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all" />
-                          <div className="w-32 h-16 border border-input bg-muted/50 rounded-2xl flex items-center justify-center text-sm font-bold text-muted-foreground uppercase">{showOpenModal.unitLabel}</div>
-                        </div>
+                        <label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-2">Units to bench</label>
+                        <input type="number" min={1} max={showOpenModal.totalUnits} value={openAmount} onChange={(e) => setOpenAmount(Number(e.target.value))} className="w-full h-16 border-2 border-primary/20 bg-background rounded-2xl px-6 text-2xl font-black outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all" />
                       </div>
                       <div className="p-6 bg-primary/5 border border-primary/20 rounded-2xl">
-                        <p className="text-sm text-muted-foreground">Smart Yield Calculation:</p>
-                        <p className="text-xl font-black text-primary mt-1 uppercase">
-                          {showOpenModal.quantityType === "units_and_count" ? openAmount * showOpenModal.count : openAmount} {showOpenModal.quantityType === "units_and_count" ? showOpenModal.countLabel : showOpenModal.unitLabel}
-                        </p>
+                        <p className="text-sm text-muted-foreground">In storage for this lot:</p>
+                        <p className="text-xl font-black text-primary mt-1 tabular-nums">{showOpenModal.totalUnits} units</p>
+                        <p className="text-sm text-muted-foreground mt-2">Moving to bench:</p>
+                        <p className="text-lg font-bold text-foreground tabular-nums">{openAmount} units</p>
                       </div>
                    </div>
                 </div>
