@@ -3,6 +3,7 @@
 import { cn } from "@/lib/utils"
 import { LayoutDashboard, Package, ClipboardList, Settings, PackageOpen, Activity, BarChart3, Network } from "lucide-react"
 import { SidebarPage } from "@/lib/inventory-utils"
+import Image from "next/image"
 
 interface DashboardSidebarProps {
   activePage: SidebarPage
@@ -23,7 +24,7 @@ export function DashboardSidebar({ activePage, setActivePage }: DashboardSidebar
   return (
     <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-border bg-card">
       <div className="flex h-16 items-center px-6 border-b border-border">
-        <img src="/buddy-logo.png" alt="Buddy Logo" className="h-10 w-auto object-contain" />
+        <Image src="/buddy-logo.png" alt="Buddy Logo" width={40} height={40} className="h-10 w-auto object-contain" priority />
       </div>
       <nav className="flex-1 space-y-1 p-4 overflow-y-auto">
         {navItems.map((item) => (
