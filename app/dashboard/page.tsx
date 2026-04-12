@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation" 
 import { Search, CalendarClock, CheckCircle2, Activity, ShieldCheck, User } from "lucide-react"
 import { supabase } from "@/lib/supabase"
@@ -50,7 +50,7 @@ export default function DashboardPage() {
 
   // ── 2. DATABASE FETCH FUNCTIONS ──
 
-  const refreshData = async () => {
+  const refreshData = useCallback(async () => {
     try {
       // Fetch core inventory, logs, and active lots in parallel
       const [invData, logData, activeData] = await Promise.all([
@@ -91,7 +91,7 @@ export default function DashboardPage() {
     } catch (err) {
       console.error("Dashboard Refresh Error:", err)
     }
-  }
+  }, [labSettings])
 
   useEffect(() => {
     const checkSessionAndRole = async () => {
@@ -119,7 +119,7 @@ export default function DashboardPage() {
       }
     }
     checkSessionAndRole()
-  }, [router])
+  }, [router, refreshData])
 
   // ── 3. FILTER LOGIC ──
 
