@@ -1,22 +1,31 @@
 "use client"
 
 import { cn } from "@/lib/utils"
-import { LayoutDashboard, Package, ClipboardList, Settings, PackageOpen, Activity, BarChart3, Network } from "lucide-react"
+import { LayoutDashboard, Package, ClipboardList, Settings, PackageOpen, Activity, BarChart3, Network, CheckSquare } from "lucide-react"
 import { SidebarPage } from "@/lib/inventory-utils"
 
 interface DashboardSidebarProps {
   activePage: SidebarPage
   setActivePage: (page: SidebarPage) => void
+  userRole?: "manager" | "technician"
 }
 
-export function DashboardSidebar({ activePage, setActivePage }: DashboardSidebarProps) {
-  const navItems = [
+export function DashboardSidebar({ activePage, setActivePage, userRole = "technician" }: DashboardSidebarProps) {
+  const baseNavItems = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "inventory", label: "Inventory", icon: Package },
     { id: "lotinuse", label: "Lot in Use", icon: PackageOpen },
     { id: "requests", label: "Requests", icon: ClipboardList },
     { id: "activitylog", label: "Activity Log", icon: Activity },
-    { id: "analytics", label: "Analytics", icon: BarChart3 },
+  ]
+
+  const conditionalItems = userRole === "manager"
+    ? [{ id: "analytics", label: "Analytics", icon: BarChart3 }]
+    : [{ id: "mytasks", label: "My Tasks", icon: CheckSquare }]
+
+  const navItems = [
+    ...baseNavItems,
+    ...conditionalItems,
     { id: "labsharing", label: "Lab Sharing", icon: Network },
   ]
 

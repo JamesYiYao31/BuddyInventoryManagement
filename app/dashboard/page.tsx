@@ -24,6 +24,7 @@ import RequestsTab from "@/components/dashboard/requests-table"
 import ActivityLogTab from "@/components/dashboard/activity-log-table"
 import AnalyticsTab from "@/components/dashboard/analytics-tab"
 import LabSharingTab from "@/components/dashboard/lab-sharing-tab"
+import MyTasksTab from "@/components/dashboard/my-tasks-tab"
 
 export default function DashboardPage() {
   const router = useRouter()
@@ -164,7 +165,7 @@ export default function DashboardPage() {
   return (
     <div className="flex h-screen bg-background overflow-hidden print:h-auto print:block print:bg-white">
       <div className="print:hidden">
-        <DashboardSidebar activePage={activePage} setActivePage={setActivePage} />
+        <DashboardSidebar activePage={activePage} setActivePage={setActivePage} userRole={userRole} />
       </div>
 
       <div className="flex flex-1 flex-col pl-64 print:pl-0 print:block">
@@ -205,7 +206,8 @@ export default function DashboardPage() {
                   </div>
                 )}
 
-                {activePage === "analytics" && <AnalyticsTab stats={stats} requests={requests} inventory={inventory} />}
+                {activePage === "analytics" && userRole === "manager" && <AnalyticsTab stats={stats} requests={requests} inventory={inventory} />}
+                {activePage === "mytasks" && userRole !== "manager" && <MyTasksTab />}
                 {activePage === "labsharing" && <LabSharingTab />}
 
                 {["inventory", "lotinuse", "requests", "activitylog"].includes(activePage) && (

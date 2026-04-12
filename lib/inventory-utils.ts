@@ -1,6 +1,6 @@
 import { supabase } from "./supabase"
 
-export type SidebarPage = "dashboard" | "inventory" | "lotinuse" | "requests" | "activitylog" | "analytics" | "labsharing"
+export type SidebarPage = "dashboard" | "inventory" | "lotinuse" | "requests" | "activitylog" | "analytics" | "labsharing" | "mytasks"
 export type InventoryStatus = "In Storage" | "Low Stock" | "Expiring Soon" | "Expired" | "Watchlist"
 export type QuantityType = "units_and_count" | "units_only" | "count_only"
 
