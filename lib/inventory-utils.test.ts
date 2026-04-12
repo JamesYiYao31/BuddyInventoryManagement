@@ -1,6 +1,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
 import { getEarliestExpiry } from './expiry-utils.ts';
+import { getLotTotalCount, type LotEntry } from './inventory-utils.ts';
 
 describe('getEarliestExpiry', () => {
   test('returns date1 if it is earlier than date2', () => {
@@ -35,5 +36,32 @@ describe('getEarliestExpiry', () => {
 
   test('returns empty string if both are empty', () => {
     assert.strictEqual(getEarliestExpiry('', ''), '');
+  });
+});
+
+describe('getLotTotalCount', () => {
+  test('returns units when quantityType is units_only', () => {
+    const lot = { quantityType: 'units_only', units: 5, count: 10 } as LotEntry;
+    assert.strictEqual(getLotTotalCount(lot), 5);
+  });
+
+  test('returns count when quantityType is count_only', () => {
+    const lot = { quantityType: 'count_only', units: 5, count: 10 } as LotEntry;
+    assert.strictEqual(getLotTotalCount(lot), 10);
+  });
+
+  test('returns units * count when quantityType is units_and_count', () => {
+    const lot = { quantityType: 'units_and_count', units: 5, count: 10 } as LotEntry;
+    assert.strictEqual(getLotTotalCount(lot), 50);
+  });
+
+  test('handles zero units correctly', () => {
+    const lot = { quantityType: 'units_and_count', units: 0, count: 10 } as LotEntry;
+    assert.strictEqual(getLotTotalCount(lot), 0);
+  });
+
+  test('handles zero count correctly', () => {
+    const lot = { quantityType: 'units_and_count', units: 5, count: 0 } as LotEntry;
+    assert.strictEqual(getLotTotalCount(lot), 0);
   });
 });
