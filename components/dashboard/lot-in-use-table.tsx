@@ -7,8 +7,12 @@ import {
   LOT_IN_USE_STYLES, 
   daysUntilExpiry, 
   getEarliestExpiry, 
+  getLabCurrentDateStr,
+  parseSmartBarcode,
+  lookupItemByVendorSku,
   InventoryGroup,
   LotEntry,
+  LabSettings,
   logUsageInSupabase,
   openNewLotInSupabase
 } from "@/lib/inventory-utils"
@@ -18,9 +22,10 @@ interface LotInUseTabProps {
   inventory: InventoryGroup[]
   refreshData: () => Promise<void> | void
   userRole: "manager" | "technician"
+  labSettings: LabSettings
 }
 
-export default function LotInUseTab({ activeLots, inventory, refreshData, userRole }: LotInUseTabProps) {
+export default function LotInUseTab({ activeLots, inventory, refreshData, userRole, labSettings }: LotInUseTabProps) {
   // ── MODAL STATES ──
   const [showScanModal, setShowScanModal] = useState(false)
   const [scanMode, setScanMode] = useState<"use" | "open">("use") 
@@ -36,6 +41,7 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
   
   const [showOpenModal, setShowOpenModal] = useState<any>(null)
   const [openAmount, setOpenAmount] = useState<number>(1)
+  const [openedDate, setOpenedDate] = useState("")
   const [workingExpiry, setWorkingExpiry] = useState("")
 
   // ── SCANNER STATE ──
@@ -66,12 +72,23 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
     }
   };
 
-  // ── LOGIC: OPEN NEW LOT (Freezer -> Bench) ──
+  // ── LOGIC: OPEN NEW LOT (Storage -> Bench) ──
+  const clampWorkingExpiry = (working: string, actual: string): string => {
+    if (!working) return actual
+    if (!actual) return working
+    return working > actual ? actual : working
+  }
+
   const handleConfirmOpen = async () => {
     if (!showOpenModal) return;
 
     if (openAmount < 1) return alert("Enter at least 1 unit to move to the bench.");
     if (openAmount > showOpenModal.totalUnits) return alert("Cannot move more units than are in storage for this lot.");
+
+    const finalWorkingExpiry = clampWorkingExpiry(
+      workingExpiry || showOpenModal.expiry,
+      showOpenModal.expiry
+    )
 
     try {
       await openNewLotInSupabase(
@@ -79,10 +96,12 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
         showOpenModal.itemId || "",
         showOpenModal.lot,
         showOpenModal.expiry,
-        workingExpiry || showOpenModal.expiry,
-        openAmount
+        finalWorkingExpiry,
+        openAmount,
+        openedDate || getLabCurrentDateStr(labSettings.labTimezone)
       );
       setShowOpenModal(null);
+      setOpenedDate("");
       setWorkingExpiry("");
       await refreshData();
     } catch (error: any) {
@@ -103,7 +122,7 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
         triggerManualUsage(found);
       }
     } else {
-      // Find the freezer lot in inventory
+      // Find the storage lot in inventory
       let foundLot = null;
       let foundName = "";
       for (const group of inventory) {
@@ -114,37 +133,76 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
         setShowManualModal(false);
         setSelectedManualLotId("");
         setOpenAmount(1);
+        setOpenedDate(getLabCurrentDateStr(labSettings.labTimezone));
+        setWorkingExpiry("");
         setShowOpenModal({ ...foundLot, itemName: foundName });
       }
     }
   };
 
   // ── SCAN LOGIC ──
-  const handleScan = (code: string) => {
+  const failToManual = () => {
+    alert("Lot not found in current context")
+    setShowScanModal(false)
+    setManualMode(scanMode)
+    setSelectedManualLotId("")
+    setShowManualModal(true)
+  }
+
+  const handleScan = async (code: string) => {
+    const parsed = parseSmartBarcode(code)
+    const parsedLot = (parsed.lot || "").trim()
+    const parsedSku = (parsed.sku || "").trim()
+
+    if (!parsedLot && !parsedSku) return failToManual()
+
     if (scanMode === "use") {
-      const found = (activeLots || []).find(l => l.lotNumber === code)
-      if (found) {
-        setShowScanModal(false);
-        triggerManualUsage(found);
-      } else {
-        alert("Lot not found on the bench.");
+      // Primary match: lot number strictly equals parsed lot
+      if (parsedLot) {
+        const found = (activeLots || []).find(l => l.lotNumber === parsedLot)
+        if (found) {
+          setShowScanModal(false)
+          triggerManualUsage(found)
+          return
+        }
       }
-    } else {
-      let foundInvLot = null;
-      let foundInvName = "";
+
+      // Fallback match (lazy barcode): no lot, but SKU exists → lookup item → match by itemId
+      if (!parsedLot && parsedSku) {
+        const catalogItem = await lookupItemByVendorSku(parsedSku)
+        if (catalogItem) {
+          const foundByItem = (activeLots || []).find(l => l.itemId === catalogItem.id)
+          if (foundByItem) {
+            setShowScanModal(false)
+            triggerManualUsage(foundByItem)
+            return
+          }
+        }
+      }
+
+      return failToManual()
+    }
+
+    // scanMode === "open" (Storage search)
+    if (parsedLot) {
+      let foundInvLot: any = null
+      let foundInvName = ""
       for (const group of inventory) {
-        const match = group.lots.find(l => l.lot === code);
+        const match = group.lots.find(l => l.lot === parsedLot)
         if (match) { foundInvLot = match; foundInvName = group.name; break; }
       }
-      
+
       if (foundInvLot) {
-        setShowScanModal(false);
-        setOpenAmount(1);
-        setShowOpenModal({ ...foundInvLot, itemName: foundInvName });
-      } else {
-        alert("Lot not found in Inventory Database.");
+        setShowScanModal(false)
+        setOpenAmount(1)
+        setOpenedDate(getLabCurrentDateStr(labSettings.labTimezone))
+        setWorkingExpiry("")
+        setShowOpenModal({ ...foundInvLot, itemName: foundInvName })
+        return
       }
     }
+
+    return failToManual()
   };
 
   const triggerManualUsage = (lot: LotInUseEntry) => {
@@ -196,11 +254,11 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
           </div>
           <div className="p-4 bg-zinc-50 rounded-xl border border-zinc-200">
             <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Generated Date</p>
-            <p className="text-lg font-bold text-zinc-900">{new Date().toLocaleDateString()}</p>
+            <p className="text-lg font-bold text-zinc-900">{getLabCurrentDateStr(labSettings.labTimezone)}</p>
           </div>
           <div className="p-4 bg-zinc-50 rounded-xl border border-zinc-200">
-            <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Current Time</p>
-            <p className="text-lg font-bold text-zinc-900">{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+            <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Lab Timezone</p>
+            <p className="text-lg font-bold text-zinc-900">{labSettings.labTimezone}</p>
           </div>
         </div>
       </div>
@@ -214,8 +272,8 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
         {(activeLots || []).length > 0 ? (
           activeLots.map((lot) => {
             const effectiveExpiry = getEarliestExpiry(lot.workingExpiryDate, lot.actualExpiryDate)
-            const daysLeft = daysUntilExpiry(effectiveExpiry)
-            const isExpired = daysLeft <= 0
+            const daysLeft = daysUntilExpiry(effectiveExpiry, labSettings.labTimezone)
+            const isExpired = daysLeft < 0
             
             return (
               <div key={lot.id} className={`grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_1fr_0.5fr] px-6 py-4 items-center border-t border-border/50 text-sm hover:bg-muted/20 transition-colors print:border-zinc-200 print:text-zinc-900 ${isExpired ? "bg-destructive/5 print:bg-red-50" : ""}`}>
@@ -285,7 +343,7 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
 
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-2">
-                    {manualMode === "use" ? "Select Reagent from Bench" : "Select Reagent from Freezer"}
+                    {manualMode === "use" ? "Select Reagent from Bench" : "Select Reagent from Storage"}
                   </label>
                   <select 
                     value={selectedManualLotId} 
@@ -431,13 +489,29 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
                    <div className="space-y-6">
                       <div className="space-y-2">
                          <label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-2">Date Opened</label>
-                         <input type="date" defaultValue={new Date().toISOString().split('T')[0]} className="w-full h-16 border border-input bg-background rounded-2xl px-6 text-lg font-bold outline-none transition-all" />
+                         <input type="date" value={openedDate} onChange={(e) => setOpenedDate(e.target.value)} className="w-full h-16 border border-input bg-background rounded-2xl px-6 text-lg font-bold outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all" />
                       </div>
                       <div className="space-y-2">
                          <label className="text-xs font-bold text-primary uppercase tracking-widest ml-2">Set Working Expiry</label>
-                         <input type="date" value={workingExpiry} onChange={(e) => setWorkingExpiry(e.target.value)} className="w-full h-16 border-2 border-primary bg-primary/5 rounded-2xl px-6 text-lg font-black text-primary outline-none focus:ring-8 focus:ring-primary/10 transition-all" />
+                         <input
+                           type="date"
+                           value={workingExpiry}
+                           max={showOpenModal.expiry}
+                           onChange={(e) => {
+                             const val = e.target.value
+                             if (showOpenModal.expiry && val > showOpenModal.expiry) {
+                               setWorkingExpiry(showOpenModal.expiry)
+                             } else {
+                               setWorkingExpiry(val)
+                             }
+                           }}
+                           className="w-full h-16 border-2 border-primary bg-primary/5 rounded-2xl px-6 text-lg font-black text-primary outline-none focus:ring-8 focus:ring-primary/10 transition-all"
+                         />
                       </div>
-                      <p className="text-xs text-muted-foreground italic">Setting a working expiry overrides the original bottle stability if it comes sooner.</p>
+                      {workingExpiry && showOpenModal.expiry && workingExpiry >= showOpenModal.expiry && (
+                        <p className="text-xs text-destructive font-semibold ml-2">Capped to manufacturer expiry ({showOpenModal.expiry}).</p>
+                      )}
+                      <p className="text-xs text-muted-foreground italic">Working expiry cannot exceed the manufacturer&apos;s actual expiry date.</p>
                    </div>
                 </div>
               </div>

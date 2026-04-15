@@ -10,7 +10,7 @@ import {
   InventoryGroup, LabSettings, SidebarPage, daysUntilExpiry, 
   getEarliestExpiry, LotInUseEntry, ReorderRequest, ActivityLogEntry,
   fetchInventoryFromSupabase, fetchLogsFromSupabase, fetchActiveLotsFromSupabase,
-  calculateDashboardStats, DashboardStats 
+  calculateDashboardStats, DashboardStats, fetchLabSettings
 } from "@/lib/inventory-utils"
 
 // UI Components
@@ -24,6 +24,7 @@ import RequestsTab from "@/components/dashboard/requests-table"
 import ActivityLogTab from "@/components/dashboard/activity-log-table"
 import AnalyticsTab from "@/components/dashboard/analytics-tab"
 import LabSharingTab from "@/components/dashboard/lab-sharing-tab"
+import LabSettingsTab from "@/components/dashboard/lab-settings-tab"
 
 export default function DashboardPage() {
   const router = useRouter()
@@ -39,7 +40,7 @@ export default function DashboardPage() {
   const [lotsInUse, setLotsInUse] = useState<LotInUseEntry[]>([]) 
   const [stats, setStats] = useState<DashboardStats | null>(null)
   
-  const [labSettings] = useState<LabSettings>({ lowStockCount: 5, expiryWarnDays: 30, expiryUrgentDays: 7 })
+  const [labSettings, setLabSettings] = useState<LabSettings>({ lowStockThreshold: 5, expiringSoonDays: 30, urgentDays: 7, labTimezone: "America/Chicago" })
   const [loading, setLoading] = useState(true)
 
   // Filter State
@@ -52,12 +53,13 @@ export default function DashboardPage() {
 
   const refreshData = useCallback(async () => {
     try {
-      // Fetch core inventory, logs, and active lots in parallel
-      const [invData, logData, activeData] = await Promise.all([
+      const [invData, logData, activeData, settings] = await Promise.all([
         fetchInventoryFromSupabase(),
         fetchLogsFromSupabase(),
-        fetchActiveLotsFromSupabase()
+        fetchActiveLotsFromSupabase(),
+        fetchLabSettings()
       ])
+      setLabSettings(settings)
 
       // Fetch Requests and map snake_case to camelCase
       const { data: reqData, error: reqError } = await supabase
@@ -85,13 +87,12 @@ export default function DashboardPage() {
       setLotsInUse(activeData)
       setRequests(mappedRequests)
 
-      // Compute Analytics Stats
-      const calculated = calculateDashboardStats(invData, activeData, mappedRequests, labSettings)
+      const calculated = calculateDashboardStats(invData, activeData, mappedRequests, settings)
       setStats(calculated)
     } catch (err) {
       console.error("Dashboard Refresh Error:", err)
     }
-  }, [labSettings])
+  }, [])
 
   useEffect(() => {
     const checkSessionAndRole = async () => {
@@ -123,11 +124,14 @@ export default function DashboardPage() {
 
   // ── 3. FILTER LOGIC ──
 
+  const tz = labSettings.labTimezone
+
   const sortedFlatInventory = inventory.flatMap(g => g.lots.map(l => ({ ...l, itemName: g.name || "Unknown", itemId: g.itemId })))
     .filter(lot => {
       const matchSearch = (lot.itemName || "").toLowerCase().includes(searchQuery.toLowerCase()) || (lot.lot || "").toLowerCase().includes(searchQuery.toLowerCase())
       const matchItem = selectedItems.size === 0 || selectedItems.has(lot.itemName)
-      const matchExpiry = expiryFilter === "all" || (daysUntilExpiry(lot.expiry) <= Number(expiryFilter) && daysUntilExpiry(lot.expiry) > 0)
+      const days = daysUntilExpiry(lot.expiry, tz)
+      const matchExpiry = expiryFilter === "all" || (days <= Number(expiryFilter) && days >= 0)
       return matchSearch && matchItem && matchExpiry
     })
     .sort((a, b) => (a.itemName || "").localeCompare(b.itemName || ""))
@@ -136,7 +140,8 @@ export default function DashboardPage() {
     const matchSearch = (lot.itemName || "").toLowerCase().includes(searchQuery.toLowerCase()) || (lot.lotNumber || "").toLowerCase().includes(searchQuery.toLowerCase())
     const matchItem = selectedItems.size === 0 || selectedItems.has(lot.itemName)
     const effectiveExpiry = getEarliestExpiry(lot.workingExpiryDate, lot.actualExpiryDate)
-    const matchExpiry = expiryFilter === "all" || (daysUntilExpiry(effectiveExpiry) <= Number(expiryFilter) && daysUntilExpiry(effectiveExpiry) > 0)
+    const days = daysUntilExpiry(effectiveExpiry, tz)
+    const matchExpiry = expiryFilter === "all" || (days <= Number(expiryFilter) && days >= 0)
     return matchSearch && matchItem && matchExpiry
   })
 
@@ -207,12 +212,13 @@ export default function DashboardPage() {
 
                 {activePage === "analytics" && <AnalyticsTab stats={stats} requests={requests} inventory={inventory} />}
                 {activePage === "labsharing" && <LabSharingTab />}
+                {activePage === "settings" && <LabSettingsTab labSettings={labSettings} refreshData={refreshData} userRole={userRole} />}
 
                 {["inventory", "lotinuse", "requests", "activitylog"].includes(activePage) && (
                   <div className="flex gap-8 items-start print:block">
                     <div className="flex-1 min-w-0 print:w-full">
                       {activePage === "inventory" && <InventoryTab inventory={inventory} sortedFlatInventory={sortedFlatInventory} labSettings={labSettings} refreshData={refreshData} userRole={userRole} />}
-                      {activePage === "lotinuse" && <LotInUseTab activeLots={filteredLotsInUse} inventory={inventory} refreshData={refreshData} userRole={userRole} />}
+                      {activePage === "lotinuse" && <LotInUseTab activeLots={filteredLotsInUse} inventory={inventory} refreshData={refreshData} userRole={userRole} labSettings={labSettings} />}
                       {activePage === "requests" && <RequestsTab requests={filteredRequests} refreshRequests={refreshData} userRole={userRole} />}
                       {activePage === "activitylog" && <ActivityLogTab logs={filteredLogs} />}
                     </div>

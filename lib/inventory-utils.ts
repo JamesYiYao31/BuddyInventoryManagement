@@ -3,7 +3,7 @@ import { getEarliestExpiry } from "./expiry-utils.ts"
 
 export { getEarliestExpiry }
 
-export type SidebarPage = "dashboard" | "inventory" | "lotinuse" | "requests" | "activitylog" | "analytics" | "labsharing"
+export type SidebarPage = "dashboard" | "inventory" | "lotinuse" | "requests" | "activitylog" | "analytics" | "labsharing" | "settings"
 export type InventoryStatus = "In Storage" | "Low Stock" | "Expiring Soon" | "Expired" | "Watchlist"
 
 /** Single lowest-trackable count. Legacy DB rows (boxes × units) are normalized when reading. */
@@ -40,10 +40,283 @@ export interface InventoryGroup {
   lots: LotEntry[]
 }
 
+export interface Item {
+  id: string
+  name: string
+  vendor: string | null
+  vendor_sku: string | null
+}
+
+// ── SMART BARCODE PARSER (Waterfall: HIBC → GS1 → Code 128 Plaintext) ──
+
+export type BarcodeFormat = "HIBC" | "GS1" | "CODE128"
+
+export interface ParsedBarcode {
+  format: BarcodeFormat
+  sku: string
+  lot: string
+  expiry: string
+  raw: string
+}
+
+/**
+ * Waterfall barcode parser. Detects format, extracts what it can.
+ *
+ * 1. HIBC  — string starts with `+`
+ * 2. GS1   — string contains `(01)` or raw AI `01` with 14-digit GTIN
+ * 3. Code 128 / plaintext — everything else; entire string → sku
+ */
+export function parseSmartBarcode(raw: string): ParsedBarcode {
+  const trimmed = raw.trim()
+  if (!trimmed) return { format: "CODE128", sku: "", lot: "", expiry: "", raw }
+
+  // ── 1. HIBC detection (starts with "+") ──
+  if (trimmed.startsWith("+")) return parseHIBC(trimmed)
+
+  // ── 2. GS1 detection ──
+  if (isGS1(trimmed)) return parseGS1(trimmed)
+
+  // ── 3. Code 128 / plaintext fallback ──
+  return { format: "CODE128", sku: trimmed, lot: "", expiry: "", raw }
+}
+
+function isGS1(s: string): boolean {
+  if (s.includes("(01)") || s.includes("(10)") || s.includes("(17)")) return true
+  // Raw FNC1 stream: starts with AI 01 followed by 14-digit GTIN
+  const clean = s.replace(/[\x1d~]/g, "")
+  if (clean.startsWith("01") && clean.length >= 16 && /^\d{16}/.test(clean)) return true
+  return false
+}
+
+/**
+ * HIBC (Health Industry Bar Code) parser.
+ *
+ * Primary symbol: +{LIC}{product/catalog}        (after the leading "+")
+ * Secondary symbol: +$$lot/expiry                 (second "+" segment)
+ *
+ * Many HIBC barcodes concatenate primary+secondary into one string.
+ * Common date formats: YYDDD (Julian), YYMMDD, MMDDYY.
+ */
+function parseHIBC(s: string): ParsedBarcode {
+  const result: ParsedBarcode = { format: "HIBC", sku: "", lot: "", expiry: "", raw: s }
+
+  // Split on "+" to get segments; first char is always "+" so segments[0] is empty
+  const segments = s.split("+").filter(Boolean)
+  if (segments.length === 0) return result
+
+  // Primary label — everything up to "/" or end is the LIC + product code (= our SKU)
+  const primary = segments[0]
+  // The LIC is typically 4 chars (alpha+digits) but the full primary IS the vendor SKU
+  result.sku = primary.replace(/[/\s]/g, "")
+
+  // Secondary label (if present)
+  if (segments.length >= 2) {
+    const secondary = segments[1]
+    // HIBC secondary starts with "$$" for lot+date, or "$" for lot-only
+    if (secondary.startsWith("$$")) {
+      parseHIBCSecondary(secondary.substring(2), result)
+    } else if (secondary.startsWith("$")) {
+      parseHIBCSecondary(secondary.substring(1), result)
+    } else {
+      // Some encoders skip $ — try to split lot/date heuristically
+      parseHIBCSecondary(secondary, result)
+    }
+  }
+
+  return result
+}
+
+function parseHIBCSecondary(seg: string, result: ParsedBarcode) {
+  // Strip trailing check character if present (single alpha at end after digits)
+  let body = seg.replace(/[A-Z]$/i, "")
+
+  // Try to find a 6-digit date suffix (YYMMDD) at the end
+  const dateMatch = body.match(/(\d{6})$/)
+  if (dateMatch) {
+    const dateStr = dateMatch[1]
+    const yy = parseInt(dateStr.substring(0, 2), 10)
+    const mm = dateStr.substring(2, 4)
+    const dd = dateStr.substring(4, 6)
+    const century = yy >= 50 ? 1900 : 2000
+    result.expiry = `${century + yy}-${mm}-${dd}`
+    result.lot = body.substring(0, body.length - 6) || result.lot
+  } else {
+    // No date found — entire body is lot
+    result.lot = body || result.lot
+  }
+}
+
+/**
+ * GS1-128 / DataMatrix parser.
+ * Handles parenthesised AIs — (01)(17)(10) — and raw FNC1 streams.
+ */
+function parseGS1(raw: string): ParsedBarcode {
+  const result: ParsedBarcode = { format: "GS1", sku: "", lot: "", expiry: "", raw }
+  const trimmed = raw.trim()
+
+  // Strategy 1: parenthesised AI format
+  if (trimmed.includes("(01)") || trimmed.includes("(10)") || trimmed.includes("(17)")) {
+    const aiPattern = /\((\d{2,4})\)([^(]*)/g
+    let match: RegExpExecArray | null
+    while ((match = aiPattern.exec(trimmed)) !== null) {
+      const [, ai, value] = match
+      const v = value.replace(/[\x1d\x00]/g, "").trim()
+      if (ai === "01") result.sku = v
+      else if (ai === "10") result.lot = v
+      else if (ai === "17") result.expiry = formatGS1Date(v)
+    }
+    return result
+  }
+
+  // Strategy 2: raw FNC1 stream
+  const clean = trimmed.replace(/[~\x1d]/g, "\x1d")
+  const segments = clean.split("\x1d").filter(Boolean)
+
+  for (const seg of segments) {
+    if (seg.startsWith("01") && seg.length >= 16) {
+      result.sku = seg.substring(2, 16)
+      extractGS1Tail(seg.substring(16), result)
+    } else if (seg.startsWith("10")) {
+      result.lot = seg.substring(2)
+    } else if (seg.startsWith("17") && seg.length >= 8) {
+      result.expiry = formatGS1Date(seg.substring(2, 8))
+      extractGS1Tail(seg.substring(8), result)
+    }
+  }
+
+  // Single undelimited string fallback
+  if (!result.sku && !result.lot && clean.startsWith("01") && clean.length >= 16) {
+    result.sku = clean.substring(2, 16)
+    extractGS1Tail(clean.substring(16), result)
+  }
+
+  return result
+}
+
+function extractGS1Tail(rest: string, result: ParsedBarcode) {
+  if (!rest) return
+  if (rest.startsWith("17") && rest.length >= 8) {
+    result.expiry = formatGS1Date(rest.substring(2, 8))
+    extractGS1Tail(rest.substring(8), result)
+  } else if (rest.startsWith("10")) {
+    result.lot = rest.substring(2).replace(/\x1d.*/, "")
+  }
+}
+
+function formatGS1Date(yymmdd: string): string {
+  if (yymmdd.length < 6) return ""
+  const yy = parseInt(yymmdd.substring(0, 2), 10)
+  const mm = yymmdd.substring(2, 4)
+  const dd = yymmdd.substring(4, 6)
+  const century = yy >= 50 ? 1900 : 2000
+  return `${century + yy}-${mm}-${dd}`
+}
+
+// ── ITEMS TABLE HELPERS ──
+
+export const fetchAllItems = async (): Promise<Item[]> => {
+  const { data, error } = await supabase
+    .from("items")
+    .select("id, name, vendor, vendor_sku")
+    .order("name", { ascending: true })
+
+  if (error) {
+    console.error("Failed to fetch items:", error)
+    return []
+  }
+  return data as Item[]
+}
+
+export const lookupItemByVendorSku = async (sku: string): Promise<Item | null> => {
+  if (!sku) return null
+  const { data, error } = await supabase
+    .from("items")
+    .select("id, name, vendor, vendor_sku")
+    .eq("vendor_sku", sku)
+    .maybeSingle()
+
+  if (error) {
+    console.error("vendor_sku lookup failed:", error)
+    return null
+  }
+  return data as Item | null
+}
+
 export interface LabSettings {
-  lowStockCount: number
-  expiryWarnDays: number
-  expiryUrgentDays: number
+  lowStockThreshold: number
+  expiringSoonDays: number
+  urgentDays: number
+  labTimezone: string
+}
+
+export const LAB_SETTINGS_DEFAULTS: LabSettings = {
+  lowStockThreshold: 5,
+  expiringSoonDays: 30,
+  urgentDays: 7,
+  labTimezone: "America/Chicago",
+}
+
+export const fetchLabSettings = async (): Promise<LabSettings> => {
+  const d = LAB_SETTINGS_DEFAULTS
+
+  const { data, error } = await supabase
+    .from("lab_settings")
+    .select("low_stock_threshold, expiring_soon_days, urgent_days, lab_timezone")
+    .eq("id", 1)
+    .maybeSingle()
+
+  if (error || !data) {
+    console.error("Failed to fetch lab_settings, using defaults:", error)
+    return d
+  }
+
+  return {
+    lowStockThreshold: data.low_stock_threshold ?? d.lowStockThreshold,
+    expiringSoonDays: data.expiring_soon_days ?? d.expiringSoonDays,
+    urgentDays: data.urgent_days ?? d.urgentDays,
+    labTimezone: data.lab_timezone ?? d.labTimezone,
+  }
+}
+
+export const updateLabSettings = async (
+  settings: LabSettings
+): Promise<{ success: boolean; error?: string }> => {
+  const { error } = await supabase
+    .from("lab_settings")
+    .update({
+      low_stock_threshold: settings.lowStockThreshold,
+      expiring_soon_days: settings.expiringSoonDays,
+      urgent_days: settings.urgentDays,
+    })
+    .eq("id", 1)
+
+  if (error) {
+    console.error("Failed to update lab_settings:", error)
+    return { success: false, error: error.message }
+  }
+  return { success: true }
+}
+
+export const createItem = async (
+  name: string,
+  vendor?: string,
+  vendorSku?: string
+): Promise<Item | null> => {
+  const row: Record<string, string> = { name }
+  if (vendor) row.vendor = vendor
+  if (vendorSku) row.vendor_sku = vendorSku
+
+  const { data, error } = await supabase
+    .from("items")
+    .insert([row])
+    .select("id, name, vendor, vendor_sku")
+    .single()
+
+  if (error) {
+    console.error("Failed to create item:", error)
+    return null
+  }
+  return data as Item
 }
 
 export const STATUS_STYLES: Record<string, string> = {
@@ -54,27 +327,45 @@ export const STATUS_STYLES: Record<string, string> = {
   "Watchlist": "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400",
 }
 
-export const daysUntilExpiry = (expiry: string): number => {
+/**
+ * Returns the lab's current calendar date (YYYY-MM-DD) in the configured timezone,
+ * completely ignoring the user's browser clock.
+ */
+export const getLabCurrentDateStr = (timezone: string): string => {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  })
+  return formatter.format(new Date())
+}
+
+/**
+ * Pure calendar-day difference: expiry minus lab-today.
+ * Positive → days remaining, 0 → expires today (NOT expired), negative → past due.
+ */
+export const daysUntilExpiry = (expiry: string, labTimezone: string = "America/Chicago"): number => {
   if (!expiry) return 999
-  const d = new Date(expiry)
-  const now = new Date()
-  return Math.ceil((d.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+  const todayStr = getLabCurrentDateStr(labTimezone)
+  const todayMs = new Date(todayStr + "T00:00:00").getTime()
+  const expiryMs = new Date(expiry + "T00:00:00").getTime()
+  return Math.round((expiryMs - todayMs) / (1000 * 60 * 60 * 24))
 }
 
 export const getLotTotalCount = (lot: LotEntry): number => lot.totalUnits
 
 export const getLotStatus = (lot: LotEntry, settings: LabSettings): InventoryStatus => {
-  if (!lot.expiry) return "In Storage"
-  const days = daysUntilExpiry(lot.expiry)
-  if (days <= 0) return "Expired"
-  if (days <= settings.expiryUrgentDays) return "Expiring Soon"
-  if (getLotTotalCount(lot) <= settings.lowStockCount) return "Low Stock"
+  const days = daysUntilExpiry(lot.expiry, settings.labTimezone)
+  if (days < 0) return "Expired"
+  if (days >= 0 && days <= settings.expiringSoonDays) return "Expiring Soon"
+  if (getLotTotalCount(lot) <= settings.lowStockThreshold) return "Low Stock"
   return "In Storage"
 }
 
-export const emptyLotForm = (): Omit<LotEntry, "lotId"> => ({
+export const emptyLotForm = (labTimezone: string = "America/Chicago"): Omit<LotEntry, "lotId"> => ({
   itemId: "",
-  lot: "", expiry: "", receivedDate: new Date().toLocaleDateString(), vendor: "", storage: "",
+  lot: "", expiry: "", receivedDate: getLabCurrentDateStr(labTimezone), vendor: "", storage: "",
   status: "In Storage", notes: "", totalUnits: 1,
 })
 
@@ -262,7 +553,8 @@ export const openNewLotInSupabase = async (
   lotNumber: string,
   actualExpiry: string,
   workingExpiry: string,
-  unitsToMove: number
+  unitsToMove: number,
+  openedDate: string
 ) => {
   const { data: invLot, error: fetchErr } = await supabase
     .from("inventory_lots")
@@ -292,7 +584,7 @@ export const openNewLotInSupabase = async (
     {
       item_id: itemId,
       lot_number: lotNumber,
-      opened_date: new Date().toISOString().split("T")[0],
+      opened_date: openedDate,
       working_expiry_date: workingExpiry,
       actual_expiry_date: actualExpiry,
       quantity_left: `${unitsToMove} units`,
@@ -347,27 +639,29 @@ export const calculateDashboardStats = (
   requests: ReorderRequest[],
   settings: LabSettings
 ): DashboardStats => {
-  const now = new Date()
+  const tz = settings.labTimezone
+  const labToday = getLabCurrentDateStr(tz)
+  const labDate = new Date(labToday + "T00:00:00")
 
-  const expiredInventory = inventory.flatMap((g) => g.lots).filter((l) => daysUntilExpiry(l.expiry) <= 0).length
+  const expiredInventory = inventory.flatMap((g) => g.lots).filter((l) => daysUntilExpiry(l.expiry, tz) < 0).length
   const expiredBench = activeLots.filter(
-    (l) => daysUntilExpiry(getEarliestExpiry(l.workingExpiryDate, l.actualExpiryDate)) <= 0
+    (l) => daysUntilExpiry(getEarliestExpiry(l.workingExpiryDate, l.actualExpiryDate), tz) < 0
   ).length
 
   const urgentInventory = inventory.flatMap((g) => g.lots).filter((l) => {
-    const days = daysUntilExpiry(l.expiry)
-    return days > 0 && days <= settings.expiryUrgentDays
+    const days = daysUntilExpiry(l.expiry, tz)
+    return days >= 0 && days <= settings.expiringSoonDays
   }).length
 
   const lowStock = inventory.filter((g) => {
     const totalCount = g.lots.reduce((acc, lot) => acc + (lot.totalUnits || 0), 0)
-    return totalCount <= settings.lowStockCount
+    return totalCount <= settings.lowStockThreshold
   }).length
 
   const pending = requests.filter((r) => r.status === "Pending").length
 
-  const currentMonth = now.getMonth()
-  const currentYear = now.getFullYear()
+  const currentMonth = labDate.getMonth()
+  const currentYear = labDate.getFullYear()
   const monthlySpend = requests
     .filter((r) => {
       const d = new Date(r.dateRequested)

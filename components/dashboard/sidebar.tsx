@@ -19,6 +19,7 @@ export function DashboardSidebar({ activePage, setActivePage }: DashboardSidebar
     { id: "activitylog", label: "Activity Log", icon: Activity },
     { id: "analytics", label: "Analytics", icon: BarChart3 },
     { id: "labsharing", label: "Lab Sharing", icon: Network },
+    { id: "settings", label: "Settings", icon: Settings },
   ]
 
   return (
