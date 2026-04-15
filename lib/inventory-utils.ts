@@ -405,6 +405,15 @@ export interface ReorderRequest {
   dateRequested: string
 }
 
+export interface RequestMutationInput {
+  catalogNumber: string
+  itemName: string
+  vendor: string
+  orderQty: number
+  unitPrice: number
+  notes: string
+}
+
 export const REQUEST_STATUS_STYLES: Record<RequestStatus, string> = {
   "Pending": "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400",
   "Approved": "bg-blue-500/10 text-blue-600 dark:text-blue-400",
@@ -417,6 +426,38 @@ export const CATALOG_DB: Record<string, { name: string; vendor: string; price: n
   "CAT-26542": { name: "BioBall", vendor: "Merck", price: 120.5 },
   "CAT-25510": { name: "DMSO", vendor: "Sigma Aldrich", price: 35.0 },
   "CAT-99887": { name: "FACS Clean", vendor: "BD Biosciences", price: 85.0 },
+}
+
+export const createRequestInSupabase = async (input: RequestMutationInput) => {
+  return supabase
+    .from("requests")
+    .insert([
+      {
+        catalog_number: input.catalogNumber,
+        item_name: input.itemName,
+        vendor: input.vendor,
+        order_qty: input.orderQty,
+        unit_price: input.unitPrice,
+        total_price: input.orderQty * input.unitPrice,
+        status: "Pending",
+        notes: input.notes,
+      },
+    ])
+}
+
+export const updateRequestInSupabase = async (requestId: string, input: RequestMutationInput) => {
+  return supabase
+    .from("requests")
+    .update({
+      catalog_number: input.catalogNumber,
+      item_name: input.itemName,
+      vendor: input.vendor,
+      order_qty: input.orderQty,
+      unit_price: input.unitPrice,
+      total_price: input.orderQty * input.unitPrice,
+      notes: input.notes,
+    })
+    .eq("id", requestId)
 }
 
 export type ActivityActionType = "Added" | "Opened" | "Used" | "Disposed" | "Ordered" | "Received" | "Edited"

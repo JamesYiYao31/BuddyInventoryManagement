@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation" 
-import { Search, CalendarClock, CheckCircle2, Activity, ShieldCheck, User } from "lucide-react"
+import { Search, CalendarClock, CalendarDays, CheckCircle2, Activity, ShieldCheck, User } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 
 // Utilities & Types
@@ -48,6 +48,9 @@ export default function DashboardPage() {
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set()) 
   const [expiryFilter, setExpiryFilter] = useState("all") 
   const [actionFilter, setActionFilter] = useState("all")
+  const [logUserFilter, setLogUserFilter] = useState("all")
+  const [logDateStart, setLogDateStart] = useState("")
+  const [logDateEnd, setLogDateEnd] = useState("")
 
   // ── 2. DATABASE FETCH FUNCTIONS ──
 
@@ -156,8 +159,26 @@ export default function DashboardPage() {
     const matchSearch = (log.itemName || "").toLowerCase().includes(query) || (log.lotNumber || "").toLowerCase().includes(query) || (log.user || "").toLowerCase().includes(query)
     const matchItem = selectedItems.size === 0 || selectedItems.has(log.itemName)
     const matchAction = actionFilter === "all" || log.actionType === actionFilter
-    return matchSearch && matchItem && matchAction
+    const matchUser = logUserFilter === "all" || log.user === logUserFilter
+
+    let matchDate = true
+    if (logDateStart || logDateEnd) {
+      const logDate = new Date(log.date)
+      logDate.setHours(0, 0, 0, 0)
+      if (logDateStart) {
+        const start = new Date(logDateStart + "T00:00:00")
+        if (logDate < start) matchDate = false
+      }
+      if (logDateEnd) {
+        const end = new Date(logDateEnd + "T00:00:00")
+        if (logDate > end) matchDate = false
+      }
+    }
+
+    return matchSearch && matchItem && matchAction && matchUser && matchDate
   })
+
+  const allLogUsers = Array.from(new Set(activityLogs.map(l => l.user).filter(Boolean))).sort()
 
   const allItemNames = Array.from(new Set([
     ...inventory.map(g => g.name).filter(Boolean), 
@@ -258,6 +279,56 @@ export default function DashboardPage() {
                               ))}
                             </div>
                           </div>
+                        )}
+
+                        {activePage === "activitylog" && (
+                          <>
+                            <div className="space-y-3 pt-6 border-t border-border">
+                              <p className="text-[10px] font-bold uppercase text-muted-foreground tracking-widest flex items-center gap-2"><User className="size-4" /> Filter by User</p>
+                              <select
+                                value={logUserFilter}
+                                onChange={e => setLogUserFilter(e.target.value)}
+                                className="w-full h-10 border border-input bg-background rounded-xl px-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                              >
+                                <option value="all">All Users</option>
+                                {allLogUsers.map(name => (
+                                  <option key={name} value={name}>{name}</option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="space-y-3 pt-6 border-t border-border">
+                              <p className="text-[10px] font-bold uppercase text-muted-foreground tracking-widest flex items-center gap-2"><CalendarDays className="size-4" /> Date Range</p>
+                              <div className="space-y-2">
+                                <div className="space-y-1">
+                                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest ml-1">Start Date</label>
+                                  <input
+                                    type="date"
+                                    value={logDateStart}
+                                    onChange={e => setLogDateStart(e.target.value)}
+                                    className="w-full h-10 border border-input bg-background rounded-xl px-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest ml-1">End Date</label>
+                                  <input
+                                    type="date"
+                                    value={logDateEnd}
+                                    onChange={e => setLogDateEnd(e.target.value)}
+                                    className="w-full h-10 border border-input bg-background rounded-xl px-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                                  />
+                                </div>
+                              </div>
+                              {(logUserFilter !== "all" || logDateStart || logDateEnd) && (
+                                <button
+                                  onClick={() => { setLogUserFilter("all"); setLogDateStart(""); setLogDateEnd("") }}
+                                  className="w-full text-center px-4 py-2 text-xs font-bold text-primary rounded-xl hover:bg-primary/10 transition-all"
+                                >
+                                  Reset Log Filters
+                                </button>
+                              )}
+                            </div>
+                          </>
                         )}
                       </div>
                     </aside>
