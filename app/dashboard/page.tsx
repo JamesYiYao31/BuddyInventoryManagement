@@ -231,7 +231,7 @@ export default function DashboardPage() {
                   </div>
                 )}
 
-                {activePage === "analytics" && <AnalyticsTab stats={stats} requests={requests} inventory={inventory} />}
+                {activePage === "analytics" && <AnalyticsTab inventory={inventory} requests={requests} activityLogs={activityLogs} labSettings={labSettings} userRole={userRole} />}
                 {activePage === "labsharing" && <LabSharingTab />}
                 {activePage === "settings" && <LabSettingsTab labSettings={labSettings} refreshData={refreshData} userRole={userRole} />}
 

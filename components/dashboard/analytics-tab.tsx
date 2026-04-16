@@ -1,176 +1,509 @@
 "use client"
 
-import { 
-  CreditCard, 
-  Trash2, 
-  TrendingDown, 
-  LineChart, 
-  DollarSign, 
-  Package, 
-  ArrowUpRight 
+import { useState, useMemo } from "react"
+import {
+  Skull, AlertTriangle, TrendingUp, TrendingDown,
+  DollarSign, Activity, ShieldX, Filter,
 } from "lucide-react"
-import { DashboardStats, InventoryGroup, ReorderRequest } from "@/lib/inventory-utils"
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts"
+import {
+  InventoryGroup, ReorderRequest, ActivityLogEntry, LabSettings,
+  daysUntilExpiry, getLotTotalCount, getLabCurrentDateStr,
+} from "@/lib/inventory-utils"
+
+// ── Types ──
 
 interface AnalyticsTabProps {
-  stats: DashboardStats | null
-  requests: ReorderRequest[]
   inventory: InventoryGroup[]
+  requests: ReorderRequest[]
+  activityLogs: ActivityLogEntry[]
+  labSettings: LabSettings
+  userRole: "manager" | "technician"
 }
 
-export default function AnalyticsTab({ stats, requests, inventory }: AnalyticsTabProps) {
-  // ── LOGIC: DYNAMIC CALCULATIONS ──
-  const totalLots = inventory.flatMap(i => i.lots).length
-  const totalPendingValue = requests
-    .filter(r => r.status === "Pending")
-    .reduce((sum, r) => sum + r.totalPrice, 0)
+// ── Helpers ──
+
+function getLabNow(tz: string): Date {
+  return new Date(getLabCurrentDateStr(tz) + "T00:00:00")
+}
+
+function isInTimeframe(dateStr: string, frame: "month" | "quarter" | "year", tz: string): boolean {
+  if (!dateStr) return false
+  const labNow = getLabNow(tz)
+  const d = new Date(dateStr)
+  const sameYear = d.getFullYear() === labNow.getFullYear()
+  if (frame === "year") return sameYear
+  if (frame === "month") return sameYear && d.getMonth() === labNow.getMonth()
+  if (frame === "quarter") {
+    const q = Math.floor(labNow.getMonth() / 3)
+    const dq = Math.floor(d.getMonth() / 3)
+    return sameYear && q === dq
+  }
+  return false
+}
+
+// ── Component ──
+
+export default function AnalyticsTab({
+  inventory, requests, activityLogs, labSettings, userRole,
+}: AnalyticsTabProps) {
+
+  // ── Role Gate ──
+  if (userRole === "technician") {
+    return (
+      <div className="flex flex-col items-center justify-center py-32 text-center space-y-4 animate-in fade-in duration-500">
+        <div className="p-5 rounded-full bg-red-500/10">
+          <ShieldX className="size-10 text-red-500" />
+        </div>
+        <h2 className="text-2xl font-black text-foreground">Access Restricted</h2>
+        <p className="text-muted-foreground max-w-sm">
+          Analytics are available to Lab Managers only. Contact your lab manager for access.
+        </p>
+      </div>
+    )
+  }
+
+  return <AnalyticsDashboard
+    inventory={inventory}
+    requests={requests}
+    activityLogs={activityLogs}
+    labSettings={labSettings}
+  />
+}
+
+// ── Manager Dashboard (avoids hook-after-early-return issues) ──
+
+function AnalyticsDashboard({
+  inventory, requests, activityLogs, labSettings,
+}: Omit<AnalyticsTabProps, "userRole">) {
+
+  const tz = labSettings.labTimezone
+  const allLots = useMemo(() => inventory.flatMap(g => g.lots.map(l => ({ ...l, itemName: g.name }))), [inventory])
+
+  // ────────────────────────────────────────────────
+  // 1. WASTE METRICS
+  // ────────────────────────────────────────────────
+  const priceMap = useMemo(() => {
+    const map: Record<string, number> = {}
+    const sorted = [...requests].sort((a, b) => new Date(b.dateRequested).getTime() - new Date(a.dateRequested).getTime())
+    for (const r of sorted) {
+      const key = r.itemName.toLowerCase()
+      if (!map[key] && r.unitPrice > 0) map[key] = r.unitPrice
+    }
+    return map
+  }, [requests])
+
+  const wasteData = useMemo(() => {
+    const expired = allLots.filter(l => {
+      const days = daysUntilExpiry(l.expiry, tz)
+      return days < 0 && getLotTotalCount(l) > 0
+    })
+    const items = expired.map(l => {
+      const price = priceMap[l.itemName.toLowerCase()] || 0
+      return { ...l, estimatedLoss: getLotTotalCount(l) * price }
+    })
+    const totalLoss = items.reduce((sum, i) => sum + i.estimatedLoss, 0)
+    return { items, totalLoss }
+  }, [allLots, priceMap, tz])
+
+  // ────────────────────────────────────────────────
+  // 2. RUNNING OUT
+  // ────────────────────────────────────────────────
+  const lowStockItems = useMemo(() => {
+    return allLots
+      .filter(l => {
+        const days = daysUntilExpiry(l.expiry, tz)
+        return getLotTotalCount(l) <= labSettings.lowStockThreshold && days >= 0
+      })
+      .sort((a, b) => getLotTotalCount(a) - getLotTotalCount(b))
+  }, [allLots, labSettings.lowStockThreshold, tz])
+
+  // ────────────────────────────────────────────────
+  // 3. MOST / LEAST USED
+  // ────────────────────────────────────────────────
+  const { mostUsed, leastUsed } = useMemo(() => {
+    const usageActions = ["Used", "Disposed"]
+    const usageLogs = activityLogs.filter(l => usageActions.includes(l.actionType) && l.itemName)
+    const counts: Record<string, number> = {}
+    for (const log of usageLogs) {
+      counts[log.itemName] = (counts[log.itemName] || 0) + 1
+    }
+    const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1])
+    return {
+      mostUsed: sorted.slice(0, 3).map(([name, count]) => ({ name, count })),
+      leastUsed: sorted.slice(-3).reverse().map(([name, count]) => ({ name, count })),
+    }
+  }, [activityLogs])
+
+  // ────────────────────────────────────────────────
+  // 4. EXPENSE FILTERING
+  // ────────────────────────────────────────────────
+  const [expenseItem, setExpenseItem] = useState("all")
+  const [expenseTimeframe, setExpenseTimeframe] = useState<"month" | "quarter" | "year">("month")
+
+  const expenseItemNames = useMemo(() =>
+    Array.from(new Set(requests.map(r => r.itemName).filter(Boolean))).sort(),
+  [requests])
+
+  const filteredExpenses = useMemo(() => {
+    return requests.filter(r => {
+      const matchItem = expenseItem === "all" || r.itemName === expenseItem
+      const matchTime = isInTimeframe(r.dateRequested, expenseTimeframe, tz)
+      return matchItem && matchTime
+    })
+  }, [requests, expenseItem, expenseTimeframe, tz])
+
+  const totalExpense = useMemo(() =>
+    filteredExpenses.reduce((sum, r) => sum + r.totalPrice, 0),
+  [filteredExpenses])
+
+  // ────────────────────────────────────────────────
+  // 5. GLOBAL HEALTH DONUT
+  // ────────────────────────────────────────────────
+  const healthData = useMemo(() => {
+    let healthy = 0, lowStock = 0, expiringSoon = 0, expired = 0
+    for (const lot of allLots) {
+      const days = daysUntilExpiry(lot.expiry, tz)
+      const units = getLotTotalCount(lot)
+      if (days < 0) { expired++; continue }
+      if (days <= labSettings.expiringSoonDays) { expiringSoon++; continue }
+      if (units <= labSettings.lowStockThreshold) { lowStock++; continue }
+      healthy++
+    }
+    return [
+      { name: "Healthy", value: healthy, color: "#22c55e" },
+      { name: "Low Stock", value: lowStock, color: "#eab308" },
+      { name: "Expiring Soon", value: expiringSoon, color: "#f97316" },
+      { name: "Expired", value: expired, color: "#ef4444" },
+    ]
+  }, [allLots, tz, labSettings.expiringSoonDays, labSettings.lowStockThreshold])
+
+  const totalLots = allLots.length
+
+  // ────────────────────────────────────────────────
+  // 6. VENDOR PRICE COMPARISON
+  // ────────────────────────────────────────────────
+  const vendorComparisons = useMemo(() => {
+    const itemVendorMap: Record<string, Record<string, number>> = {}
+    for (const r of requests) {
+      if (!r.itemName || !r.vendor || !r.unitPrice) continue
+      const key = r.itemName
+      if (!itemVendorMap[key]) itemVendorMap[key] = {}
+      const existing = itemVendorMap[key][r.vendor]
+      if (!existing || r.unitPrice < existing) {
+        itemVendorMap[key][r.vendor] = r.unitPrice
+      }
+    }
+    // Also include items table vendor data matched to request prices
+    const results: { itemName: string; vendors: { vendor: string; price: number }[] }[] = []
+    for (const [itemName, vendors] of Object.entries(itemVendorMap)) {
+      const vendorList = Object.entries(vendors).map(([vendor, price]) => ({ vendor, price }))
+      if (vendorList.length >= 2) {
+        vendorList.sort((a, b) => a.price - b.price)
+        results.push({ itemName, vendors: vendorList })
+      }
+    }
+    return results.sort((a, b) => a.itemName.localeCompare(b.itemName))
+  }, [requests])
+
+  // ── RENDER ──
+
+  const timeframeLabels: Record<string, string> = { month: "Current Month", quarter: "Current Quarter", year: "Current Year" }
 
   return (
-    <div className="flex flex-col gap-10 animate-in fade-in duration-700">
-      
-      {/* ── HEADER ── */}
+    <div className="flex flex-col gap-8 animate-in fade-in duration-700">
+      {/* Header */}
       <div className="flex items-end justify-between">
         <div>
           <h1 className="text-4xl font-black text-foreground tracking-tight">Lab Analytics</h1>
-          <p className="text-base text-muted-foreground mt-2 font-medium">Real-time financial and operational performance metrics.</p>
+          <p className="text-base text-muted-foreground mt-2 font-medium">
+            Financial, operational, and inventory health metrics — sourced from live lab data.
+          </p>
         </div>
-        <div className="flex gap-3">
-          <div className="px-5 py-2.5 bg-primary/10 rounded-2xl border border-primary/20 flex items-center gap-2">
-            <div className="size-2 rounded-full bg-primary animate-pulse" />
-            <span className="text-xs font-black text-primary uppercase tracking-widest">Live Cloud Data</span>
-          </div>
-        </div>
-      </div>
-
-      {/* ── TOP ROW: IMPACT CARDS ── */}
-      <div className="grid grid-cols-3 gap-8">
-        {/* Monthly Spend (2-Column Wide) */}
-        <div className="col-span-2 bg-card border-2 border-primary/10 p-10 rounded-[2.5rem] flex justify-between items-center shadow-xl shadow-primary/5 relative overflow-hidden group">
-          <div className="relative z-10">
-            <p className="text-xs font-black uppercase text-primary tracking-[0.2em] mb-4">Current Monthly Spend</p>
-            <div className="flex items-baseline gap-2">
-              <span className="text-7xl font-black text-foreground">${stats?.totalMonthlySpend.toLocaleString() || "0"}</span>
-              <span className="text-sm font-bold text-green-500 flex items-center gap-1"><ArrowUpRight className="size-4" /> 4.2% vs Last Month</span>
-            </div>
-            <p className="text-sm text-muted-foreground mt-6 font-medium max-w-sm leading-relaxed">
-              Financial aggregation of all approved and received requests within the current billing cycle.
-            </p>
-          </div>
-          <div className="h-32 w-48 bg-primary/10 rounded-[2rem] flex items-center justify-center group-hover:scale-110 transition-transform duration-500">
-             <CreditCard className="size-16 text-primary" />
-          </div>
-          {/* Subtle Background Pattern */}
-          <div className="absolute top-0 right-0 p-4 opacity-[0.03]">
-             <LineChart className="size-64 text-primary" />
-          </div>
-        </div>
-
-        {/* Catalog Summary */}
-        <div className="bg-zinc-900 dark:bg-zinc-800 p-10 rounded-[2.5rem] text-white flex flex-col justify-between shadow-2xl">
-           <div>
-             <div className="p-3 bg-white/10 rounded-2xl w-fit mb-6"><Package className="size-6" /></div>
-             <p className="text-xs font-black uppercase text-zinc-400 tracking-widest">Catalog Assets</p>
-             <h2 className="text-6xl font-black mt-2">{inventory.length}</h2>
-             <p className="text-sm text-zinc-500 font-bold uppercase mt-1">Unique Items</p>
-           </div>
-           <div className="pt-8 border-t border-white/10 flex justify-between items-center">
-             <span className="text-xs text-zinc-400 font-bold uppercase tracking-widest">Total Active Lots</span>
-             <span className="text-2xl font-black text-white">{totalLots}</span>
-           </div>
+        <div className="px-5 py-2.5 bg-primary/10 rounded-2xl border border-primary/20 flex items-center gap-2">
+          <div className="size-2 rounded-full bg-primary animate-pulse" />
+          <span className="text-xs font-black text-primary uppercase tracking-widest">Live Data</span>
         </div>
       </div>
 
-      {/* ── MIDDLE ROW: KPI GRID ── */}
-      <div className="grid grid-cols-3 gap-8">
-        <div className="bg-card border border-border p-8 rounded-[2rem] shadow-sm flex flex-col gap-4">
+      {/* ── ROW 1: Waste + Running Out ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+        {/* 1 · Waste Metrics */}
+        <div className="bg-card border border-border rounded-2xl p-8 space-y-6">
           <div className="flex items-center justify-between">
-            <p className="text-xs font-black text-muted-foreground uppercase tracking-widest">Pending Liability</p>
-            <DollarSign className="size-6 text-blue-500" />
-          </div>
-          <p className="text-4xl font-black text-foreground">${totalPendingValue.toLocaleString()}</p>
-          <div className="w-full h-1.5 bg-muted rounded-full mt-2">
-            <div className="h-full bg-blue-500 rounded-full w-[45%]" />
-          </div>
-        </div>
-
-        <div className="bg-card border border-border p-8 rounded-[2rem] shadow-sm flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-black text-muted-foreground uppercase tracking-widest">Waste Exposure</p>
-            <Trash2 className="size-6 text-red-500" />
-          </div>
-          <p className="text-4xl font-black text-foreground">{stats?.expiredCount || 0}</p>
-          <p className="text-xs font-bold text-red-500">Expired lots awaiting disposal</p>
-        </div>
-
-        <div className="bg-card border border-border p-8 rounded-[2rem] shadow-sm flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-black text-muted-foreground uppercase tracking-widest">Optimization Score</p>
-            <TrendingDown className="size-6 text-green-500" />
-          </div>
-          <p className="text-4xl font-black text-foreground">92%</p>
-          <p className="text-xs font-bold text-green-500">Inventory turnover is healthy</p>
-        </div>
-      </div>
-
-      {/* ── BOTTOM ROW: DETAILED INSIGHTS ── */}
-      <div className="grid grid-cols-2 gap-8">
-        {/* Waste Progress Tracking */}
-        <div className="bg-card border border-border p-10 rounded-[2.5rem] space-y-8">
-          <div>
-            <h2 className="text-2xl font-black text-foreground">Top Wasted Reagents</h2>
-            <p className="text-sm text-muted-foreground font-medium mt-1">Items most frequently expiring before consumption.</p>
-          </div>
-          <div className="space-y-8">
-            {[
-              { name: "SuperMix Buffer", loss: "$1,200", pct: 85, color: "bg-red-500" },
-              { name: "FACS Clean", loss: "$850", pct: 60, color: "bg-orange-500" },
-              { name: "IAST Culture Bottle", loss: "$420", pct: 30, color: "bg-yellow-500" },
-            ].map(item => (
-              <div key={item.name} className="space-y-3">
-                <div className="flex justify-between items-end">
-                  <span className="text-base font-bold text-foreground">{item.name}</span>
-                  <span className="text-sm font-black text-foreground uppercase tracking-widest">{item.loss} Loss</span>
-                </div>
-                <div className="w-full h-4 bg-muted rounded-full overflow-hidden">
-                  <div className={`h-full ${item.color} rounded-full transition-all duration-1000`} style={{width: `${item.pct}%`}} />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Vendor API Integration Shell */}
-        <div className="bg-card border border-border p-10 rounded-[2.5rem] space-y-8">
-          <div className="flex justify-between items-start">
             <div>
-              <h2 className="text-2xl font-black text-foreground">Vendor Price API</h2>
-              <p className="text-sm text-muted-foreground font-medium mt-1">Live market comparison for recurring orders.</p>
+              <h2 className="text-lg font-black text-foreground">Waste Exposure</h2>
+              <p className="text-xs text-muted-foreground mt-1">Expired lots still holding stock</p>
             </div>
-            <div className="text-[10px] font-black bg-green-500/10 text-green-600 px-3 py-1 rounded-lg uppercase">Best Price Active</div>
+            <Skull className="size-6 text-red-500" />
           </div>
-          <div className="divide-y divide-border">
-             {[
-               { name: "BioBall (Box of 10)", cat: "CAT-26542", current: "Merck: $120.50", best: "Thermo: $95.00" },
-               { name: "DMSO (500mL)", cat: "CAT-25510", current: "Sigma: $35.00", best: "Fisher: $28.50" },
-               { name: "Agar Plates (50pk)", cat: "CAT-10092", current: "VWR: $145.00", best: "Fisher: $132.00" }
-             ].map((price, idx) => (
-               <div key={idx} className="py-6 flex items-center justify-between first:pt-0 last:pb-0">
-                 <div>
-                   <p className="font-black text-base text-foreground">{price.name}</p>
-                   <p className="text-xs text-muted-foreground font-mono mt-1">{price.cat}</p>
-                 </div>
-                 <div className="text-right">
-                   <p className="text-xs text-muted-foreground line-through decoration-red-500/50">{price.current}</p>
-                   <p className="text-lg font-black text-green-500 mt-0.5">{price.best}</p>
-                 </div>
-               </div>
-             ))}
+          <div className="flex items-baseline gap-2">
+            <span className="text-4xl font-black text-red-500">${wasteData.totalLoss.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            <span className="text-sm font-bold text-muted-foreground">estimated loss</span>
           </div>
-          <button className="w-full py-5 bg-primary/10 text-primary font-black rounded-2xl text-sm hover:bg-primary/20 transition-all border border-primary/20">
-            Expand Market Insights
-          </button>
+          {wasteData.items.length > 0 ? (
+            <div className="max-h-52 overflow-y-auto space-y-2 pr-1">
+              {wasteData.items.map(item => (
+                <div key={item.lotId} className="flex items-center justify-between px-4 py-3 rounded-xl bg-red-500/5 border border-red-500/10">
+                  <div>
+                    <p className="text-sm font-bold text-foreground">{item.itemName}</p>
+                    <p className="text-xs text-muted-foreground">Lot {item.lot} · {getLotTotalCount(item)} units remaining</p>
+                  </div>
+                  <span className="text-sm font-black text-red-500">
+                    ${item.estimatedLoss.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground italic py-4 text-center">No expired lots with remaining stock.</p>
+          )}
+        </div>
+
+        {/* 2 · Running Out */}
+        <div className="bg-card border border-border rounded-2xl p-8 space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-black text-foreground">Running Out</h2>
+              <p className="text-xs text-muted-foreground mt-1">Lots at or below {labSettings.lowStockThreshold} units</p>
+            </div>
+            <AlertTriangle className="size-6 text-yellow-500" />
+          </div>
+          <div className="text-4xl font-black text-yellow-500">{lowStockItems.length} <span className="text-sm font-bold text-muted-foreground">lots</span></div>
+          {lowStockItems.length > 0 ? (
+            <div className="max-h-52 overflow-y-auto space-y-2 pr-1">
+              {lowStockItems.map(item => (
+                <div key={item.lotId} className="flex items-center justify-between px-4 py-3 rounded-xl bg-yellow-500/5 border border-yellow-500/10">
+                  <div>
+                    <p className="text-sm font-bold text-foreground">{item.itemName}</p>
+                    <p className="text-xs text-muted-foreground">Lot {item.lot}</p>
+                  </div>
+                  <span className="text-sm font-black text-yellow-600">{getLotTotalCount(item)} units</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground italic py-4 text-center">All lots above threshold.</p>
+          )}
         </div>
       </div>
 
+      {/* ── ROW 2: Most/Least Used + Expenses ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+        {/* 3 · Most / Least Used */}
+        <div className="bg-card border border-border rounded-2xl p-8 space-y-6">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-black text-foreground">Usage Ranking</h2>
+            <Activity className="size-6 text-primary" />
+          </div>
+          <div className="grid grid-cols-2 gap-6">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 mb-2">
+                <TrendingUp className="size-4 text-green-500" />
+                <p className="text-xs font-black text-muted-foreground uppercase tracking-widest">Most Used</p>
+              </div>
+              {mostUsed.length > 0 ? mostUsed.map((item, i) => (
+                <div key={item.name} className="flex items-center gap-3">
+                  <span className="text-xs font-black text-muted-foreground w-5">{i + 1}.</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-foreground truncate">{item.name}</p>
+                    <p className="text-xs text-muted-foreground">{item.count} events</p>
+                  </div>
+                </div>
+              )) : <p className="text-xs text-muted-foreground italic">No usage data</p>}
+            </div>
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 mb-2">
+                <TrendingDown className="size-4 text-orange-500" />
+                <p className="text-xs font-black text-muted-foreground uppercase tracking-widest">Least Used</p>
+              </div>
+              {leastUsed.length > 0 ? leastUsed.map((item, i) => (
+                <div key={item.name} className="flex items-center gap-3">
+                  <span className="text-xs font-black text-muted-foreground w-5">{i + 1}.</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-foreground truncate">{item.name}</p>
+                    <p className="text-xs text-muted-foreground">{item.count} events</p>
+                  </div>
+                </div>
+              )) : <p className="text-xs text-muted-foreground italic">No usage data</p>}
+            </div>
+          </div>
+        </div>
+
+        {/* 4 · Expense Filtering */}
+        <div className="bg-card border border-border rounded-2xl p-8 space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-black text-foreground">Expense Tracker</h2>
+              <p className="text-xs text-muted-foreground mt-1">Request spend by item &amp; timeframe</p>
+            </div>
+            <DollarSign className="size-6 text-green-500" />
+          </div>
+
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest block mb-1.5">Item</label>
+              <select
+                value={expenseItem}
+                onChange={e => setExpenseItem(e.target.value)}
+                className="w-full h-10 border border-input bg-background rounded-xl px-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+              >
+                <option value="all">All Items</option>
+                {expenseItemNames.map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+            <div className="flex-1">
+              <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest block mb-1.5">Timeframe</label>
+              <select
+                value={expenseTimeframe}
+                onChange={e => setExpenseTimeframe(e.target.value as "month" | "quarter" | "year")}
+                className="w-full h-10 border border-input bg-background rounded-xl px-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+              >
+                <option value="month">Current Month</option>
+                <option value="quarter">Current Quarter</option>
+                <option value="year">Current Year</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="flex items-baseline gap-2">
+            <span className="text-4xl font-black text-foreground">${totalExpense.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            <span className="text-sm font-bold text-muted-foreground">{timeframeLabels[expenseTimeframe]}</span>
+          </div>
+
+          {filteredExpenses.length > 0 ? (
+            <div className="max-h-40 overflow-y-auto space-y-2 pr-1">
+              {filteredExpenses.map(r => (
+                <div key={r.id} className="flex items-center justify-between px-4 py-2.5 rounded-xl bg-muted/50">
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-foreground truncate">{r.itemName}</p>
+                    <p className="text-xs text-muted-foreground">{r.vendor} · Qty {r.orderQty} · {r.status}</p>
+                  </div>
+                  <span className="text-sm font-black text-foreground shrink-0 ml-3">${r.totalPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground italic py-4 text-center">No requests in this period.</p>
+          )}
+        </div>
+      </div>
+
+      {/* ── ROW 3: Health Donut + Vendor Comparison ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+        {/* 5 · Global Health Donut */}
+        <div className="bg-card border border-border rounded-2xl p-8 space-y-6">
+          <div>
+            <h2 className="text-lg font-black text-foreground">Inventory Health</h2>
+            <p className="text-xs text-muted-foreground mt-1">Distribution across {totalLots} tracked lots</p>
+          </div>
+          {totalLots > 0 ? (
+            <div className="flex items-center gap-8">
+              <div className="w-48 h-48 shrink-0">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={healthData.filter(d => d.value > 0)}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={50}
+                      outerRadius={80}
+                      paddingAngle={3}
+                      dataKey="value"
+                      stroke="none"
+                    >
+                      {healthData.filter(d => d.value > 0).map((entry) => (
+                        <Cell key={entry.name} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      content={({ active, payload }) => {
+                        if (!active || !payload?.length) return null
+                        const d = payload[0].payload
+                        const pct = totalLots > 0 ? ((d.value / totalLots) * 100).toFixed(1) : "0"
+                        return (
+                          <div className="bg-background border border-border rounded-lg px-3 py-2 text-xs shadow-lg">
+                            <p className="font-bold">{d.name}</p>
+                            <p className="text-muted-foreground">{d.value} lots ({pct}%)</p>
+                          </div>
+                        )
+                      }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="space-y-3 flex-1">
+                {healthData.map(d => {
+                  const pct = totalLots > 0 ? ((d.value / totalLots) * 100).toFixed(1) : "0"
+                  return (
+                    <div key={d.name} className="flex items-center gap-3">
+                      <div className="size-3 rounded-full shrink-0" style={{ backgroundColor: d.color }} />
+                      <span className="text-sm font-bold text-foreground flex-1">{d.name}</span>
+                      <span className="text-sm font-black text-foreground">{d.value}</span>
+                      <span className="text-xs text-muted-foreground w-14 text-right">{pct}%</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground italic py-8 text-center">No inventory lots to analyze.</p>
+          )}
+        </div>
+
+        {/* 6 · Vendor Price Comparison */}
+        <div className="bg-card border border-border rounded-2xl p-8 space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-black text-foreground">Vendor Price Comparison</h2>
+              <p className="text-xs text-muted-foreground mt-1">Items ordered from multiple vendors</p>
+            </div>
+            <Filter className="size-6 text-primary" />
+          </div>
+
+          {vendorComparisons.length > 0 ? (
+            <div className="max-h-72 overflow-y-auto space-y-4 pr-1">
+              {vendorComparisons.map(comp => {
+                const best = comp.vendors[0].price
+                return (
+                  <div key={comp.itemName} className="rounded-xl border border-border overflow-hidden">
+                    <div className="px-4 py-2.5 bg-muted/50">
+                      <p className="text-sm font-black text-foreground">{comp.itemName}</p>
+                    </div>
+                    <div className="divide-y divide-border">
+                      {comp.vendors.map((v, i) => (
+                        <div key={v.vendor} className="flex items-center justify-between px-4 py-2.5">
+                          <span className="text-sm text-foreground">{v.vendor}</span>
+                          <div className="flex items-center gap-2">
+                            <span className={`text-sm font-black ${i === 0 ? "text-green-500" : "text-foreground"}`}>
+                              ${v.price.toFixed(2)}
+                            </span>
+                            {i === 0 && (
+                              <span className="text-[10px] font-black bg-green-500/10 text-green-600 px-2 py-0.5 rounded-md uppercase">Best</span>
+                            )}
+                            {i > 0 && (
+                              <span className="text-[10px] font-bold text-red-500">
+                                +${(v.price - best).toFixed(2)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground italic py-8 text-center">
+              No items with multiple vendor records found. Order the same item from different vendors to see comparisons.
+            </p>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
