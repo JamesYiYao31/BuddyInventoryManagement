@@ -1,8 +1,11 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { Settings, Save, Loader2, ShieldAlert, Package, Clock, AlertTriangle } from "lucide-react"
-import { LabSettings, fetchLabSettings, updateLabSettings } from "@/lib/inventory-utils"
+import { useState, useEffect, useCallback } from "react"
+import { Settings, Save, Loader2, ShieldAlert, Package, Clock, AlertTriangle, LayoutDashboard, Users, ShieldCheck, User as UserIcon } from "lucide-react"
+import {
+  LabSettings, TechDashboardWidget, fetchLabSettings, updateLabSettings,
+  LabProfile, fetchLabProfiles, updateUserRole,
+} from "@/lib/inventory-utils"
 import { useToast } from "@/hooks/use-toast"
 
 interface LabSettingsTabProps {
@@ -18,6 +21,18 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
+  // ── TEAM MANAGEMENT STATE ──
+  const [profiles, setProfiles] = useState<LabProfile[]>([])
+  const [profilesLoading, setProfilesLoading] = useState(false)
+  const [updatingUserId, setUpdatingUserId] = useState<string | null>(null)
+
+  const loadProfiles = useCallback(async () => {
+    setProfilesLoading(true)
+    const list = await fetchLabProfiles()
+    setProfiles(list)
+    setProfilesLoading(false)
+  }, [])
+
   useEffect(() => {
     const load = async () => {
       setLoading(true)
@@ -28,10 +43,39 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
     load()
   }, [])
 
+  useEffect(() => {
+    if (userRole === "manager") loadProfiles()
+  }, [userRole, loadProfiles])
+
+  const handleRoleChange = async (userId: string, newRole: "manager" | "technician") => {
+    if (userRole !== "manager") return
+    const target = profiles.find(p => p.id === userId)
+    if (target && target.role === newRole) return
+
+    setUpdatingUserId(userId)
+    const result = await updateUserRole(userId, newRole)
+    setUpdatingUserId(null)
+
+    if (result.success) {
+      toast({
+        title: "Role updated",
+        description: `${target?.fullName || "User"} is now a ${newRole === "manager" ? "Manager" : "Technician"}.`,
+      })
+      await loadProfiles()
+    } else {
+      toast({
+        variant: "destructive",
+        title: "Could not update role",
+        description: result.error || "Check permissions and try again.",
+      })
+    }
+  }
+
   const isDirty =
     form.lowStockThreshold !== labSettings.lowStockThreshold ||
     form.expiringSoonDays !== labSettings.expiringSoonDays ||
-    form.urgentDays !== labSettings.urgentDays
+    form.urgentDays !== labSettings.urgentDays ||
+    form.techDashboardWidget !== labSettings.techDashboardWidget
 
   const handleSave = async () => {
     if (userRole !== "manager") return
@@ -153,6 +197,116 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
                 Lots expiring within <span className="font-bold">{form.urgentDays}</span> days will show an <span className="font-bold text-red-600">Urgent</span> badge.
               </p>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Dashboard Configuration ── */}
+      {!loading && (
+        <div className="rounded-2xl border border-border bg-card p-8 space-y-6 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-primary/10"><LayoutDashboard className="size-5 text-primary" /></div>
+            <div>
+              <p className="text-sm font-bold text-foreground">Dashboard Configuration</p>
+              <p className="text-xs text-muted-foreground">Choose the analytics widget displayed on the main dashboard for all users</p>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest ml-1">Technician Dashboard Widget</label>
+            <select
+              value={form.techDashboardWidget}
+              onChange={e => setForm({ ...form, techDashboardWidget: e.target.value as TechDashboardWidget })}
+              className="w-full h-14 border border-input bg-background rounded-2xl px-6 text-base font-medium focus:ring-4 focus:ring-primary/10 focus:border-primary outline-none transition-all"
+            >
+              <option value="donut">Global Health Donut</option>
+              <option value="waste">Waste Metrics</option>
+              <option value="expenses">Recent Expenses</option>
+              <option value="none">None</option>
+            </select>
+            <p className="text-xs text-muted-foreground ml-1">
+              This widget replaces the default dashboard panel for both Technicians and Managers.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Team Management (Manager Only) ── */}
+      {!loading && userRole === "manager" && (
+        <div className="rounded-2xl border border-border bg-card p-8 space-y-6 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-primary/10"><Users className="size-5 text-primary" /></div>
+              <div>
+                <p className="text-sm font-bold text-foreground">Team Management</p>
+                <p className="text-xs text-muted-foreground">Assign Manager or Technician roles for every registered user in this lab.</p>
+              </div>
+            </div>
+            <button
+              onClick={loadProfiles}
+              disabled={profilesLoading}
+              className="text-[10px] font-bold uppercase tracking-widest text-primary hover:underline disabled:opacity-50"
+            >
+              {profilesLoading ? "Refreshing…" : "Refresh"}
+            </button>
+          </div>
+
+          <div className="rounded-2xl border border-border overflow-hidden">
+            <div className="grid grid-cols-[2fr_2fr_1.3fr] px-6 py-3 bg-muted/30 border-b border-border text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+              <span>Display Name</span>
+              <span>Email</span>
+              <span>Role</span>
+            </div>
+
+            {profilesLoading ? (
+              <div className="flex items-center justify-center py-10">
+                <Loader2 className="size-5 text-muted-foreground animate-spin" />
+              </div>
+            ) : profiles.length === 0 ? (
+              <div className="py-10 text-center text-sm text-muted-foreground italic">
+                No registered users found.
+              </div>
+            ) : (
+              profiles.map(p => (
+                <div key={p.id} className="grid grid-cols-[2fr_2fr_1.3fr] items-center px-6 py-4 border-t border-border/50 text-sm hover:bg-muted/20 transition-colors">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className={`size-8 rounded-xl flex items-center justify-center text-[11px] font-black shrink-0 ${
+                      p.role === "manager"
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted text-muted-foreground border border-border"
+                    }`}>
+                      {(p.fullName || p.email || "?").substring(0, 2).toUpperCase()}
+                    </div>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="font-bold text-foreground truncate">
+                        {p.fullName || <span className="italic text-muted-foreground">No name set</span>}
+                      </span>
+                      {p.role === "manager" ? (
+                        <ShieldCheck className="size-3.5 text-primary shrink-0" />
+                      ) : (
+                        <UserIcon className="size-3.5 text-muted-foreground shrink-0" />
+                      )}
+                    </div>
+                  </div>
+
+                  <span className="font-mono text-xs text-muted-foreground truncate">{p.email || "—"}</span>
+
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={p.role}
+                      onChange={e => handleRoleChange(p.id, e.target.value as "manager" | "technician")}
+                      disabled={updatingUserId === p.id}
+                      className={`h-9 border border-input bg-background rounded-lg px-3 text-xs font-bold outline-none focus:ring-2 focus:ring-primary/20 transition-all disabled:opacity-50 ${
+                        p.role === "manager" ? "text-primary" : "text-muted-foreground"
+                      }`}
+                    >
+                      <option value="technician">Technician</option>
+                      <option value="manager">Manager</option>
+                    </select>
+                    {updatingUserId === p.id && <Loader2 className="size-3.5 text-muted-foreground animate-spin" />}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       )}

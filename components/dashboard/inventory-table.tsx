@@ -1,15 +1,16 @@
 "use client"
 
 import { supabase } from "@/lib/supabase"
-import { useState, useRef, useEffect, useCallback } from "react"
+import { useState, useRef, useEffect, useCallback, useMemo } from "react"
 import {
-  Scan, Plus, Pencil, Camera, X, Trash2, ShieldAlert,
+  Scan, Plus, Pencil, Camera, X, Trash2, ShieldAlert, AlertCircle,
   CheckCircle2, Loader2, AlertTriangle, Search, Send
 } from "lucide-react"
 import {
   LotEntry, daysUntilExpiry, emptyLotForm, getLabCurrentDateStr,
-  logActivity, InventoryGroup, LabSettings, Item,
-  parseSmartBarcode, fetchAllItems, lookupItemByVendorSku, createItem
+  logActivity, InventoryGroup, LabSettings, Item, ReorderRequest,
+  parseSmartBarcode, fetchAllItems, lookupItemByVendorSku, createItem,
+  deleteInventoryLotInSupabase
 } from "@/lib/inventory-utils"
 import { useToast } from "@/hooks/use-toast"
 
@@ -19,10 +20,11 @@ interface InventoryTabProps {
   labSettings: LabSettings
   refreshData: () => Promise<void> | void
   userRole: "manager" | "technician"
+  requests?: ReorderRequest[]
 }
 
 export default function InventoryTab({
-  inventory, sortedFlatInventory, labSettings, refreshData, userRole
+  inventory, sortedFlatInventory, labSettings, refreshData, userRole, requests = []
 }: InventoryTabProps) {
 
   const { toast } = useToast()
@@ -91,6 +93,14 @@ export default function InventoryTab({
   const visibleInventoryLots = sortedFlatInventory.filter(
     (lot: LotEntry) => (lot.totalUnits ?? 0) > 0
   )
+
+  const pendingItemNames = useMemo(() => {
+    const names = new Set<string>()
+    for (const r of requests) {
+      if (r.status === "Pending") names.add(r.itemName.toLowerCase())
+    }
+    return names
+  }, [requests])
 
   // ── 5. DYNAMIC STATUS FROM lab_settings THRESHOLDS ──
   type StatusBadge = { label: string; color: string }
@@ -164,16 +174,32 @@ export default function InventoryTab({
     setReorderLot(null)
   }
 
-  const deleteLot = async (lot: any) => {
-    if (userRole !== "manager") return alert("Unauthorized: Only managers can delete inventory.")
-    if (!confirm("Are you sure you want to delete this lot?")) return
+  // ── INVENTORY DELETE MODAL STATE ──
+  const [showInventoryDeleteModal, setShowInventoryDeleteModal] = useState<any>(null)
+  const [deleteReason, setDeleteReason] = useState("")
 
-    const { error } = await supabase.from("inventory_lots").delete().eq("id", lot.lotId)
-    if (error) {
-      alert(error.message)
-    } else {
-      await logActivity("Disposed", lot.itemName, lot.lot, "Manually deleted from inventory")
+  const openDeleteModal = (lot: any) => {
+    if (userRole !== "manager") return alert("Unauthorized: Only managers can delete inventory.")
+    setDeleteReason("")
+    setShowInventoryDeleteModal(lot)
+  }
+
+  const handleConfirmInventoryDelete = async () => {
+    if (!showInventoryDeleteModal) return
+    const reason = deleteReason.trim()
+    if (!reason) return alert("Please provide a reason for deletion.")
+    try {
+      await deleteInventoryLotInSupabase(
+        showInventoryDeleteModal.lotId,
+        showInventoryDeleteModal.itemName,
+        showInventoryDeleteModal.lot,
+        reason
+      )
+      setShowInventoryDeleteModal(null)
+      setDeleteReason("")
       await refreshData()
+    } catch {
+      alert("Error deleting lot from inventory.")
     }
   }
 
@@ -380,7 +406,11 @@ export default function InventoryTab({
                     <span key={b.label} className={`inline-flex px-3 py-1 rounded-full text-[10px] font-bold ${b.color}`}>{b.label}</span>
                   ))}
                   {hasWarning && (
-                    <button onClick={e => { e.stopPropagation(); openReorderModal(lot) }} className="text-[9px] font-black text-primary uppercase hover:underline ml-1">+ Reorder</button>
+                    pendingItemNames.has((lot.itemName || "").toLowerCase()) ? (
+                      <span className="inline-flex px-3 py-1 rounded-full text-[9px] font-bold bg-muted text-muted-foreground cursor-default ml-1">Pending Request</span>
+                    ) : (
+                      <button onClick={e => { e.stopPropagation(); openReorderModal(lot) }} className="text-[9px] font-black text-primary uppercase hover:underline ml-1">+ Reorder</button>
+                    )
                   )}
                 </div>
 
@@ -388,7 +418,7 @@ export default function InventoryTab({
                   {userRole === "manager" ? (
                     <>
                       <button onClick={() => { setEditingLot(lot); setLotForm(lot); setSelectedItemId(lot.itemId); setNewItemName(""); setItemSearchQuery(""); setScanBadge(null); setShowItemModal(true) }} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-primary transition-all"><Pencil className="size-4" /></button>
-                      <button onClick={() => deleteLot(lot)} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-destructive transition-all"><Trash2 className="size-4" /></button>
+                      <button onClick={() => openDeleteModal(lot)} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-destructive transition-all"><Trash2 className="size-4" /></button>
                     </>
                   ) : (
                     <span title="Manager Only">
@@ -671,6 +701,51 @@ export default function InventoryTab({
               >
                 {saving && <Loader2 className="size-5 animate-spin" />}
                 {editingLot ? "Update Lot" : "Confirm & Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════
+          INVENTORY DELETE MODAL
+         ══════════════════════════════════════════════════════════════════ */}
+      {showInventoryDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-md p-4">
+          <div className="w-full max-w-2xl rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center px-10 py-8 border-b border-border bg-destructive/5">
+              <div className="flex items-center gap-4 font-bold text-2xl text-destructive"><Trash2 className="size-8" /> Delete from Inventory</div>
+              <button onClick={() => setShowInventoryDeleteModal(null)} className="p-2 rounded-full hover:bg-muted text-muted-foreground"><X className="size-6" /></button>
+            </div>
+            <div className="p-10 space-y-8">
+              <div className="bg-destructive/5 border-2 border-destructive/20 p-8 rounded-[2rem] text-center">
+                <p className="font-black text-3xl text-foreground">{showInventoryDeleteModal.itemName}</p>
+                <p className="text-sm font-mono text-muted-foreground mt-2">Lot: {showInventoryDeleteModal.lot} &middot; {showInventoryDeleteModal.totalUnits} units</p>
+              </div>
+              <div className="space-y-4">
+                <label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-2">Reason for Deletion <span className="text-destructive">*</span></label>
+                <textarea
+                  value={deleteReason}
+                  onChange={e => setDeleteReason(e.target.value)}
+                  placeholder="e.g. Misentered, Shared with external lab, Damaged in transit..."
+                  rows={3}
+                  className="w-full border border-input bg-background rounded-2xl p-6 text-base outline-none focus:ring-4 focus:ring-destructive/10 focus:border-destructive transition-all resize-none"
+                  autoFocus
+                />
+              </div>
+              <div className="flex items-start gap-3 p-4 bg-muted/50 rounded-2xl border border-border">
+                <AlertCircle className="size-5 text-muted-foreground shrink-0 mt-0.5" />
+                <p className="text-sm text-muted-foreground">This will permanently remove the lot from storage and log the reason to the audit trail.</p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-5 px-10 py-8 border-t border-border bg-muted/20">
+              <button onClick={() => setShowInventoryDeleteModal(null)} className="px-8 py-4 rounded-2xl border border-border bg-card font-bold text-muted-foreground hover:bg-muted transition-all">Cancel</button>
+              <button
+                onClick={handleConfirmInventoryDelete}
+                disabled={!deleteReason.trim()}
+                className="px-12 py-4 rounded-2xl bg-destructive text-destructive-foreground font-black text-lg shadow-xl shadow-destructive/20 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50"
+              >
+                Confirm Deletion
               </button>
             </div>
           </div>

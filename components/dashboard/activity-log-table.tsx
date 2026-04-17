@@ -17,9 +17,11 @@ import { ActivityLogEntry, ACTION_STYLES } from "@/lib/inventory-utils"
 
 interface ActivityLogTabProps {
   logs: ActivityLogEntry[]
+  currentUserName?: string
+  currentUserRole?: "manager" | "technician"
 }
 
-export default function ActivityLogTab({ logs }: ActivityLogTabProps) {
+export default function ActivityLogTab({ logs, currentUserName, currentUserRole }: ActivityLogTabProps) {
   // ── LOGIC: GROUP BY DATE ──
   const groupLogsByDate = (entries: ActivityLogEntry[]) => {
     const groups: Record<string, ActivityLogEntry[]> = {}
@@ -63,7 +65,10 @@ export default function ActivityLogTab({ logs }: ActivityLogTabProps) {
         <div className="flex gap-3">
           <div className="px-5 py-2.5 bg-muted rounded-2xl border border-border flex items-center gap-2">
             <User className="size-4 text-muted-foreground" />
-            <span className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Logged as James (Admin)</span>
+            <span className="text-xs font-bold text-muted-foreground uppercase tracking-widest">
+              Logged as {currentUserName || "—"}
+              {currentUserRole && ` (${currentUserRole === "manager" ? "Manager" : "Technician"})`}
+            </span>
           </div>
           <button onClick={handlePrint} className="flex items-center gap-2 rounded-xl border border-border bg-card text-foreground px-6 py-2.5 text-sm font-bold hover:bg-muted transition-all">
             <Printer className="size-5 text-muted-foreground" /> Print Log

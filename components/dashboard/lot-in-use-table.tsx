@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
-import { Printer, PackageOpen, AlertCircle, Scan, Minus, Camera, X, CheckCircle2, ShieldAlert, List } from "lucide-react"
+import { Printer, PackageOpen, AlertCircle, Scan, Minus, Camera, X, CheckCircle2, ShieldAlert, List, Trash2 } from "lucide-react"
 import { 
   LotInUseEntry, 
   LOT_IN_USE_STYLES, 
@@ -14,7 +14,8 @@ import {
   LotEntry,
   LabSettings,
   logUsageInSupabase,
-  openNewLotInSupabase
+  openNewLotInSupabase,
+  deleteActiveLotInSupabase
 } from "@/lib/inventory-utils"
 
 interface LotInUseTabProps {
@@ -44,6 +45,10 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
   const [openedDate, setOpenedDate] = useState("")
   const [workingExpiry, setWorkingExpiry] = useState("")
 
+  const [showDeleteModal, setShowDeleteModal] = useState<LotInUseEntry | null>(null)
+  const [deleteReasonType, setDeleteReasonType] = useState<string>("Expired")
+  const [deleteCustomReason, setDeleteCustomReason] = useState("")
+
   // ── SCANNER STATE ──
   const [barcodeInput, setBarcodeInput] = useState("")
   const barcodeRef = useRef<HTMLInputElement>(null)
@@ -71,6 +76,29 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
       alert("Error updating usage.");
     }
   };
+
+  // ── LOGIC: DELETE FROM BENCH ──
+  const DELETE_REASONS = ["Expired", "Contaminated / Bad Lot", "QC Failure", "Other"] as const
+
+  const handleConfirmDelete = async () => {
+    if (!showDeleteModal) return
+    const reason = deleteReasonType === "Other" ? deleteCustomReason.trim() : deleteReasonType
+    if (!reason) return alert("Please provide a reason for deletion.")
+    try {
+      await deleteActiveLotInSupabase(
+        showDeleteModal.id,
+        showDeleteModal.itemName,
+        showDeleteModal.lotNumber,
+        reason
+      )
+      setShowDeleteModal(null)
+      setDeleteReasonType("Expired")
+      setDeleteCustomReason("")
+      await refreshData()
+    } catch {
+      alert("Error deleting lot from bench.")
+    }
+  }
 
   // ── LOGIC: OPEN NEW LOT (Storage -> Bench) ──
   const clampWorkingExpiry = (working: string, actual: string): string => {
@@ -291,9 +319,12 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
                     {isExpired ? "Expired" : lot.status}
                   </span>
                 </div>
-                <div className="flex justify-end print:hidden">
-                   <button onClick={() => triggerManualUsage(lot)} className="flex items-center justify-center size-8 rounded-lg bg-primary/10 text-primary hover:bg-primary hover:text-primary-foreground transition-all">
+                <div className="flex justify-end gap-2 print:hidden">
+                   <button onClick={() => triggerManualUsage(lot)} className="flex items-center justify-center size-8 rounded-lg bg-primary/10 text-primary hover:bg-primary hover:text-primary-foreground transition-all" title="Deduct usage">
                      <Minus className="size-5" />
+                   </button>
+                   <button onClick={() => { setDeleteReasonType("Expired"); setDeleteCustomReason(""); setShowDeleteModal(lot); }} className="flex items-center justify-center size-8 rounded-lg bg-destructive/10 text-destructive hover:bg-destructive hover:text-destructive-foreground transition-all" title="Delete from bench">
+                     <Trash2 className="size-4" />
                    </button>
                 </div>
               </div>
@@ -429,6 +460,66 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
               <div className="flex justify-end gap-5 px-10 py-8 border-t border-border bg-muted/20">
                  <button onClick={() => setShowUsageModal(null)} className="px-8 py-4 rounded-2xl border border-border bg-card font-bold text-muted-foreground hover:bg-muted transition-all">Cancel</button>
                  <button onClick={handleConfirmDeduction} className="px-12 py-4 rounded-2xl bg-primary text-primary-foreground font-black text-lg shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all">Confirm Deduction</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Delete from Bench Modal */}
+        {showDeleteModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-md p-4">
+            <div className="w-full max-w-2xl rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+              <div className="flex justify-between items-center px-10 py-8 border-b border-border bg-destructive/5">
+                <div className="flex items-center gap-4 font-bold text-2xl text-destructive"><Trash2 className="size-8" /> Delete from Bench</div>
+                <button onClick={() => setShowDeleteModal(null)} className="p-2 rounded-full hover:bg-muted text-muted-foreground"><X className="size-6" /></button>
+              </div>
+              <div className="p-10 space-y-8">
+                <div className="bg-destructive/5 border-2 border-destructive/20 p-8 rounded-[2rem] text-center">
+                  <p className="font-black text-3xl text-foreground">{showDeleteModal.itemName}</p>
+                  <p className="text-sm font-mono text-muted-foreground mt-2">Lot: {showDeleteModal.lotNumber}</p>
+                </div>
+                <div className="space-y-4">
+                  <label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-2">Reason for Deletion <span className="text-destructive">*</span></label>
+                  <div className="grid grid-cols-2 gap-3">
+                    {DELETE_REASONS.map(r => (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => { setDeleteReasonType(r); if (r !== "Other") setDeleteCustomReason(""); }}
+                        className={`px-4 py-3 rounded-2xl border-2 text-sm font-bold transition-all ${
+                          deleteReasonType === r
+                            ? "border-destructive bg-destructive/10 text-destructive"
+                            : "border-border text-muted-foreground hover:border-muted-foreground/40"
+                        }`}
+                      >
+                        {r}
+                      </button>
+                    ))}
+                  </div>
+                  {deleteReasonType === "Other" && (
+                    <input
+                      value={deleteCustomReason}
+                      onChange={e => setDeleteCustomReason(e.target.value)}
+                      placeholder="Describe the reason..."
+                      className="w-full h-16 border border-input bg-background rounded-2xl px-6 text-lg outline-none focus:ring-4 focus:ring-destructive/10 focus:border-destructive transition-all animate-in slide-in-from-top-2"
+                      autoFocus
+                    />
+                  )}
+                </div>
+                <div className="flex items-start gap-3 p-4 bg-muted/50 rounded-2xl border border-border">
+                  <AlertCircle className="size-5 text-muted-foreground shrink-0 mt-0.5" />
+                  <p className="text-sm text-muted-foreground">This will permanently remove the lot from the bench and log the reason to the audit trail.</p>
+                </div>
+              </div>
+              <div className="flex justify-end gap-5 px-10 py-8 border-t border-border bg-muted/20">
+                <button onClick={() => setShowDeleteModal(null)} className="px-8 py-4 rounded-2xl border border-border bg-card font-bold text-muted-foreground hover:bg-muted transition-all">Cancel</button>
+                <button
+                  onClick={handleConfirmDelete}
+                  disabled={deleteReasonType === "Other" && !deleteCustomReason.trim()}
+                  className="px-12 py-4 rounded-2xl bg-destructive text-destructive-foreground font-black text-lg shadow-xl shadow-destructive/20 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50"
+                >
+                  Confirm Deletion
+                </button>
               </div>
             </div>
           </div>

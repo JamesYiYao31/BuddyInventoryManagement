@@ -242,11 +242,14 @@ export const lookupItemByVendorSku = async (sku: string): Promise<Item | null> =
   return data as Item | null
 }
 
+export type TechDashboardWidget = "donut" | "waste" | "expenses" | "none"
+
 export interface LabSettings {
   lowStockThreshold: number
   expiringSoonDays: number
   urgentDays: number
   labTimezone: string
+  techDashboardWidget: TechDashboardWidget
 }
 
 export const LAB_SETTINGS_DEFAULTS: LabSettings = {
@@ -254,27 +257,74 @@ export const LAB_SETTINGS_DEFAULTS: LabSettings = {
   expiringSoonDays: 30,
   urgentDays: 7,
   labTimezone: "America/Chicago",
+  techDashboardWidget: "donut",
 }
 
 export const fetchLabSettings = async (): Promise<LabSettings> => {
   const d = LAB_SETTINGS_DEFAULTS
 
-  const { data, error } = await supabase
-    .from("lab_settings")
-    .select("low_stock_threshold, expiring_soon_days, urgent_days, lab_timezone")
-    .eq("id", 1)
-    .maybeSingle()
+  try {
+    // First attempt: full select including tech_dashboard_widget
+    const { data, error } = await supabase
+      .from("lab_settings")
+      .select("low_stock_threshold, expiring_soon_days, urgent_days, lab_timezone, tech_dashboard_widget")
+      .eq("id", 1)
+      .maybeSingle()
 
-  if (error || !data) {
-    console.error("Failed to fetch lab_settings, using defaults:", error)
+    if (error) {
+      console.error("[fetchLabSettings] Supabase error — falling back to defaults.", {
+        message: error?.message,
+        details: error?.details,
+        hint: error?.hint,
+        code: error?.code,
+      })
+
+      // Likely cause: tech_dashboard_widget column doesn't exist yet.
+      // Retry with legacy columns so the dashboard keeps working.
+      const legacy = await supabase
+        .from("lab_settings")
+        .select("low_stock_threshold, expiring_soon_days, urgent_days, lab_timezone")
+        .eq("id", 1)
+        .maybeSingle()
+
+      if (legacy.error) {
+        console.error("[fetchLabSettings] Legacy fallback also failed — using defaults.", {
+          message: legacy.error?.message,
+          details: legacy.error?.details,
+          hint: legacy.error?.hint,
+          code: legacy.error?.code,
+        })
+        return d
+      }
+      if (!legacy.data) return d
+
+      return {
+        lowStockThreshold: legacy.data.low_stock_threshold ?? d.lowStockThreshold,
+        expiringSoonDays: legacy.data.expiring_soon_days ?? d.expiringSoonDays,
+        urgentDays: legacy.data.urgent_days ?? d.urgentDays,
+        labTimezone: legacy.data.lab_timezone ?? d.labTimezone,
+        techDashboardWidget: d.techDashboardWidget,
+      }
+    }
+
+    if (!data) {
+      // Table is empty — return safe defaults instead of crashing.
+      return d
+    }
+
+    return {
+      lowStockThreshold: data.low_stock_threshold ?? d.lowStockThreshold,
+      expiringSoonDays: data.expiring_soon_days ?? d.expiringSoonDays,
+      urgentDays: data.urgent_days ?? d.urgentDays,
+      labTimezone: data.lab_timezone ?? d.labTimezone,
+      techDashboardWidget: data.tech_dashboard_widget ?? d.techDashboardWidget,
+    }
+  } catch (err: any) {
+    console.error("[fetchLabSettings] Unexpected exception — using defaults.", {
+      message: err?.message,
+      details: err?.details ?? err?.stack,
+    })
     return d
-  }
-
-  return {
-    lowStockThreshold: data.low_stock_threshold ?? d.lowStockThreshold,
-    expiringSoonDays: data.expiring_soon_days ?? d.expiringSoonDays,
-    urgentDays: data.urgent_days ?? d.urgentDays,
-    labTimezone: data.lab_timezone ?? d.labTimezone,
   }
 }
 
@@ -287,12 +337,37 @@ export const updateLabSettings = async (
       low_stock_threshold: settings.lowStockThreshold,
       expiring_soon_days: settings.expiringSoonDays,
       urgent_days: settings.urgentDays,
+      tech_dashboard_widget: settings.techDashboardWidget,
     })
     .eq("id", 1)
 
   if (error) {
-    console.error("Failed to update lab_settings:", error)
-    return { success: false, error: error.message }
+    console.error("[updateLabSettings] Failed — retrying without tech_dashboard_widget.", {
+      message: error?.message,
+      details: error?.details,
+      hint: error?.hint,
+      code: error?.code,
+    })
+
+    // Retry without the new column so managers can still save thresholds
+    // when the tech_dashboard_widget column hasn't been added to Supabase yet.
+    const retry = await supabase
+      .from("lab_settings")
+      .update({
+        low_stock_threshold: settings.lowStockThreshold,
+        expiring_soon_days: settings.expiringSoonDays,
+        urgent_days: settings.urgentDays,
+      })
+      .eq("id", 1)
+
+    if (retry.error) {
+      console.error("[updateLabSettings] Legacy retry failed.", {
+        message: retry.error?.message,
+        details: retry.error?.details,
+      })
+      return { success: false, error: retry.error.message }
+    }
+    return { success: true }
   }
   return { success: true }
 }
@@ -460,7 +535,7 @@ export const updateRequestInSupabase = async (requestId: string, input: RequestM
     .eq("id", requestId)
 }
 
-export type ActivityActionType = "Added" | "Opened" | "Used" | "Disposed" | "Ordered" | "Received" | "Edited"
+export type ActivityActionType = "Added" | "Opened" | "Used" | "Disposed" | "Ordered" | "Received" | "Edited" | "Deleted from Bench" | "Deleted from Storage"
 
 export interface ActivityLogEntry {
   id: string
@@ -482,6 +557,8 @@ export const ACTION_STYLES: Record<string, string> = {
   "Ordered": "bg-purple-500/10 text-purple-600 dark:text-purple-400",
   "Edited": "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400",
   "Disposed": "bg-red-500/10 text-red-600 dark:text-red-400",
+  "Deleted from Bench": "bg-red-500/10 text-red-600 dark:text-red-400",
+  "Deleted from Storage": "bg-red-500/10 text-red-600 dark:text-red-400",
 }
 
 export const fetchInventoryFromSupabase = async (): Promise<InventoryGroup[]> => {
@@ -522,16 +599,66 @@ export const fetchInventoryFromSupabase = async (): Promise<InventoryGroup[]> =>
   return Object.values(groups)
 }
 
+// Resolves the current authenticated user's display name + initials from the
+// profiles table. Falls back to auth metadata, then email-prefix — never to a
+// hardcoded name. Returns null if there is no session.
+export const resolveCurrentUserIdentity = async (): Promise<{
+  userId: string
+  name: string
+  initials: string
+  email: string
+} | null> => {
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session?.user) return null
+
+  const user = session.user
+  const email = user.email ?? ""
+
+  let name = ""
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("full_name")
+    .eq("id", user.id)
+    .maybeSingle()
+
+  if (profile?.full_name && profile.full_name.trim()) {
+    name = profile.full_name.trim()
+  } else if (user.user_metadata?.full_name) {
+    name = String(user.user_metadata.full_name).trim()
+  } else if (email) {
+    name = email.split("@")[0]
+  } else {
+    name = "Unknown User"
+  }
+
+  const initials = name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(s => s[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase() || name.slice(0, 2).toUpperCase()
+
+  return { userId: user.id, name, initials, email }
+}
+
 export const logActivity = async (
   actionType: ActivityActionType,
   itemName: string,
   lotNumber: string,
   details: string
 ) => {
+  const identity = await resolveCurrentUserIdentity()
+
+  if (!identity) {
+    console.error("[logActivity] No authenticated user — aborting log insert.")
+    return
+  }
+
   const { error } = await supabase.from("activity_logs").insert([
     {
-      user_name: "James",
-      user_initials: "JM",
+      user_name: identity.name,
+      user_initials: identity.initials,
       action_type: actionType,
       item_name: itemName,
       lot_number: lotNumber,
@@ -539,7 +666,61 @@ export const logActivity = async (
     },
   ])
 
-  if (error) console.error("Logging failed:", error)
+  if (error) console.error("[logActivity] Insert failed:", error)
+}
+
+// ── TEAM MANAGEMENT ──
+
+export interface LabProfile {
+  id: string
+  fullName: string
+  email: string
+  role: "manager" | "technician"
+}
+
+export const fetchLabProfiles = async (): Promise<LabProfile[]> => {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, full_name, email, role")
+    .order("full_name", { ascending: true })
+
+  if (error) {
+    console.error("[fetchLabProfiles] Failed:", {
+      message: error?.message,
+      details: error?.details,
+      hint: error?.hint,
+      code: error?.code,
+    })
+    return []
+  }
+
+  return (data || []).map((p: any) => ({
+    id: p.id,
+    fullName: p.full_name || "",
+    email: p.email || "",
+    role: (p.role === "manager" ? "manager" : "technician") as "manager" | "technician",
+  }))
+}
+
+export const updateUserRole = async (
+  userId: string,
+  newRole: "manager" | "technician"
+): Promise<{ success: boolean; error?: string }> => {
+  const { error } = await supabase
+    .from("profiles")
+    .update({ role: newRole })
+    .eq("id", userId)
+
+  if (error) {
+    console.error("[updateUserRole] Failed:", {
+      message: error?.message,
+      details: error?.details,
+      hint: error?.hint,
+      code: error?.code,
+    })
+    return { success: false, error: error.message }
+  }
+  return { success: true }
 }
 
 export const fetchLogsFromSupabase = async (): Promise<ActivityLogEntry[]> => {
@@ -664,6 +845,57 @@ export const logUsageInSupabase = async (
 
     await logActivity("Used", itemName, lotNumber, `Deducted ${deductAmount} ${label}.`)
   }
+}
+
+export const deleteActiveLotInSupabase = async (
+  activeLotId: string,
+  itemName: string,
+  lotNumber: string,
+  reason: string
+) => {
+  const { error: deleteErr } = await supabase
+    .from("active_lots")
+    .delete()
+    .eq("id", activeLotId)
+
+  if (deleteErr) throw deleteErr
+
+  await logActivity(
+    "Deleted from Bench",
+    itemName,
+    lotNumber,
+    `Deleted due to: ${reason}`
+  )
+}
+
+export const deleteInventoryLotInSupabase = async (
+  lotId: string,
+  itemName: string,
+  lotNumber: string,
+  reason: string
+) => {
+  const { error } = await supabase
+    .from("inventory_lots")
+    .delete()
+    .eq("id", lotId)
+
+  if (error) throw error
+
+  await logActivity(
+    "Deleted from Storage",
+    itemName,
+    lotNumber,
+    `Deleted due to: ${reason}`
+  )
+}
+
+export const deleteRequestInSupabase = async (requestId: string) => {
+  const { error } = await supabase
+    .from("requests")
+    .delete()
+    .eq("id", requestId)
+
+  if (error) throw error
 }
 
 export interface DashboardStats {

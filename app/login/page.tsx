@@ -34,7 +34,7 @@ export default function LoginPage() {
       }
 
       // 2. Sign Up with Metadata
-      const { error: signUpError } = await supabase.auth.signUp({
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email,
         password,
         options: {
@@ -48,6 +48,20 @@ export default function LoginPage() {
       if (signUpError) {
         setError(signUpError.message)
       } else {
+        // 3. Persist role in profiles table so the dashboard can read it
+        const newUserId = signUpData?.user?.id
+        if (newUserId) {
+          const assignedRole = (role === "manager" && managerCode === SECRET_MANAGER_CODE)
+            ? "manager"
+            : "technician"
+
+          await supabase.from("profiles").upsert({
+            id: newUserId,
+            role: assignedRole,
+            full_name: fullName,
+          })
+        }
+
         alert("Account created! You can now sign in.")
         setIsRegistering(false)
       }

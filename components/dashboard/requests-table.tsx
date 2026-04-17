@@ -1,11 +1,12 @@
 "use client"
 
 import { useState } from "react"
-import { Plus, X, CheckCircle2, PackagePlus, DollarSign, Clock, ArrowRight, ShieldAlert } from "lucide-react"
+import { Plus, X, CheckCircle2, PackagePlus, DollarSign, Clock, ArrowRight, ShieldAlert, Trash2 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { 
   ReorderRequest, REQUEST_STATUS_STYLES, CATALOG_DB, 
-  logActivity, createRequestInSupabase, updateRequestInSupabase
+  logActivity, createRequestInSupabase, updateRequestInSupabase,
+  deleteRequestInSupabase
 } from "@/lib/inventory-utils"
 
 interface RequestsTabProps {
@@ -131,6 +132,17 @@ export default function RequestsTab({ requests, refreshRequests, userRole }: Req
     setShowReceiveModal(null)
   }
 
+  const handleDeleteRequest = async (req: ReorderRequest) => {
+    if (!window.confirm(`Are you sure you want to delete the request for "${req.itemName}"?`)) return
+    try {
+      await deleteRequestInSupabase(req.id)
+      await logActivity("Disposed", req.itemName, "N/A", `Manager deleted purchase request (${req.orderQty} units from ${req.vendor})`)
+      await refreshRequests()
+    } catch {
+      alert("Error deleting request.")
+    }
+  }
+
   return (
     <div className="relative flex flex-col gap-6">
       {/* ── HEADER ── */}
@@ -193,6 +205,11 @@ export default function RequestsTab({ requests, refreshRequests, userRole }: Req
                 <button onClick={() => setShowReceiveModal(req)} className="px-3 py-1.5 bg-green-500 text-white font-bold text-xs rounded-lg shadow-sm hover:bg-green-600 transition-all">Receive Item</button>
               )}
               {req.status === "Received" && <CheckCircle2 className="size-5 text-green-500 mr-2" />}
+              {userRole === "manager" && (
+                <button onClick={() => handleDeleteRequest(req)} className="p-1.5 rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-all" title="Delete request">
+                  <Trash2 className="size-4" />
+                </button>
+              )}
             </div>
           </div>
         )) : (

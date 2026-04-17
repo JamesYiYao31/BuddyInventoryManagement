@@ -1,73 +1,334 @@
 "use client"
 
-import { Bell, Search, ShieldCheck, User } from "lucide-react"
+import { useState, useRef, useEffect, useMemo } from "react"
+import { Bell, Search, XCircle, Timer, PackageSearch, Package, FlaskConical, ChevronRight } from "lucide-react"
+import {
+  DashboardStats, InventoryGroup, LotInUseEntry, LabSettings, SidebarPage,
+  daysUntilExpiry, getEarliestExpiry
+} from "@/lib/inventory-utils"
 
 interface DashboardHeaderProps {
-  user?: any;
-  role?: "manager" | "technician";
+  user?: any
+  role?: "manager" | "technician"
+  stats?: DashboardStats | null
+  inventory?: InventoryGroup[]
+  activeLots?: LotInUseEntry[]
+  labSettings?: LabSettings
+  onNavigate?: (page: SidebarPage) => void
 }
 
-export function DashboardHeader({ user, role }: DashboardHeaderProps) {
-  // Extract name and initials from the email or metadata
+interface SearchResult {
+  id: string
+  itemName: string
+  lotNumber: string
+  source: "Storage" | "Bench"
+}
+
+type AlertCategory = "expired" | "expiring" | "lowstock"
+
+interface NotificationItem {
+  id: string
+  message: string
+  category: AlertCategory
+  targetTab: SidebarPage
+}
+
+const CATEGORY_META: Record<AlertCategory, { icon: typeof XCircle; color: string; bg: string }> = {
+  expired:  { icon: XCircle,       color: "text-red-500",    bg: "bg-red-500/10" },
+  expiring: { icon: Timer,         color: "text-orange-500", bg: "bg-orange-500/10" },
+  lowstock: { icon: PackageSearch,  color: "text-yellow-600", bg: "bg-yellow-500/10" },
+}
+
+const MAX_NOTIFICATIONS = 12
+
+export function DashboardHeader({
+  user, role, stats, inventory = [], activeLots = [],
+  labSettings, onNavigate,
+}: DashboardHeaderProps) {
   const userEmail = user?.email || "staff@lab.com"
-  const userName = user?.user_metadata?.full_name || userEmail.split('@')[0]
+  const userName = user?.user_metadata?.full_name || userEmail.split("@")[0]
   const initials = userName.substring(0, 2).toUpperCase()
+
+  const tz = labSettings?.labTimezone ?? "America/Chicago"
+  const lowThreshold = labSettings?.lowStockThreshold ?? 5
+
+  // ── SEARCH STATE ──
+  const [searchQuery, setSearchQuery] = useState("")
+  const [searchFocused, setSearchFocused] = useState(false)
+  const searchRef = useRef<HTMLDivElement>(null)
+
+  // ── BELL STATE ──
+  const [bellOpen, setBellOpen] = useState(false)
+  const [hasUnread, setHasUnread] = useState(false)
+  const bellRef = useRef<HTMLDivElement>(null)
+
+  // ── CLICK-OUTSIDE ──
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setSearchFocused(false)
+      }
+      if (bellRef.current && !bellRef.current.contains(e.target as Node)) {
+        setBellOpen(false)
+      }
+    }
+    document.addEventListener("mousedown", handler)
+    return () => document.removeEventListener("mousedown", handler)
+  }, [])
+
+  // ── GENERATE SPECIFIC NOTIFICATIONS ──
+  const notifications: NotificationItem[] = useMemo(() => {
+    const items: NotificationItem[] = []
+
+    for (const group of inventory) {
+      let groupTotalUnits = 0
+
+      for (const lot of group.lots) {
+        groupTotalUnits += lot.totalUnits ?? 0
+        const days = daysUntilExpiry(lot.expiry, tz)
+
+        if (days < 0 && lot.expiry) {
+          items.push({
+            id: `exp-${lot.lotId}`,
+            message: `${group.name} (Lot ${lot.lot}) is Expired`,
+            category: "expired",
+            targetTab: "inventory",
+          })
+        } else if (days >= 0 && days <= 7 && lot.expiry) {
+          items.push({
+            id: `urg-${lot.lotId}`,
+            message: `${group.name} (Lot ${lot.lot}) expires in ${days}d`,
+            category: "expiring",
+            targetTab: "inventory",
+          })
+        }
+
+        if (items.length >= MAX_NOTIFICATIONS) break
+      }
+
+      if (items.length < MAX_NOTIFICATIONS && groupTotalUnits <= lowThreshold) {
+        items.push({
+          id: `low-${group.itemId}`,
+          message: `${group.name} is low stock (${groupTotalUnits} units)`,
+          category: "lowstock",
+          targetTab: "inventory",
+        })
+      }
+
+      if (items.length >= MAX_NOTIFICATIONS) break
+    }
+
+    if (items.length < MAX_NOTIFICATIONS) {
+      for (const lot of activeLots) {
+        const eff = getEarliestExpiry(lot.workingExpiryDate, lot.actualExpiryDate)
+        const days = daysUntilExpiry(eff, tz)
+
+        if (days < 0) {
+          items.push({
+            id: `bench-exp-${lot.id}`,
+            message: `${lot.itemName} (Lot ${lot.lotNumber}) expired on bench`,
+            category: "expired",
+            targetTab: "lotinuse",
+          })
+        } else if (days >= 0 && days <= 7) {
+          items.push({
+            id: `bench-urg-${lot.id}`,
+            message: `${lot.itemName} (Lot ${lot.lotNumber}) bench expiry in ${days}d`,
+            category: "expiring",
+            targetTab: "lotinuse",
+          })
+        }
+
+        if (items.length >= MAX_NOTIFICATIONS) break
+      }
+    }
+
+    return items.slice(0, MAX_NOTIFICATIONS)
+  }, [inventory, activeLots, tz, lowThreshold])
+
+  // Mark unread whenever notifications change and there are new ones
+  useEffect(() => {
+    if (notifications.length > 0) setHasUnread(true)
+  }, [notifications])
+
+  const handleBellClick = () => {
+    setBellOpen(prev => !prev)
+    setHasUnread(false)
+  }
+
+  const handleNotificationClick = (n: NotificationItem) => {
+    setBellOpen(false)
+    onNavigate?.(n.targetTab)
+  }
+
+  // ── SEARCH LOGIC ──
+  const q = searchQuery.toLowerCase().trim()
+
+  const searchResults: SearchResult[] = q.length < 2 ? [] : (() => {
+    const results: SearchResult[] = []
+
+    for (const group of inventory) {
+      for (const lot of group.lots) {
+        if (
+          (group.name || "").toLowerCase().includes(q) ||
+          (lot.lot || "").toLowerCase().includes(q)
+        ) {
+          results.push({
+            id: lot.lotId,
+            itemName: group.name,
+            lotNumber: lot.lot,
+            source: "Storage",
+          })
+        }
+        if (results.length >= 5) break
+      }
+      if (results.length >= 5) break
+    }
+
+    if (results.length < 5) {
+      for (const lot of activeLots) {
+        if (results.length >= 5) break
+        if (
+          (lot.itemName || "").toLowerCase().includes(q) ||
+          (lot.lotNumber || "").toLowerCase().includes(q)
+        ) {
+          results.push({
+            id: lot.id,
+            itemName: lot.itemName,
+            lotNumber: lot.lotNumber,
+            source: "Bench",
+          })
+        }
+      }
+    }
+
+    return results.slice(0, 5)
+  })()
+
+  const showSearchDropdown = searchFocused && q.length >= 2
 
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-background/95 px-8 backdrop-blur supports-[backdrop-filter]:bg-background/60 print:hidden">
-      
-      {/* ── LEFT SIDE: TITLE & ROLE BADGE ── */}
+
+      {/* ── LEFT SIDE: TITLE ── */}
       <div className="flex items-center gap-4">
         <h1 className="text-xl font-black text-foreground tracking-tight">BuddyLab Workspace</h1>
-        
-        {/* Dynamic Role Badge */}
-        <div className={`hidden md:flex items-center gap-1.5 px-3 py-1 rounded-full border ${
-          role === 'manager' 
-            ? 'bg-primary/10 border-primary/20 text-primary' 
-            : 'bg-muted border-border text-muted-foreground'
-        }`}>
-          {role === 'manager' ? <ShieldCheck className="size-3.5" /> : <User className="size-3.5" />}
-          <span className="text-[10px] font-black uppercase tracking-widest">
-            {role === 'manager' ? 'Admin Access' : 'Tech Access'}
-          </span>
-        </div>
       </div>
 
       {/* ── RIGHT SIDE: SEARCH, ALERTS, PROFILE ── */}
       <div className="flex items-center gap-6">
-        
-        {/* Global Search Bar Placeholder */}
-        <div className="relative hidden lg:block">
+
+        {/* ── GLOBAL SEARCH ── */}
+        <div ref={searchRef} className="relative hidden lg:block">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <input
             type="search"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            onFocus={() => setSearchFocused(true)}
             placeholder="Search reagents, lots..."
             className="w-64 h-9 bg-muted border border-border rounded-lg pl-9 pr-4 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20 transition-all"
           />
-        </div>
-        
-        {/* Notification Bell */}
-        <button className="relative p-2 text-muted-foreground hover:text-foreground transition-colors rounded-full hover:bg-muted">
-          <Bell className="size-5" />
-          {role === 'manager' && (
-            <span className="absolute right-1.5 top-1.5 flex size-2.5 items-center justify-center rounded-full bg-red-500 ring-2 ring-background animate-pulse" />
-          )}
-        </button>
 
-        {/* Dynamic User Profile */}
+          {showSearchDropdown && (
+            <div className="absolute top-full left-0 mt-1 w-80 rounded-xl border border-border bg-card shadow-xl overflow-hidden animate-in fade-in slide-in-from-top-1 duration-150 z-50">
+              {searchResults.length > 0 ? (
+                <div className="py-1">
+                  {searchResults.map(r => (
+                    <div key={`${r.source}-${r.id}`} className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/50 transition-colors cursor-default">
+                      {r.source === "Storage"
+                        ? <Package className="size-4 text-blue-500 shrink-0" />
+                        : <FlaskConical className="size-4 text-green-500 shrink-0" />
+                      }
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-foreground truncate">{r.itemName}</p>
+                        <p className="text-[11px] text-muted-foreground font-mono truncate">Lot: {r.lotNumber}</p>
+                      </div>
+                      <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-md ${
+                        r.source === "Storage"
+                          ? "bg-blue-500/10 text-blue-600"
+                          : "bg-green-500/10 text-green-600"
+                      }`}>
+                        {r.source}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+                  No matches found for &ldquo;{searchQuery}&rdquo;
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* ── NOTIFICATION BELL ── */}
+        <div ref={bellRef} className="relative">
+          <button
+            onClick={handleBellClick}
+            className="relative p-2 text-muted-foreground hover:text-foreground transition-colors rounded-full hover:bg-muted"
+          >
+            <Bell className="size-5" />
+            {hasUnread && notifications.length > 0 && (
+              <span className="absolute right-1 top-1 flex size-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-black text-white ring-2 ring-background">
+                {notifications.length > 9 ? "9+" : notifications.length}
+              </span>
+            )}
+          </button>
+
+          {bellOpen && (
+            <div className="absolute right-0 top-full mt-1 w-96 rounded-xl border border-border bg-card shadow-xl overflow-hidden animate-in fade-in slide-in-from-top-1 duration-150 z-50">
+              <div className="px-4 py-3 border-b border-border bg-muted/30 flex items-center justify-between">
+                <p className="text-xs font-black uppercase tracking-widest text-muted-foreground">Lab Alerts</p>
+                {notifications.length > 0 && (
+                  <span className="text-[10px] font-bold text-muted-foreground">{notifications.length} item{notifications.length !== 1 ? "s" : ""}</span>
+                )}
+              </div>
+              {notifications.length > 0 ? (
+                <div className="max-h-80 overflow-y-auto">
+                  {notifications.map(n => {
+                    const meta = CATEGORY_META[n.category]
+                    const Icon = meta.icon
+                    return (
+                      <button
+                        key={n.id}
+                        onClick={() => handleNotificationClick(n)}
+                        className="flex items-center gap-3 w-full text-left px-4 py-3 hover:bg-muted/60 transition-colors border-t border-border/40 first:border-t-0 group"
+                      >
+                        <div className={`p-1.5 rounded-lg shrink-0 ${meta.bg}`}>
+                          <Icon className={`size-3.5 ${meta.color}`} />
+                        </div>
+                        <p className="text-sm text-foreground flex-1 min-w-0 truncate">
+                          {n.message}
+                        </p>
+                        <ChevronRight className="size-3.5 text-muted-foreground/40 shrink-0 group-hover:text-foreground transition-colors" />
+                      </button>
+                    )
+                  })}
+                </div>
+              ) : (
+                <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+                  No active alerts. All clear.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* ── USER PROFILE ── */}
         <div className="flex items-center gap-3 border-l border-border pl-6">
           <div className="flex flex-col text-right hidden sm:flex">
             <span className="text-sm font-black text-foreground capitalize">{userName}</span>
             <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-              {role === 'manager' ? 'Lab Manager' : 'Lab Tech'}
+              {role === "manager" ? "Manager" : "Technician"}
             </span>
           </div>
-          
-          {/* Avatar Circle */}
+
           <div className={`size-9 rounded-xl flex items-center justify-center text-sm font-black shadow-sm ${
-            role === 'manager' 
-              ? 'bg-primary text-primary-foreground shadow-primary/20' 
-              : 'bg-muted text-muted-foreground border border-border'
+            role === "manager"
+              ? "bg-primary text-primary-foreground shadow-primary/20"
+              : "bg-muted text-muted-foreground border border-border"
           }`}>
             {initials}
           </div>
