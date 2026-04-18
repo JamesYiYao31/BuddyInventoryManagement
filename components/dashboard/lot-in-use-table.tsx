@@ -24,9 +24,15 @@ interface LotInUseTabProps {
   refreshData: () => Promise<void> | void
   userRole: "manager" | "technician"
   labSettings: LabSettings
+  /** Display name of the currently authenticated lab member (used in the print masthead). */
+  currentUserName?: string
 }
 
-export default function LotInUseTab({ activeLots, inventory, refreshData, userRole, labSettings }: LotInUseTabProps) {
+export default function LotInUseTab({ activeLots, inventory, refreshData, userRole, labSettings, currentUserName }: LotInUseTabProps) {
+  // ── PRINT METADATA ──
+  const labName = labSettings.labName || "BuddyLab Tracker"
+  const printUserName = (currentUserName || "Unknown User").toUpperCase()
+  const printGeneratedDate = getLabCurrentDateStr(labSettings.labTimezone)
   // ── MODAL STATES ──
   const [showScanModal, setShowScanModal] = useState(false)
   const [scanMode, setScanMode] = useState<"use" | "open">("use") 
@@ -264,25 +270,24 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
       </div>
 
       {/* ── 2. PROFESSIONAL PRINT HEADER (Visible ONLY on Print) ── */}
-      <div className="hidden print:block space-y-6 mb-10 border-b-2 border-zinc-900 pb-8">
+      <div className="hidden print:block space-y-5 mb-6 border-b-2 border-zinc-900 pb-6">
         <div className="flex justify-between items-start">
           <div>
-            <h1 className="text-4xl font-black uppercase tracking-tighter text-zinc-900">Reagent Usage Report</h1>
-            <p className="text-zinc-500 font-medium mt-1">BuddyLab Tracker | Clinical Laboratory Management</p>
+            <h1 className="text-2xl font-black tracking-tight text-zinc-900 print:text-2xl">Reagent Usage Report</h1>
+            <p className="text-zinc-500 font-medium mt-1">{labName} | Clinical Laboratory Management</p>
           </div>
           <div className="text-right">
-             <div className="text-sm font-bold uppercase text-zinc-400 tracking-widest">Document Status</div>
-             <div className="text-lg font-black text-emerald-600">ACTIVE BENCH INVENTORY</div>
+            <div className="text-lg font-black text-emerald-600">ACTIVE BENCH INVENTORY</div>
           </div>
         </div>
-        <div className="grid grid-cols-3 gap-8 pt-4">
+        <div className="grid grid-cols-3 gap-6 pt-2">
           <div className="p-4 bg-zinc-50 rounded-xl border border-zinc-200">
-            <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Technician</p>
-            <p className="text-lg font-bold text-zinc-900">Current User ({userRole})</p>
+            <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Current User</p>
+            <p className="text-lg font-bold text-zinc-900">{printUserName}</p>
           </div>
           <div className="p-4 bg-zinc-50 rounded-xl border border-zinc-200">
             <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Generated Date</p>
-            <p className="text-lg font-bold text-zinc-900">{getLabCurrentDateStr(labSettings.labTimezone)}</p>
+            <p className="text-lg font-bold text-zinc-900">{printGeneratedDate}</p>
           </div>
           <div className="p-4 bg-zinc-50 rounded-xl border border-zinc-200">
             <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Lab Timezone</p>
@@ -291,64 +296,112 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
         </div>
       </div>
 
-      {/* ── 3. MAIN TABLE ── */}
-      <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm print:border-zinc-200 print:shadow-none">
-        <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_1fr_0.5fr] border-b border-border bg-muted/30 px-6 py-4 text-[11px] font-bold uppercase tracking-widest text-muted-foreground print:bg-zinc-100 print:text-zinc-900 print:border-zinc-900">
-          <span>Item Name</span><span>Lot Number</span><span>Opened</span><span>Working Exp</span><span>Actual Exp</span><span>Qty Left</span><span>Status</span><span className="print:hidden"></span>
-        </div>
+      {/*
+        ── 3. MAIN TABLE ──
+        Rendered as a real <table> so that:
+          (a) <thead> and <tfoot> repeat automatically on every printed page, and
+          (b) column widths align flawlessly across <th> / <td> pairs on paper.
+      */}
+      <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm print:border-none print:rounded-none print:shadow-none print:overflow-visible print-table-wrapper">
+        <table className="w-full border-collapse text-sm print:text-[11px] print:text-zinc-900 print:border-collapse print:border-2 print:border-black">
+          <colgroup>
+            <col className="w-[26%]" />
+            <col className="w-[12%]" />
+            <col className="w-[11%]" />
+            <col className="w-[12%]" />
+            <col className="w-[12%]" />
+            <col className="w-[10%]" />
+            <col className="w-[11%]" />
+            <col className="w-[6%] print:hidden" />
+          </colgroup>
 
-        {(activeLots || []).length > 0 ? (
-          activeLots.map((lot) => {
-            const effectiveExpiry = getEarliestExpiry(lot.workingExpiryDate, lot.actualExpiryDate)
-            const daysLeft = daysUntilExpiry(effectiveExpiry, labSettings.labTimezone)
-            const isExpired = daysLeft < 0
-            
-            return (
-              <div key={lot.id} className={`grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_1fr_0.5fr] px-6 py-4 items-center border-t border-border/50 text-sm hover:bg-muted/20 transition-colors print:border-zinc-200 print:text-zinc-900 ${isExpired ? "bg-destructive/5 print:bg-red-50" : ""}`}>
-                <div className="flex items-center gap-3">
-                  <PackageOpen className="size-5 text-muted-foreground print:text-zinc-400" />
-                  <span className="font-bold text-foreground print:text-zinc-900">{lot.itemName}</span>
-                </div>
-                <span className="font-mono text-muted-foreground print:text-zinc-600">{lot.lotNumber}</span>
-                <span className="text-muted-foreground/80 print:text-zinc-600">{lot.openedDate}</span>
-                <span className={`font-semibold ${daysLeft <= 7 ? 'text-red-500' : 'text-foreground print:text-zinc-900'}`}>{lot.workingExpiryDate}</span>
-                <span className="font-semibold text-muted-foreground print:text-zinc-600">{lot.actualExpiryDate}</span>
-                <span className="font-bold text-foreground print:text-zinc-900">{lot.quantityLeft}</span>
-                <div>
-                  <span className={`inline-flex px-3 py-1 rounded-full text-[10px] font-bold print:border print:bg-transparent ${isExpired ? LOT_IN_USE_STYLES["Expired"] : LOT_IN_USE_STYLES[lot.status as keyof typeof LOT_IN_USE_STYLES]}`}>
-                    {isExpired ? "Expired" : lot.status}
-                  </span>
-                </div>
-                <div className="flex justify-end gap-2 print:hidden">
-                   <button onClick={() => triggerManualUsage(lot)} className="flex items-center justify-center size-8 rounded-lg bg-primary/10 text-primary hover:bg-primary hover:text-primary-foreground transition-all" title="Deduct usage">
-                     <Minus className="size-5" />
-                   </button>
-                   <button onClick={() => { setDeleteReasonType("Expired"); setDeleteCustomReason(""); setShowDeleteModal(lot); }} className="flex items-center justify-center size-8 rounded-lg bg-destructive/10 text-destructive hover:bg-destructive hover:text-destructive-foreground transition-all" title="Delete from bench">
-                     <Trash2 className="size-4" />
-                   </button>
-                </div>
-              </div>
-            )
-          })
-        ) : (
-          <div className="p-20 text-center text-muted-foreground">No active lots on the bench.</div>
-        )}
+          <thead>
+            <tr className="border-b border-border bg-muted/30 text-[11px] font-bold uppercase tracking-widest text-muted-foreground print:bg-zinc-100 print:text-zinc-900">
+              <th className="text-left px-6 py-4 print:border print:border-black print:px-2 print:py-1">Item Name</th>
+              <th className="text-left px-6 py-4 print:border print:border-black print:px-2 print:py-1">Lot Number</th>
+              <th className="text-center px-6 py-4 print:border print:border-black print:px-2 print:py-1">Opened Date</th>
+              <th className="text-center px-6 py-4 print:border print:border-black print:px-2 print:py-1">Working Exp</th>
+              <th className="text-center px-6 py-4 print:border print:border-black print:px-2 print:py-1">Actual Exp</th>
+              <th className="text-center px-6 py-4 print:border print:border-black print:px-2 print:py-1">Qty Left</th>
+              <th className="text-center px-6 py-4 print:border print:border-black print:px-2 print:py-1">Status</th>
+              <th className="text-right px-6 py-4 print:hidden">
+                <span className="sr-only">Actions</span>
+              </th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {(activeLots || []).length > 0 ? (
+              activeLots.map((lot) => {
+                const effectiveExpiry = getEarliestExpiry(lot.workingExpiryDate, lot.actualExpiryDate)
+                const daysLeft = daysUntilExpiry(effectiveExpiry, labSettings.labTimezone)
+                const isExpired = daysLeft < 0
+
+                return (
+                  <tr
+                    key={lot.id}
+                    className={`border-t border-border/50 hover:bg-muted/20 transition-colors print:text-zinc-900 ${isExpired ? "bg-destructive/5 print:bg-red-50" : ""}`}
+                  >
+                    <td className="text-left align-middle px-6 py-4 print:border print:border-black print:px-2 print:py-1">
+                      <div className="flex items-center gap-3">
+                        <PackageOpen className="size-5 text-muted-foreground print:hidden" />
+                        <span className="font-bold text-foreground print:text-zinc-900">{lot.itemName}</span>
+                      </div>
+                    </td>
+                    <td className="text-left align-middle px-6 py-4 font-mono text-muted-foreground print:border print:border-black print:px-2 print:py-1 print:text-zinc-700">
+                      {lot.lotNumber}
+                    </td>
+                    <td className="text-center align-middle px-6 py-4 text-muted-foreground/80 print:border print:border-black print:px-2 print:py-1 print:text-zinc-700 tabular-nums">
+                      {lot.openedDate || "—"}
+                    </td>
+                    <td className={`text-center align-middle px-6 py-4 font-semibold tabular-nums print:border print:border-black print:px-2 print:py-1 ${daysLeft <= 7 ? 'text-red-500 print:text-red-700' : 'text-foreground print:text-zinc-900'}`}>
+                      {lot.workingExpiryDate || "—"}
+                    </td>
+                    <td className="text-center align-middle px-6 py-4 font-semibold text-muted-foreground tabular-nums print:border print:border-black print:px-2 print:py-1 print:text-zinc-700">
+                      {lot.actualExpiryDate || "—"}
+                    </td>
+                    <td className="text-center align-middle px-6 py-4 font-bold text-foreground tabular-nums print:border print:border-black print:px-2 print:py-1 print:text-zinc-900">
+                      {lot.quantityLeft}
+                    </td>
+                    <td className="text-center align-middle px-6 py-4 print:border print:border-black print:px-2 print:py-1">
+                      <span className={`inline-flex px-3 py-1 rounded-full text-[10px] font-bold print:rounded-none print:px-0 print:py-0 print:bg-transparent ${isExpired ? LOT_IN_USE_STYLES["Expired"] : LOT_IN_USE_STYLES[lot.status as keyof typeof LOT_IN_USE_STYLES]}`}>
+                        {isExpired ? "Expired" : lot.status}
+                      </span>
+                    </td>
+                    <td className="text-right align-middle px-6 py-4 print:hidden">
+                      <div className="flex justify-end gap-2">
+                        <button onClick={() => triggerManualUsage(lot)} className="flex items-center justify-center size-8 rounded-lg bg-primary/10 text-primary hover:bg-primary hover:text-primary-foreground transition-all" title="Deduct usage">
+                          <Minus className="size-5" />
+                        </button>
+                        <button onClick={() => { setDeleteReasonType("Expired"); setDeleteCustomReason(""); setShowDeleteModal(lot); }} className="flex items-center justify-center size-8 rounded-lg bg-destructive/10 text-destructive hover:bg-destructive hover:text-destructive-foreground transition-all" title="Delete from bench">
+                          <Trash2 className="size-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })
+            ) : (
+              <tr>
+                <td colSpan={8} className="p-20 text-center text-muted-foreground print:border print:border-black print:px-2 print:py-1 print:p-10 print:text-zinc-600">
+                  No active lots on the bench.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
 
-      {/* ── 4. PRINT FOOTER ── */}
-      <div className="hidden print:block mt-20 pt-10 border-t border-zinc-200">
-         <div className="flex justify-between items-end">
-            <div className="space-y-1">
-               <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">End of Report</p>
-               <p className="text-xs text-zinc-500 italic">This document is a live record of clinical reagents currently active in the laboratory workspace.</p>
-            </div>
-            <div className="text-right">
-               <div className="h-px w-48 bg-zinc-300 mb-2" />
-               <p className="text-sm font-bold text-zinc-900">Reviewing Signature</p>
-            </div>
-         </div>
-      </div>
-
+     {/* ── PRINT SIGNATURE FOOTER — fixed to bottom of every printed page ── */}
+<div className="hidden print:block print-footer-fixed" style={{ paddingLeft: "1cm", paddingRight: "1cm" }}>
+  <div className="border-t-2 border-zinc-900 pt-3 pb-2 flex justify-between items-end">
+    <p className="text-sm font-black text-zinc-900 uppercase tracking-widest">End of Report</p>
+    <div className="flex items-end gap-3">
+      <span className="text-xs font-bold text-zinc-700 uppercase tracking-widest">Reviewed by:</span>
+      <span className="inline-block border-b border-zinc-900 w-64 h-4" />
+    </div>
+  </div>
+</div>
       {/* ── MODALS (Hidden on Print) ── */}
       <div className="print:hidden">
         

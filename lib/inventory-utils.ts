@@ -250,6 +250,12 @@ export interface LabSettings {
   urgentDays: number
   labTimezone: string
   techDashboardWidget: TechDashboardWidget
+  /**
+   * Display name of the laboratory. Appears on printed reports and report headers.
+   * Falls back to the product name when the `lab_name` column is not yet populated
+   * in Supabase so reports never render a blank masthead.
+   */
+  labName?: string
 }
 
 export const LAB_SETTINGS_DEFAULTS: LabSettings = {
@@ -258,6 +264,7 @@ export const LAB_SETTINGS_DEFAULTS: LabSettings = {
   urgentDays: 7,
   labTimezone: "America/Chicago",
   techDashboardWidget: "donut",
+  labName: "BuddyLab Tracker",
 }
 
 export const fetchLabSettings = async (): Promise<LabSettings> => {

@@ -1,11 +1,32 @@
 "use client"
 
 import { useState, useRef, useEffect, useMemo } from "react"
-import { Bell, Search, XCircle, Timer, PackageSearch, Package, FlaskConical, ChevronRight } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { useTheme } from "next-themes"
+import {
+  Bell, Search, XCircle, Timer, PackageSearch, Package, FlaskConical,
+  ChevronRight, ChevronDown, UserCog, LogOut, Sun, Moon, Monitor, Palette,
+} from "lucide-react"
 import {
   DashboardStats, InventoryGroup, LotInUseEntry, LabSettings, SidebarPage,
   daysUntilExpiry, getEarliestExpiry
 } from "@/lib/inventory-utils"
+import { supabase } from "@/lib/supabase"
+import { useToast } from "@/hooks/use-toast"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { ProfileSettingsDialog } from "@/components/dashboard/profile-settings-dialog"
 
 interface DashboardHeaderProps {
   user?: any
@@ -15,6 +36,7 @@ interface DashboardHeaderProps {
   activeLots?: LotInUseEntry[]
   labSettings?: LabSettings
   onNavigate?: (page: SidebarPage) => void
+  onProfileUpdated?: () => void | Promise<void>
 }
 
 interface SearchResult {
@@ -43,11 +65,46 @@ const MAX_NOTIFICATIONS = 12
 
 export function DashboardHeader({
   user, role, stats, inventory = [], activeLots = [],
-  labSettings, onNavigate,
+  labSettings, onNavigate, onProfileUpdated,
 }: DashboardHeaderProps) {
+  const router = useRouter()
+  const { toast } = useToast()
   const userEmail = user?.email || "staff@lab.com"
   const userName = user?.user_metadata?.full_name || userEmail.split("@")[0]
   const initials = userName.substring(0, 2).toUpperCase()
+
+  // ── PROFILE MENU ──
+  const [profileDialogOpen, setProfileDialogOpen] = useState(false)
+  const [signingOut, setSigningOut] = useState(false)
+
+  // ── THEME (light / dark / system, OS-synced by default) ──
+  const { theme, setTheme, resolvedTheme } = useTheme()
+  const [themeMounted, setThemeMounted] = useState(false)
+  useEffect(() => { setThemeMounted(true) }, [])
+  // Until mounted, next-themes returns undefined — fall back to "system" to avoid hydration flicker.
+  const activeTheme = themeMounted ? (theme ?? "system") : "system"
+  const ThemeIcon =
+    !themeMounted
+      ? Palette
+      : activeTheme === "system"
+        ? Monitor
+        : (resolvedTheme === "dark" ? Moon : Sun)
+
+  const handleSignOut = async () => {
+    if (signingOut) return
+    setSigningOut(true)
+    const { error } = await supabase.auth.signOut()
+    if (error) {
+      setSigningOut(false)
+      toast({
+        variant: "destructive",
+        title: "Sign out failed",
+        description: error.message || "Please try again.",
+      })
+      return
+    }
+    router.replace("/login")
+  }
 
   const tz = labSettings?.labTimezone ?? "America/Chicago"
   const lowThreshold = labSettings?.lowStockThreshold ?? 5
@@ -317,24 +374,137 @@ export function DashboardHeader({
         </div>
 
         {/* ── USER PROFILE ── */}
-        <div className="flex items-center gap-3 border-l border-border pl-6">
-          <div className="flex flex-col text-right hidden sm:flex">
-            <span className="text-sm font-black text-foreground capitalize">{userName}</span>
-            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-              {role === "manager" ? "Manager" : "Technician"}
-            </span>
-          </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="group flex items-center gap-3 border-l border-border pl-6 outline-none rounded-xl focus-visible:ring-2 focus-visible:ring-primary/30"
+              aria-label="Open profile menu"
+            >
+              <div className="hidden sm:flex flex-col text-right">
+                <span className="text-sm font-black text-foreground capitalize leading-tight">{userName}</span>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                  {role === "manager" ? "Manager" : "Technician"}
+                </span>
+              </div>
 
-          <div className={`size-9 rounded-xl flex items-center justify-center text-sm font-black shadow-sm ${
-            role === "manager"
-              ? "bg-primary text-primary-foreground shadow-primary/20"
-              : "bg-muted text-muted-foreground border border-border"
-          }`}>
-            {initials}
-          </div>
-        </div>
+              <div className={`relative size-9 rounded-xl flex items-center justify-center text-sm font-black shadow-sm transition-all group-hover:scale-105 ${
+                role === "manager"
+                  ? "bg-primary text-primary-foreground shadow-primary/20"
+                  : "bg-muted text-muted-foreground border border-border"
+              }`}>
+                {initials}
+              </div>
+
+              <ChevronDown className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+            </button>
+          </DropdownMenuTrigger>
+
+          <DropdownMenuContent
+            align="end"
+            sideOffset={10}
+            className="w-60 rounded-xl border-border bg-card shadow-xl p-1.5"
+          >
+            <DropdownMenuLabel className="px-2.5 pb-2 pt-1.5">
+              <p className="text-sm font-black text-foreground capitalize leading-tight truncate">
+                {userName}
+              </p>
+              <p className="text-[11px] font-medium text-muted-foreground truncate mt-0.5">
+                {userEmail}
+              </p>
+              <span className={`mt-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest ${
+                role === "manager"
+                  ? "bg-primary/10 text-primary"
+                  : "bg-muted text-muted-foreground"
+              }`}>
+                {role === "manager" ? "Manager" : "Technician"}
+              </span>
+            </DropdownMenuLabel>
+
+            <DropdownMenuSeparator />
+
+            <DropdownMenuItem
+              onSelect={(e) => {
+                e.preventDefault()
+                setProfileDialogOpen(true)
+              }}
+              className="gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer text-sm font-bold focus:bg-muted"
+            >
+              <UserCog className="size-4" />
+              Profile Settings
+            </DropdownMenuItem>
+
+            {/* ── THEME SUB-MENU (Light / Dark / System) ── */}
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger className="gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer text-sm font-bold focus:bg-muted data-[state=open]:bg-muted">
+                <ThemeIcon className="size-4" />
+                <span className="flex-1">Appearance</span>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground capitalize">
+                  {themeMounted ? activeTheme : ""}
+                </span>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent
+                sideOffset={6}
+                className="w-48 rounded-xl border-border bg-card shadow-xl p-1.5"
+              >
+                <DropdownMenuLabel className="px-2 pb-1 pt-0.5 text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                  Theme
+                </DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={activeTheme}
+                  onValueChange={(v) => setTheme(v)}
+                >
+                  <DropdownMenuRadioItem
+                    value="light"
+                    className="gap-2.5 pl-8 pr-2 py-2 rounded-lg cursor-pointer text-sm font-bold focus:bg-muted"
+                  >
+                    <Sun className="size-4" />
+                    Light
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem
+                    value="dark"
+                    className="gap-2.5 pl-8 pr-2 py-2 rounded-lg cursor-pointer text-sm font-bold focus:bg-muted"
+                  >
+                    <Moon className="size-4" />
+                    Dark
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem
+                    value="system"
+                    className="gap-2.5 pl-8 pr-2 py-2 rounded-lg cursor-pointer text-sm font-bold focus:bg-muted"
+                  >
+                    <Monitor className="size-4" />
+                    System
+                  </DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+
+            <DropdownMenuSeparator />
+
+            <DropdownMenuItem
+              onSelect={(e) => {
+                e.preventDefault()
+                handleSignOut()
+              }}
+              disabled={signingOut}
+              variant="destructive"
+              className="gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer text-sm font-bold"
+            >
+              <LogOut className="size-4" />
+              {signingOut ? "Signing out..." : "Log Out"}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
 
       </div>
+
+      <ProfileSettingsDialog
+        open={profileDialogOpen}
+        onOpenChange={setProfileDialogOpen}
+        user={user}
+        role={role ?? "technician"}
+        onProfileUpdated={onProfileUpdated}
+      />
     </header>
   )
 }

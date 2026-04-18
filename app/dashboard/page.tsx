@@ -209,6 +209,7 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
   
   const [labSettings, setLabSettings] = useState<LabSettings>({ lowStockThreshold: 5, expiringSoonDays: 30, urgentDays: 7, labTimezone: "America/Chicago", techDashboardWidget: "donut" })
+  const [profileFullName, setProfileFullName] = useState("")
   const [loading, setLoading] = useState(true)
 
   // Filter State
@@ -222,7 +223,28 @@ export default function DashboardPage() {
 
   // Resolve the authenticated user's display name — matches the header's logic
   // so that activity-log entries can be filtered by the current user.
-  const currentUserName = user?.user_metadata?.full_name || user?.email?.split("@")[0] || ""
+  const currentUserName = user?.user_metadata?.full_name || profileFullName || user?.email?.split("@")[0] || ""
+
+  // ── Refresh the authenticated user (called after profile edits so the
+  // header and activity-log filters pick up the new display name). ──
+  const refreshAuthUser = useCallback(async () => {
+    const { data } = await supabase.auth.getUser()
+    if (data?.user) setUser(data.user)
+
+    if (data?.user?.id) {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role, full_name")
+        .eq("id", data.user.id)
+        .single()
+      if (profile?.role) {
+        setUserRole(profile.role as "manager" | "technician")
+      }
+      if (profile?.full_name) {
+        setProfileFullName(profile.full_name)
+      }
+    }
+  }, [])
 
   // ── 2. DATABASE FETCH FUNCTIONS ──
 
@@ -279,12 +301,15 @@ export default function DashboardPage() {
       } else {
         setUser(session.user)
         
-        // Fetch role from profiles table, falling back to auth metadata
         const { data: profile } = await supabase
           .from('profiles')
-          .select('role')
+          .select('role, full_name')
           .eq('id', session.user.id)
           .single()
+
+        if (profile?.full_name) {
+          setProfileFullName(profile.full_name)
+        }
 
         if (profile?.role) {
           setUserRole(profile.role as "manager" | "technician")
@@ -426,7 +451,7 @@ export default function DashboardPage() {
 
       <div className="flex flex-1 flex-col pl-64 print:pl-0 print:block">
         <div className="print:hidden">
-          <DashboardHeader user={user} role={userRole} stats={stats} inventory={inventory} activeLots={lotsInUse} labSettings={labSettings} onNavigate={setActivePage} />
+          <DashboardHeader user={user} role={userRole} stats={stats} inventory={inventory} activeLots={lotsInUse} labSettings={labSettings} onNavigate={setActivePage} onProfileUpdated={refreshAuthUser} />
         </div>
 
         <main className="flex-1 overflow-y-auto p-8 print:overflow-visible print:p-0">
@@ -472,10 +497,11 @@ export default function DashboardPage() {
                         ? "No activity has been logged in the lab yet."
                         : "No recent activity logged by you yet."
 
-                      // Bottom analytics widget — managers always get Recent Expenses; techs use the saved setting
-                      const bottomWidget: TechDashboardWidget = userRole === "manager"
-                        ? "expenses"
-                        : labSettings.techDashboardWidget
+                      // Bottom analytics widget — both roles render whichever widget the
+                      // Manager has selected in Lab Settings (saved on `labSettings.techDashboardWidget`).
+                      // Edits made in the Settings tab flow back here via `refreshData()` → `setLabSettings`,
+                      // so the Manager sees their change instantly without a page refresh.
+                      const bottomWidget: TechDashboardWidget = labSettings.techDashboardWidget
 
                       return (
                         <div className="space-y-8">
@@ -604,9 +630,9 @@ export default function DashboardPage() {
                   <div className="flex gap-8 items-start print:block">
                     <div className="flex-1 min-w-0 print:w-full">
                       {activePage === "inventory" && <InventoryTab inventory={inventory} sortedFlatInventory={sortedFlatInventory} labSettings={labSettings} refreshData={refreshData} userRole={userRole} requests={requests} />}
-                      {activePage === "lotinuse" && <LotInUseTab activeLots={filteredLotsInUse} inventory={inventory} refreshData={refreshData} userRole={userRole} labSettings={labSettings} />}
+                      {activePage === "lotinuse" && <LotInUseTab activeLots={filteredLotsInUse} inventory={inventory} refreshData={refreshData} userRole={userRole} labSettings={labSettings} currentUserName={currentUserName} />}
                       {activePage === "requests" && <RequestsTab requests={filteredRequests} refreshRequests={refreshData} userRole={userRole} />}
-                      {activePage === "activitylog" && <ActivityLogTab logs={filteredLogs} currentUserName={currentUserName} currentUserRole={userRole} />}
+                      {activePage === "activitylog" && <ActivityLogTab logs={filteredLogs} currentUserName={currentUserName} currentUserRole={userRole} labSettings={labSettings} filterUser={logUserFilter} filterAction={actionFilter} filterDateStart={logDateStart} filterDateEnd={logDateEnd} />}
                     </div>
                     
                     <aside className="w-72 shrink-0 space-y-8 print:hidden">
