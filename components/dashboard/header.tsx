@@ -3,9 +3,10 @@
 import { useState, useRef, useEffect, useMemo } from "react"
 import { useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
+import Link from "next/link"
 import {
   Bell, Search, XCircle, Timer, PackageSearch, Package, FlaskConical,
-  ChevronRight, ChevronDown, UserCog, LogOut, Sun, Moon, Monitor, Palette,
+  ChevronRight, ChevronDown, UserCog, LogOut, Sun, Moon, Monitor, Palette, Check,
 } from "lucide-react"
 import {
   DashboardStats, InventoryGroup, LotInUseEntry, LabSettings, SidebarPage,
@@ -18,8 +19,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
@@ -64,7 +63,7 @@ const CATEGORY_META: Record<AlertCategory, { icon: typeof XCircle; color: string
 const MAX_NOTIFICATIONS = 12
 
 export function DashboardHeader({
-  user, role, stats, inventory = [], activeLots = [],
+  user, role, stats, inventory = [], activeLots =[],
   labSettings, onNavigate, onProfileUpdated,
 }: DashboardHeaderProps) {
   const router = useRouter()
@@ -79,12 +78,12 @@ export function DashboardHeader({
 
   // ── THEME (light / dark / system, OS-synced by default) ──
   const { theme, setTheme, resolvedTheme } = useTheme()
-  const [themeMounted, setThemeMounted] = useState(false)
-  useEffect(() => { setThemeMounted(true) }, [])
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) },[])
   // Until mounted, next-themes returns undefined — fall back to "system" to avoid hydration flicker.
-  const activeTheme = themeMounted ? (theme ?? "system") : "system"
+  const activeTheme = mounted ? (theme ?? "system") : "system"
   const ThemeIcon =
-    !themeMounted
+    !mounted
       ? Palette
       : activeTheme === "system"
         ? Monitor
@@ -111,7 +110,7 @@ export function DashboardHeader({
 
   // ── SEARCH STATE ──
   const [searchQuery, setSearchQuery] = useState("")
-  const [searchFocused, setSearchFocused] = useState(false)
+  const[searchFocused, setSearchFocused] = useState(false)
   const searchRef = useRef<HTMLDivElement>(null)
 
   // ── BELL STATE ──
@@ -131,11 +130,11 @@ export function DashboardHeader({
     }
     document.addEventListener("mousedown", handler)
     return () => document.removeEventListener("mousedown", handler)
-  }, [])
+  },[])
 
   // ── GENERATE SPECIFIC NOTIFICATIONS ──
   const notifications: NotificationItem[] = useMemo(() => {
-    const items: NotificationItem[] = []
+    const items: NotificationItem[] =[]
 
     for (const group of inventory) {
       let groupTotalUnits = 0
@@ -222,7 +221,7 @@ export function DashboardHeader({
   const q = searchQuery.toLowerCase().trim()
 
   const searchResults: SearchResult[] = q.length < 2 ? [] : (() => {
-    const results: SearchResult[] = []
+    const results: SearchResult[] =[]
 
     for (const group of inventory) {
       for (const lot of group.lots) {
@@ -267,9 +266,19 @@ export function DashboardHeader({
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-background/95 px-8 backdrop-blur supports-[backdrop-filter]:bg-background/60 print:hidden">
 
-      {/* ── LEFT SIDE: TITLE ── */}
+      {/* ── LEFT SIDE: TITLE & FEEDBACK BUTTON ── */}
       <div className="flex items-center gap-4">
         <h1 className="text-xl font-black text-foreground tracking-tight">BuddyLab Workspace</h1>
+        
+        <Link 
+          href="/dashboard/feedback" 
+          target="_blank" 
+          rel="noopener noreferrer"
+          className="ml-4 inline-flex items-center gap-2 bg-muted border border-border px-4 py-1.5 rounded-lg shadow-sm hover:bg-muted/80 text-xs font-bold transition-colors text-muted-foreground hover:text-foreground"
+        >
+          <span>🐞</span>
+          <span>Submit Feedback / Report Bug</span>
+        </Link>
       </div>
 
       {/* ── RIGHT SIDE: SEARCH, ALERTS, PROFILE ── */}
@@ -403,7 +412,7 @@ export function DashboardHeader({
           <DropdownMenuContent
             align="end"
             sideOffset={10}
-            className="w-60 rounded-xl border-border bg-card shadow-xl p-1.5"
+            className="w-60 overflow-visible rounded-xl border-border bg-card shadow-xl p-1.5"
           >
             <DropdownMenuLabel className="px-2.5 pb-2 pt-1.5">
               <p className="text-sm font-black text-foreground capitalize leading-tight truncate">
@@ -440,42 +449,65 @@ export function DashboardHeader({
                 <ThemeIcon className="size-4" />
                 <span className="flex-1">Appearance</span>
                 <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground capitalize">
-                  {themeMounted ? activeTheme : ""}
+                  {mounted ? activeTheme : ""}
                 </span>
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent
                 sideOffset={6}
-                className="w-48 rounded-xl border-border bg-card shadow-xl p-1.5"
+                className="z-[100] w-48 rounded-xl border-border bg-card shadow-xl p-1.5"
               >
                 <DropdownMenuLabel className="px-2 pb-1 pt-0.5 text-[10px] font-black uppercase tracking-widest text-muted-foreground">
                   Theme
                 </DropdownMenuLabel>
-                <DropdownMenuRadioGroup
-                  value={activeTheme}
-                  onValueChange={(v) => setTheme(v)}
-                >
-                  <DropdownMenuRadioItem
-                    value="light"
-                    className="gap-2.5 pl-8 pr-2 py-2 rounded-lg cursor-pointer text-sm font-bold focus:bg-muted"
-                  >
-                    <Sun className="size-4" />
-                    Light
-                  </DropdownMenuRadioItem>
-                  <DropdownMenuRadioItem
-                    value="dark"
-                    className="gap-2.5 pl-8 pr-2 py-2 rounded-lg cursor-pointer text-sm font-bold focus:bg-muted"
-                  >
-                    <Moon className="size-4" />
-                    Dark
-                  </DropdownMenuRadioItem>
-                  <DropdownMenuRadioItem
-                    value="system"
-                    className="gap-2.5 pl-8 pr-2 py-2 rounded-lg cursor-pointer text-sm font-bold focus:bg-muted"
-                  >
-                    <Monitor className="size-4" />
-                    System
-                  </DropdownMenuRadioItem>
-                </DropdownMenuRadioGroup>
+                {mounted ? (
+                  <>
+                    <DropdownMenuItem
+                      onClick={() => setTheme("light")}
+                      onSelect={() => setTheme("light")}
+                      className={`gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer text-sm font-bold focus:bg-muted ${
+                        activeTheme === "light" ? "bg-muted text-foreground" : ""
+                      }`}
+                    >
+                      <Sun className="size-4" />
+                      <span className="flex-1">Light</span>
+                      {activeTheme === "light" ? (
+                        <Check className="size-4 text-primary" aria-hidden />
+                      ) : (
+                        <span className="size-4 shrink-0" aria-hidden />
+                      )}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => setTheme("dark")}
+                      onSelect={() => setTheme("dark")}
+                      className={`gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer text-sm font-bold focus:bg-muted ${
+                        activeTheme === "dark" ? "bg-muted text-foreground" : ""
+                      }`}
+                    >
+                      <Moon className="size-4" />
+                      <span className="flex-1">Dark</span>
+                      {activeTheme === "dark" ? (
+                        <Check className="size-4 text-primary" aria-hidden />
+                      ) : (
+                        <span className="size-4 shrink-0" aria-hidden />
+                      )}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => setTheme("system")}
+                      onSelect={() => setTheme("system")}
+                      className={`gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer text-sm font-bold focus:bg-muted ${
+                        activeTheme === "system" ? "bg-muted text-foreground" : ""
+                      }`}
+                    >
+                      <Monitor className="size-4" />
+                      <span className="flex-1">System</span>
+                      {activeTheme === "system" ? (
+                        <Check className="size-4 text-primary" aria-hidden />
+                      ) : (
+                        <span className="size-4 shrink-0" aria-hidden />
+                      )}
+                    </DropdownMenuItem>
+                  </>
+                ) : null}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
 
