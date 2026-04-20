@@ -194,6 +194,17 @@ function DashboardWidgetPanel({ widget, healthData, totalLots, wasteData, expens
   return null
 }
 
+/** Map DB profile.role to dashboard UI role and super-admin nav visibility. */
+function dashboardRoleFromProfile(role: string | null | undefined): {
+  uiRole: "manager" | "technician"
+  isSuperAdmin: boolean
+} {
+  if (role === "super_admin") return { uiRole: "technician", isSuperAdmin: true }
+  if (role === "manager") return { uiRole: "manager", isSuperAdmin: false }
+  if (role === "technician") return { uiRole: "technician", isSuperAdmin: false }
+  return { uiRole: "technician", isSuperAdmin: false }
+}
+
 export default function DashboardPage() {
   const router = useRouter()
   
@@ -201,6 +212,7 @@ export default function DashboardPage() {
   const [activePage, setActivePage] = useState<SidebarPage>("dashboard")
   const [user, setUser] = useState<any>(null)
   const [userRole, setUserRole] = useState<"manager" | "technician">("technician")
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false)
   
   const [inventory, setInventory] = useState<InventoryGroup[]>([])
   const [requests, setRequests] = useState<ReorderRequest[]>([])
@@ -238,7 +250,12 @@ export default function DashboardPage() {
         .eq("id", data.user.id)
         .single()
       if (profile?.role) {
-        setUserRole(profile.role as "manager" | "technician")
+        const { uiRole, isSuperAdmin: sa } = dashboardRoleFromProfile(profile.role)
+        setUserRole(uiRole)
+        setIsSuperAdmin(sa)
+      } else {
+        setUserRole("technician")
+        setIsSuperAdmin(false)
       }
       if (profile?.full_name) {
         setProfileFullName(profile.full_name)
@@ -303,7 +320,7 @@ export default function DashboardPage() {
         
         const { data: profile } = await supabase
           .from('profiles')
-          .select('role, full_name')
+          .select('role, full_name, lab_id')
           .eq('id', session.user.id)
           .single()
 
@@ -311,22 +328,25 @@ export default function DashboardPage() {
           setProfileFullName(profile.full_name)
         }
 
-        if (profile?.role) {
-          setUserRole(profile.role as "manager" | "technician")
-        } else {
-          // No profile row yet — bootstrap one from auth metadata
-          const metaRole = (session.user.user_metadata?.role === "manager")
-            ? "manager"
-            : "technician"
+        // Super admins have no lab_id and should bypass archived-lab enforcement.
+        if (profile?.lab_id) {
+          const { data: lab } = await supabase
+            .from("labs")
+            .select("is_archived")
+            .eq("id", profile.lab_id)
+            .single()
 
-          await supabase.from("profiles").upsert({
-            id: session.user.id,
-            role: metaRole,
-            full_name: session.user.user_metadata?.full_name ?? "",
-          })
-
-          setUserRole(metaRole)
+          if (lab?.is_archived) {
+            await supabase.auth.signOut()
+            router.push(`/login?error=${encodeURIComponent("Your lab has been archived. Please contact support.")}`)
+            setLoading(false)
+            return
+          }
         }
+
+        const { uiRole, isSuperAdmin: sa } = dashboardRoleFromProfile(profile?.role)
+        setUserRole(uiRole)
+        setIsSuperAdmin(sa)
 
         await refreshData()
         setLoading(false)
@@ -446,7 +466,11 @@ export default function DashboardPage() {
   return (
     <div className="flex h-screen bg-background overflow-hidden print:h-auto print:block print:bg-white">
       <div className="print:hidden">
-        <DashboardSidebar activePage={activePage} setActivePage={setActivePage} />
+        <DashboardSidebar
+          activePage={activePage}
+          setActivePage={setActivePage}
+          showSuperAdminLink={isSuperAdmin}
+        />
       </div>
 
       <div className="flex flex-1 flex-col pl-64 print:pl-0 print:block">

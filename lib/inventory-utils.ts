@@ -271,11 +271,38 @@ export const fetchLabSettings = async (): Promise<LabSettings> => {
   const d = LAB_SETTINGS_DEFAULTS
 
   try {
-    // First attempt: full select including tech_dashboard_widget
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+
+    if (!session?.user?.id) return d
+
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("role, lab_id")
+      .eq("id", session.user.id)
+      .maybeSingle()
+
+    if (profileError) {
+      console.error("[fetchLabSettings] Failed to load profile - using defaults.", {
+        message: profileError?.message,
+        details: profileError?.details,
+        hint: profileError?.hint,
+        code: profileError?.code,
+      })
+      return d
+    }
+
+    const isSuperAdmin = profile?.role === "super_admin"
+    const labId = profile?.lab_id
+
+    // super_admin users intentionally have no tenant context
+    if (isSuperAdmin || !labId) return d
+
     const { data, error } = await supabase
       .from("lab_settings")
       .select("low_stock_threshold, expiring_soon_days, urgent_days, lab_timezone, tech_dashboard_widget")
-      .eq("id", 1)
+      .eq("lab_id", labId)
       .maybeSingle()
 
     if (error) {
@@ -291,7 +318,7 @@ export const fetchLabSettings = async (): Promise<LabSettings> => {
       const legacy = await supabase
         .from("lab_settings")
         .select("low_stock_threshold, expiring_soon_days, urgent_days, lab_timezone")
-        .eq("id", 1)
+        .eq("lab_id", labId)
         .maybeSingle()
 
       if (legacy.error) {
@@ -685,10 +712,42 @@ export interface LabProfile {
   role: "manager" | "technician"
 }
 
+const resolveCurrentUserLabId = async (): Promise<string | null> => {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+
+  if (!session?.user?.id) return null
+
+  const { data: profile, error } = await supabase
+    .from("profiles")
+    .select("role, lab_id")
+    .eq("id", session.user.id)
+    .maybeSingle()
+
+  if (error) {
+    console.error("[resolveCurrentUserLabId] Failed to load profile:", {
+      message: error?.message,
+      details: error?.details,
+      hint: error?.hint,
+      code: error?.code,
+    })
+    return null
+  }
+
+  // super_admin has no tenant context and must not be scoped to a lab
+  if (profile?.role === "super_admin") return null
+  return profile?.lab_id ?? null
+}
+
 export const fetchLabProfiles = async (): Promise<LabProfile[]> => {
+  const labId = await resolveCurrentUserLabId()
+  if (!labId) return []
+
   const { data, error } = await supabase
     .from("profiles")
     .select("id, full_name, email, role")
+    .eq("lab_id", labId)
     .order("full_name", { ascending: true })
 
   if (error) {
@@ -701,22 +760,56 @@ export const fetchLabProfiles = async (): Promise<LabProfile[]> => {
     return []
   }
 
-  return (data || []).map((p: any) => ({
-    id: p.id,
-    fullName: p.full_name || "",
-    email: p.email || "",
-    role: (p.role === "manager" ? "manager" : "technician") as "manager" | "technician",
-  }))
+  return (data || [])
+    .filter((p: any) => p.role !== "super_admin")
+    .map((p: any) => ({
+      id: p.id,
+      fullName: p.full_name || "",
+      email: p.email || "",
+      role: (p.role === "manager" ? "manager" : "technician") as "manager" | "technician",
+    }))
 }
 
 export const updateUserRole = async (
   userId: string,
   newRole: "manager" | "technician"
 ): Promise<{ success: boolean; error?: string }> => {
+  if ((newRole as string) === "super_admin") {
+    return { success: false, error: "Cannot assign the super_admin role." }
+  }
+
+  const labId = await resolveCurrentUserLabId()
+  if (!labId) {
+    return { success: false, error: "Could not resolve current lab context." }
+  }
+
+  const { data: existing, error: fetchError } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", userId)
+    .eq("lab_id", labId)
+    .maybeSingle()
+
+  if (fetchError) {
+    console.error("[updateUserRole] Failed to read profile:", {
+      message: fetchError?.message,
+      details: fetchError?.details,
+      code: fetchError?.code,
+    })
+    return { success: false, error: fetchError.message }
+  }
+  if (!existing) {
+    return { success: false, error: "User not found." }
+  }
+  if (existing.role === "super_admin") {
+    return { success: false, error: "Cannot modify a super administrator." }
+  }
+
   const { error } = await supabase
     .from("profiles")
     .update({ role: newRole })
     .eq("id", userId)
+    .eq("lab_id", labId)
 
   if (error) {
     console.error("[updateUserRole] Failed:", {

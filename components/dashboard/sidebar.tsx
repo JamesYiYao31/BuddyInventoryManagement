@@ -1,16 +1,29 @@
 "use client"
 
+import Link from "next/link"
 import { cn } from "@/lib/utils"
-import { LayoutDashboard, Package, ClipboardList, Settings, PackageOpen, Activity, BarChart3, Network } from "lucide-react"
+import {
+  LayoutDashboard,
+  Package,
+  ClipboardList,
+  Settings,
+  PackageOpen,
+  Activity,
+  BarChart3,
+  Network,
+  Shield,
+} from "lucide-react"
 import { SidebarPage } from "@/lib/inventory-utils"
 import Image from "next/image"
 
 interface DashboardSidebarProps {
   activePage: SidebarPage
   setActivePage: (page: SidebarPage) => void
+  /** When true, show internal link to the super-admin control panel (never for manager/technician). */
+  showSuperAdminLink?: boolean
 }
 
-export function DashboardSidebar({ activePage, setActivePage }: DashboardSidebarProps) {
+export function DashboardSidebar({ activePage, setActivePage, showSuperAdminLink = false }: DashboardSidebarProps) {
   const navItems = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "inventory", label: "Inventory", icon: Package },
@@ -43,6 +56,22 @@ export function DashboardSidebar({ activePage, setActivePage }: DashboardSidebar
             {item.label}
           </button>
         ))}
+
+        {showSuperAdminLink ? (
+          <>
+            <div className="my-2 border-t border-border" aria-hidden />
+            <Link
+              href="/super-admin"
+              className={cn(
+                "flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-bold transition-all",
+                "text-muted-foreground hover:bg-muted hover:text-foreground"
+              )}
+            >
+              <Shield className="h-5 w-5 shrink-0" />
+              Admin Panel
+            </Link>
+          </>
+        ) : null}
       </nav>
       <div className="p-4 border-t border-border">
         <div className="rounded-2xl bg-muted/50 p-4">
