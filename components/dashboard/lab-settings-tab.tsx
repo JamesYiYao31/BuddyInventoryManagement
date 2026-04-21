@@ -6,6 +6,7 @@ import {
   LabSettings, TechDashboardWidget, fetchLabSettings, updateLabSettings,
   LabProfile, fetchLabProfiles, updateUserRole,
 } from "@/lib/inventory-utils"
+import { supabase } from "@/lib/supabase"
 import { useToast } from "@/hooks/use-toast"
 
 interface LabSettingsTabProps {
@@ -51,6 +52,26 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
     if (userRole !== "manager") return
     const target = profiles.find(p => p.id === userId)
     if (target && target.role === newRole) return
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (user?.id === userId) {
+      toast({
+        variant: "destructive",
+        title: "Cannot change role",
+        description: "You cannot change your own role.",
+      })
+      return
+    }
+    if (target?.isOwner) {
+      toast({
+        variant: "destructive",
+        title: "Cannot change role",
+        description: "The lab owner's role cannot be changed.",
+      })
+      return
+    }
 
     setUpdatingUserId(userId)
     const result = await updateUserRole(userId, newRole)

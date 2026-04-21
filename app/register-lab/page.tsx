@@ -25,7 +25,6 @@ function RegisterLabContent() {
   const [managerEmail, setManagerEmail] = useState("")
   const [managerPassword, setManagerPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
-  const [managerKey, setManagerKey] = useState("")
   const [techKey, setTechKey] = useState("")
 
   const [submitting, setSubmitting] = useState(false)
@@ -33,7 +32,6 @@ function RegisterLabContent() {
   const [successWarning, setSuccessWarning] = useState<string | null>(null)
 
   const [generalError, setGeneralError] = useState<string | null>(null)
-  const [managerKeyError, setManagerKeyError] = useState<string | null>(null)
   const [techKeyError, setTechKeyError] = useState<string | null>(null)
   const [emailError, setEmailError] = useState<string | null>(null)
 
@@ -75,7 +73,6 @@ function RegisterLabContent() {
 
   const clearFieldErrors = useCallback(() => {
     setGeneralError(null)
-    setManagerKeyError(null)
     setTechKeyError(null)
     setEmailError(null)
   }, [])
@@ -98,10 +95,9 @@ function RegisterLabContent() {
     const email = managerEmail.trim()
     const pass = managerPassword
     const confirm = confirmPassword
-    const mk = managerKey.trim()
     const tk = techKey.trim()
 
-    if (!name || !fullName || !email || !pass || !confirm || !mk || !tk) {
+    if (!name || !fullName || !email || !pass || !confirm || !tk) {
       setGeneralError("Please fill in all fields.")
       return
     }
@@ -111,21 +107,9 @@ function RegisterLabContent() {
       return
     }
 
-    if (mk === tk) {
-      setGeneralError("Manager Registration Code and Technician Registration Code must be different.")
-      return
-    }
-
     setSubmitting(true)
 
     try {
-      const { data: mgrDup } = await supabase.from("labs").select("id").eq("manager_key", mk).maybeSingle()
-      if (mgrDup) {
-        setManagerKeyError("This Manager Code is already taken, please choose another")
-        setSubmitting(false)
-        return
-      }
-
       const { data: techDup } = await supabase.from("labs").select("id").eq("tech_key", tk).maybeSingle()
       if (techDup) {
         setTechKeyError("This Technician Code is already taken, please choose another")
@@ -137,7 +121,6 @@ function RegisterLabContent() {
         .from("labs")
         .insert({
           name,
-          manager_key: mk,
           tech_key: tk,
         })
         .select("id")
@@ -146,12 +129,10 @@ function RegisterLabContent() {
       if (labErr || !newLab?.id) {
         const msg = labErr?.message || "Could not create lab."
         if (labErr?.code === "23505" || msg.toLowerCase().includes("unique")) {
-          if (msg.toLowerCase().includes("manager") || msg.toLowerCase().includes("manager_key")) {
-            setManagerKeyError("This Manager Code is already taken, please choose another")
-          } else if (msg.toLowerCase().includes("tech") || msg.toLowerCase().includes("tech_key")) {
+          if (msg.toLowerCase().includes("tech") || msg.toLowerCase().includes("tech_key")) {
             setTechKeyError("This Technician Code is already taken, please choose another")
           } else {
-            setGeneralError("A registration code is already in use. Please choose different codes.")
+            setGeneralError("A registration code is already in use. Please choose a different technician code.")
           }
         } else {
           setGeneralError(msg)
@@ -192,12 +173,12 @@ function RegisterLabContent() {
       }
 
       const userId = authData.user?.id
-      if (!userId) {
-        await deleteLabById(labId)
-        setGeneralError("Registration did not return a user id. Please try again or contact support.")
-        setSubmitting(false)
-        return
-      }
+if (!userId) {
+  await deleteLabById(labId)
+  setGeneralError("Registration did not return a user id. Please try again or contact support.")
+  setSubmitting(false)
+  return
+}
 
       const { error: profileErr } = await supabase
         .from("profiles")
@@ -220,14 +201,14 @@ function RegisterLabContent() {
         return
       }
 
-      const { error: inviteErr } = await supabase
-        .from("lab_invites")
-        .update({
-          used: true,
-          used_at: new Date().toISOString(),
-        })
-        .eq("token", token)
-        .eq("used", false)
+      const { error: inviteErr, data: inviteData } = await supabase
+  .from("lab_invites")
+  .update({
+    used: true,
+    used_at: new Date().toISOString(),
+  })
+  .eq("token", token)
+  .select() // ← add this
 
       if (inviteErr) {
         setSuccessWarning(
@@ -405,31 +386,6 @@ function RegisterLabContent() {
           </div>
 
           <div className="space-y-2">
-            <label htmlFor="reg-manager-key" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">
-              Manager Registration Code
-            </label>
-            <input
-              id="reg-manager-key"
-              type="text"
-              value={managerKey}
-              onChange={(e) => {
-                setManagerKey(e.target.value)
-                setManagerKeyError(null)
-              }}
-              autoComplete="off"
-              className="w-full h-12 border border-input bg-background rounded-xl px-4 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20"
-            />
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              This code must be unique across every lab. Managers use it when they join your lab.
-            </p>
-            {managerKeyError ? (
-              <p role="alert" className="text-xs font-medium text-destructive">
-                {managerKeyError}
-              </p>
-            ) : null}
-          </div>
-
-          <div className="space-y-2">
             <label htmlFor="reg-tech-key" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">
               Technician Registration Code
             </label>
@@ -445,7 +401,7 @@ function RegisterLabContent() {
               className="w-full h-12 border border-input bg-background rounded-xl px-4 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20"
             />
             <p className="text-xs text-muted-foreground leading-relaxed">
-              This code must be unique across every lab and different from the manager code. Technicians use it when they join.
+              This code must be unique across every lab. Technicians use it when they join.
             </p>
             {techKeyError ? (
               <p role="alert" className="text-xs font-medium text-destructive">

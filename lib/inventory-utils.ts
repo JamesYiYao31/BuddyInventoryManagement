@@ -710,6 +710,7 @@ export interface LabProfile {
   fullName: string
   email: string
   role: "manager" | "technician"
+  isOwner: boolean
 }
 
 const resolveCurrentUserLabId = async (): Promise<string | null> => {
@@ -744,6 +745,23 @@ export const fetchLabProfiles = async (): Promise<LabProfile[]> => {
   const labId = await resolveCurrentUserLabId()
   if (!labId) return []
 
+  const { data: labRow, error: labError } = await supabase
+    .from("labs")
+    .select("owner_id")
+    .eq("id", labId)
+    .maybeSingle()
+
+  if (labError) {
+    console.error("[fetchLabProfiles] Failed to load lab owner:", {
+      message: labError?.message,
+      details: labError?.details,
+      hint: labError?.hint,
+      code: labError?.code,
+    })
+  }
+
+  const ownerId: string | null = labRow?.owner_id ?? null
+
   const { data, error } = await supabase
     .from("profiles")
     .select("id, full_name, email, role")
@@ -767,6 +785,7 @@ export const fetchLabProfiles = async (): Promise<LabProfile[]> => {
       fullName: p.full_name || "",
       email: p.email || "",
       role: (p.role === "manager" ? "manager" : "technician") as "manager" | "technician",
+      isOwner: Boolean(ownerId && p.id === ownerId),
     }))
 }
 
@@ -783,6 +802,25 @@ export const updateUserRole = async (
     return { success: false, error: "Could not resolve current lab context." }
   }
 
+  const { data: labRow, error: labFetchError } = await supabase
+    .from("labs")
+    .select("owner_id")
+    .eq("id", labId)
+    .maybeSingle()
+
+  if (labFetchError) {
+    console.error("[updateUserRole] Failed to read lab:", {
+      message: labFetchError?.message,
+      details: labFetchError?.details,
+      hint: labFetchError?.hint,
+      code: labFetchError?.code,
+    })
+    return { success: false, error: labFetchError.message }
+  }
+  if (labRow?.owner_id && userId === labRow.owner_id) {
+    return { success: false, error: "Cannot change the lab owner's role." }
+  }
+
   const { data: existing, error: fetchError } = await supabase
     .from("profiles")
     .select("role")
@@ -794,6 +832,7 @@ export const updateUserRole = async (
     console.error("[updateUserRole] Failed to read profile:", {
       message: fetchError?.message,
       details: fetchError?.details,
+      hint: fetchError?.hint,
       code: fetchError?.code,
     })
     return { success: false, error: fetchError.message }

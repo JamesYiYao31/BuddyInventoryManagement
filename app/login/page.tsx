@@ -1,24 +1,20 @@
 "use client"
 
 import { Suspense, useMemo, useState } from "react"
-import { Loader2, ShieldCheck, UserCircle, Key } from "lucide-react"
+import { Loader2, Key } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { useRouter, useSearchParams } from "next/navigation"
 import Image from "next/image"
-
-type RegistrationKind = "manager" | "technician"
 
 function LoginContent() {
   const searchParams = useSearchParams()
   const urlError = useMemo(() => searchParams.get("error")?.trim() || null, [searchParams])
 
   const [isRegistering, setIsRegistering] = useState(false)
-  const [registrationKind, setRegistrationKind] = useState<RegistrationKind>("technician")
 
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [fullName, setFullName] = useState("")
-  const [managerCode, setManagerCode] = useState("")
   const [techKey, setTechKey] = useState("")
 
   const [isLoading, setIsLoading] = useState(false)
@@ -55,51 +51,27 @@ function LoginContent() {
       return
     }
 
-    let labId: string
-
-    if (registrationKind === "manager") {
-      const key = managerCode.trim()
-      if (!key) {
-        setError("Please enter your Manager Registration Code.")
-        setIsLoading(false)
-        return
-      }
-
-      const { data: lab, error: labErr } = await supabase
-        .from("labs")
-        .select("id")
-        .eq("manager_key", key)
-        .maybeSingle()
-
-      if (labErr || !lab?.id) {
-        setError("Invalid Manager Code")
-        setIsLoading(false)
-        return
-      }
-      labId = lab.id
-    } else {
-      const key = techKey.trim()
-      if (!key) {
-        setError("Please enter your Technician Registration Code.")
-        setIsLoading(false)
-        return
-      }
-
-      const { data: lab, error: labErr } = await supabase
-        .from("labs")
-        .select("id")
-        .eq("tech_key", key)
-        .maybeSingle()
-
-      if (labErr || !lab?.id) {
-        setError("Invalid Tech Code")
-        setIsLoading(false)
-        return
-      }
-      labId = lab.id
+    const key = techKey.trim()
+    if (!key) {
+      setError("Please enter your Technician Registration Code.")
+      setIsLoading(false)
+      return
     }
 
-    const role = registrationKind === "manager" ? "manager" : "technician"
+    const { data: lab, error: labErr } = await supabase
+      .from("labs")
+      .select("id")
+      .eq("tech_key", key)
+      .maybeSingle()
+
+    if (labErr || !lab?.id) {
+      setError("Invalid Tech Code")
+      setIsLoading(false)
+      return
+    }
+
+    const labId = lab.id
+    const role = "technician" as const
 
     const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
       email: em,
@@ -145,7 +117,6 @@ function LoginContent() {
     setIsRegistering(false)
     setFullName("")
     setPassword("")
-    setManagerCode("")
     setTechKey("")
     setIsLoading(false)
   }
@@ -201,10 +172,10 @@ function LoginContent() {
               <div className="flex flex-col items-center text-center">
                 <Image src="/buddy-logo.png" alt="Logo" width={64} height={64} className="h-16 w-auto mb-8 drop-shadow-md" priority />
                 <h1 className="text-4xl font-black tracking-tight text-foreground">
-                  {isRegistering ? "Account Registration" : "Oakwood Clinical Portal"}
+                  {isRegistering ? "Register" : "Oakwood Clinical Portal"}
                 </h1>
                 <p className="text-lg text-muted-foreground mt-2 font-medium">
-                  {isRegistering ? "Register your clinical credentials" : "Authorized Personnel Access Only"}
+                  {isRegistering ? "Create your technician account" : "Authorized Personnel Access Only"}
                 </p>
               </div>
 
@@ -221,31 +192,6 @@ function LoginContent() {
 
                 {isRegistering ? (
                   <div className="space-y-6 animate-in slide-in-from-top-4 duration-300">
-                    <div className="flex border border-border rounded-2xl overflow-hidden bg-muted/30 font-black uppercase tracking-widest text-[10px]">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setRegistrationKind("manager")
-                          setError(null)
-                        }}
-                        className={`flex-1 py-4 transition-all flex items-center justify-center gap-2 ${registrationKind === "manager" ? "bg-background text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-                      >
-                        <ShieldCheck className="size-5" />
-                        Manager registration
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setRegistrationKind("technician")
-                          setError(null)
-                        }}
-                        className={`flex-1 py-4 transition-all flex items-center justify-center gap-2 ${registrationKind === "technician" ? "bg-background text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-                      >
-                        <UserCircle className="size-5" />
-                        Technician registration
-                      </button>
-                    </div>
-
                     <div className="space-y-2">
                       <label className="text-[10px] font-black uppercase text-muted-foreground tracking-widest ml-2">Full Name</label>
                       <input
@@ -257,43 +203,23 @@ function LoginContent() {
                       />
                     </div>
 
-                    {registrationKind === "manager" ? (
-                      <div className="space-y-2 animate-in slide-in-from-top-2">
-                        <label className="text-[10px] font-black uppercase text-primary tracking-widest ml-2">Manager Registration Code</label>
-                        <div className="relative">
-                          <Key className="absolute left-5 top-5 size-6 text-primary" />
-                          <input
-                            type="password"
-                            value={managerCode}
-                            onChange={(e) => setManagerCode(e.target.value)}
-                            className="h-16 w-full rounded-2xl border-2 border-primary/30 bg-primary/5 pl-14 pr-6 text-xl font-black text-primary outline-none"
-                            placeholder="Enter your lab's manager code"
-                            autoComplete="off"
-                          />
-                        </div>
-                        <p className="text-xs text-muted-foreground ml-2 leading-relaxed">
-                          Use the Manager Registration Code your lab admin created for this workspace.
-                        </p>
+                    <div className="space-y-2 animate-in slide-in-from-top-2">
+                      <label className="text-[10px] font-black uppercase text-primary tracking-widest ml-2">Technician Registration Code</label>
+                      <div className="relative">
+                        <Key className="absolute left-5 top-5 size-6 text-primary" />
+                        <input
+                          type="password"
+                          value={techKey}
+                          onChange={(e) => setTechKey(e.target.value)}
+                          className="h-16 w-full rounded-2xl border-2 border-primary/30 bg-primary/5 pl-14 pr-6 text-xl font-black text-primary outline-none"
+                          placeholder="Enter your lab's technician code"
+                          autoComplete="off"
+                        />
                       </div>
-                    ) : (
-                      <div className="space-y-2 animate-in slide-in-from-top-2">
-                        <label className="text-[10px] font-black uppercase text-primary tracking-widest ml-2">Technician Registration Code</label>
-                        <div className="relative">
-                          <Key className="absolute left-5 top-5 size-6 text-primary" />
-                          <input
-                            type="password"
-                            value={techKey}
-                            onChange={(e) => setTechKey(e.target.value)}
-                            className="h-16 w-full rounded-2xl border-2 border-primary/30 bg-primary/5 pl-14 pr-6 text-xl font-black text-primary outline-none"
-                            placeholder="Enter your lab's technician code"
-                            autoComplete="off"
-                          />
-                        </div>
-                        <p className="text-xs text-muted-foreground ml-2 leading-relaxed">
-                          Use the Technician Registration Code your lab admin created for this workspace.
-                        </p>
-                      </div>
-                    )}
+                      <p className="text-xs text-muted-foreground ml-2 leading-relaxed">
+                        Use the Technician Registration Code your lab admin created for this workspace.
+                      </p>
+                    </div>
                   </div>
                 ) : null}
 
