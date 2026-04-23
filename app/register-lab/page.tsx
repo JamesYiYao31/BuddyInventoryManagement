@@ -32,6 +32,7 @@ function RegisterLabContent() {
   const [successWarning, setSuccessWarning] = useState<string | null>(null)
 
   const [generalError, setGeneralError] = useState<string | null>(null)
+  const [labNameError, setLabNameError] = useState<string | null>(null)
   const [techKeyError, setTechKeyError] = useState<string | null>(null)
   const [emailError, setEmailError] = useState<string | null>(null)
 
@@ -73,6 +74,7 @@ function RegisterLabContent() {
 
   const clearFieldErrors = useCallback(() => {
     setGeneralError(null)
+    setLabNameError(null)
     setTechKeyError(null)
     setEmailError(null)
   }, [])
@@ -129,7 +131,9 @@ function RegisterLabContent() {
       if (labErr || !newLab?.id) {
         const msg = labErr?.message || "Could not create lab."
         if (labErr?.code === "23505" || msg.toLowerCase().includes("unique")) {
-          if (msg.toLowerCase().includes("tech") || msg.toLowerCase().includes("tech_key")) {
+          if (labErr?.code === "23505" && msg.toLowerCase().includes("labs_name_unique_ci")) {
+            setLabNameError("A lab with this name already exists. Please choose a different name.")
+          } else if (msg.toLowerCase().includes("tech") || msg.toLowerCase().includes("tech_key")) {
             setTechKeyError("This Technician Code is already taken, please choose another")
           } else {
             setGeneralError("A registration code is already in use. Please choose a different technician code.")
@@ -142,6 +146,24 @@ function RegisterLabContent() {
       }
 
       const labId = newLab.id as string
+
+      const { error: inviteErr } = await supabase
+        .from("lab_invites")
+        .update({
+          used: true,
+          used_at: new Date().toISOString(),
+        })
+        .eq("token", token)
+        .select()
+
+      if (inviteErr) {
+        await deleteLabById(labId)
+        setGeneralError(
+          `The invite could not be marked as used: ${inviteErr.message}. Registration was cancelled. Please contact support with your email.`
+        )
+        setSubmitting(false)
+        return
+      }
 
       const { data: authData, error: signUpErr } = await supabase.auth.signUp({
         email,
@@ -198,25 +220,6 @@ if (!userId) {
             "Could not finish setting up your profile. Please contact support if this persists."
         )
         setSubmitting(false)
-        return
-      }
-
-      const { error: inviteErr, data: inviteData } = await supabase
-  .from("lab_invites")
-  .update({
-    used: true,
-    used_at: new Date().toISOString(),
-  })
-  .eq("token", token)
-  .select() // ← add this
-
-      if (inviteErr) {
-        setSuccessWarning(
-          `Your lab was created, but the invite could not be marked as used: ${inviteErr.message}. Please contact support with your email.`
-        )
-        setSuccess(true)
-        setSubmitting(false)
-        await supabase.auth.signOut()
         return
       }
 
@@ -316,9 +319,17 @@ if (!userId) {
               id="reg-lab-name"
               type="text"
               value={labName}
-              onChange={(e) => setLabName(e.target.value)}
+              onChange={(e) => {
+                setLabName(e.target.value)
+                setLabNameError(null)
+              }}
               className="w-full h-12 border border-input bg-background rounded-xl px-4 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20"
             />
+            {labNameError ? (
+              <p role="alert" className="text-xs font-medium text-destructive">
+                {labNameError}
+              </p>
+            ) : null}
           </div>
 
           <div className="space-y-2">

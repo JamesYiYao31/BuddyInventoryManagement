@@ -254,7 +254,7 @@ export default function SuperAdminPage() {
             </div>
             <div className="min-w-0">
               <h1 className="text-xl font-black tracking-tight truncate">Super Admin</h1>
-              <p className="text-xs text-muted-foreground truncate">Buddy Lab internal control panel</p>
+              <p className="text-xs text-muted-foreground truncate">Lab Inventory Management internal control panel</p>
             </div>
           </div>
           <button

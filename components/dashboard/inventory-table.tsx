@@ -10,7 +10,7 @@ import {
   LotEntry, daysUntilExpiry, emptyLotForm, getLabCurrentDateStr,
   logActivity, InventoryGroup, LabSettings, Item, ReorderRequest,
   parseSmartBarcode, fetchAllItems, lookupItemByVendorSku, createItem,
-  deleteInventoryLotInSupabase
+  deleteInventoryLotInSupabase, resolveCurrentUserLabId
 } from "@/lib/inventory-utils"
 import { useToast } from "@/hooks/use-toast"
 
@@ -145,6 +145,12 @@ export default function InventoryTab({
     if (!reorderLot || reorderQty < 1) return
     setReorderSaving(true)
 
+    const labId = await resolveCurrentUserLabId()
+    if (!labId) {
+      setReorderSaving(false)
+      return alert("Could not resolve lab context. Please refresh and try again.")
+    }
+
     const catalogItem = allItems.find(i => i.id === reorderLot.itemId)
     const vendor = catalogItem?.vendor || reorderLot.vendor || ""
     const dateRequested = getLabCurrentDateStr(labSettings.labTimezone)
@@ -152,6 +158,7 @@ export default function InventoryTab({
     const { error } = await supabase
       .from("requests")
       .insert([{
+        lab_id: labId,
         item_id: reorderLot.itemId,
         item_name: reorderLot.itemName,
         vendor,
@@ -327,7 +334,14 @@ export default function InventoryTab({
       finalItemName = created.name
     }
 
+    const labId = await resolveCurrentUserLabId()
+    if (!labId) {
+      setSaving(false)
+      return alert("Could not resolve lab context. Please refresh and try again.")
+    }
+
     const { error: lotError } = await supabase.from("inventory_lots").insert([{
+      lab_id: labId,
       item_id: finalItemId,
       lot_number: lotForm.lot.trim(),
       expiry_date: lotForm.expiry,

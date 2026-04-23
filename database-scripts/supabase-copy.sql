@@ -1,4 +1,4 @@
--- Buddy Lab Tracker - multi-tenant migration (full script)
+-- Lab Inventory Management - multi-tenant migration (full script)
 -- Clears and recreates public schema tables with lab isolation + RLS
 
 -- ---------------------------------------------------------------------------

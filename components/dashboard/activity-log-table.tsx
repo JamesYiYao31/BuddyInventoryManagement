@@ -17,6 +17,7 @@ import { ActivityLogEntry, ACTION_STYLES, LabSettings } from "@/lib/inventory-ut
 
 interface ActivityLogTabProps {
   logs: ActivityLogEntry[]
+  labName?: string
   currentUserName?: string
   currentUserRole?: "manager" | "technician"
   labSettings?: LabSettings
@@ -27,10 +28,10 @@ interface ActivityLogTabProps {
 }
 
 export default function ActivityLogTab({
-  logs, currentUserName, currentUserRole, labSettings,
+  logs, labName, currentUserName, currentUserRole, labSettings,
   filterUser, filterAction, filterDateStart, filterDateEnd,
 }: ActivityLogTabProps) {
-  const labName = labSettings?.labName || "BuddyLab Tracker"
+  const reportLabName = labName || labSettings?.labName || "My Lab"
   const printUserName = (currentUserName || "Unknown User").toUpperCase()
 
   const hasUserFilter = !!(filterUser && filterUser !== "all")
@@ -51,6 +52,7 @@ export default function ActivityLogTab({
 
   const groupedLogs = groupLogsByDate(logs)
   const sortedDates = Object.keys(groupedLogs).sort((a, b) => new Date(b).getTime() - new Date(a).getTime())
+  const printRows = sortedDates.flatMap((date) => groupedLogs[date].map((log) => ({ date, log })))
 
   const handlePrint = () => window.print()
 
@@ -97,7 +99,7 @@ export default function ActivityLogTab({
           <div className="flex justify-between items-start">
             <div>
               <h1 className="text-2xl font-black tracking-tight text-zinc-900">Activity Log Report</h1>
-              <p className="text-zinc-500 font-medium mt-1">{labName} | Clinical Laboratory Management</p>
+              <p className="text-zinc-500 font-medium mt-1">{reportLabName} | Clinical Laboratory Management</p>
             </div>
             <div className="text-right">
               <div className="text-lg font-black text-emerald-600">AUDIT TRAIL</div>
@@ -237,9 +239,9 @@ export default function ActivityLogTab({
             </thead>
 
             <tbody>
-              {logs.length > 0 ? (
-                sortedDates.flatMap((date) =>
-                  groupedLogs[date].map((log) => (
+              {printRows.length > 0 ? (
+                printRows.map(({ date, log }, idx) => (
+                  <>
                     <tr key={log.id} className="align-top print:border-b print:border-black">
                       <td className="text-left px-3 print:py-4 font-semibold text-black tabular-nums">{date}</td>
                       <td className="text-center px-3 print:py-4 tabular-nums text-zinc-700">{log.time}</td>
@@ -253,8 +255,15 @@ export default function ActivityLogTab({
                       </td>
                       <td className="text-left px-3 print:py-4 text-zinc-700">{log.details}</td>
                     </tr>
-                  ))
-                )
+                    {idx === printRows.length - 1 ? (
+                      <tr>
+                        <td colSpan={6} className="px-3 py-4 text-center text-zinc-900 font-black uppercase tracking-widest">
+                          End of Report
+                        </td>
+                      </tr>
+                    ) : null}
+                  </>
+                ))
               ) : (
                 <tr>
                   <td colSpan={6} className="px-3 py-6 text-center text-zinc-600">
@@ -270,12 +279,9 @@ export default function ActivityLogTab({
       {/* ── PRINT SIGNATURE FOOTER — fixed to bottom of every printed page ── */}
       {/* Notice this is now OUTSIDE of the animated container to prevent the browser from trapping it! */}
       <div className="hidden print:block print-footer-fixed" style={{ paddingLeft: "1cm", paddingRight: "1cm" }}>
-        <div className="border-t-2 border-zinc-900 pt-3 pb-2 flex justify-between items-end">
-          <p className="text-sm font-black text-zinc-900 uppercase tracking-widest">End of Report</p>
-          <div className="flex items-end gap-3">
-            <span className="text-xs font-bold text-zinc-700 uppercase tracking-widest">Reviewed by:</span>
-            <span className="inline-block border-b border-zinc-900 w-64 h-4" />
-          </div>
+        <div className="border-t-2 border-zinc-900 pt-3 pb-2 flex justify-end items-end">
+          <span className="text-xs font-bold text-zinc-700 uppercase tracking-widest mr-3">Reviewed by:</span>
+          <span className="inline-block border-b border-zinc-900 w-64 h-4" />
         </div>
       </div>
 

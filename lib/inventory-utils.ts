@@ -215,9 +215,13 @@ function formatGS1Date(yymmdd: string): string {
 // ── ITEMS TABLE HELPERS ──
 
 export const fetchAllItems = async (): Promise<Item[]> => {
+  const labId = await resolveCurrentUserLabId()
+  if (!labId) return []
+
   const { data, error } = await supabase
     .from("items")
     .select("id, name, vendor, vendor_sku")
+    .eq("lab_id", labId)
     .order("name", { ascending: true })
 
   if (error) {
@@ -229,9 +233,14 @@ export const fetchAllItems = async (): Promise<Item[]> => {
 
 export const lookupItemByVendorSku = async (sku: string): Promise<Item | null> => {
   if (!sku) return null
+
+  const labId = await resolveCurrentUserLabId()
+  if (!labId) return null
+
   const { data, error } = await supabase
     .from("items")
     .select("id, name, vendor, vendor_sku")
+    .eq("lab_id", labId)
     .eq("vendor_sku", sku)
     .maybeSingle()
 
@@ -264,7 +273,7 @@ export const LAB_SETTINGS_DEFAULTS: LabSettings = {
   urgentDays: 7,
   labTimezone: "America/Chicago",
   techDashboardWidget: "donut",
-  labName: "BuddyLab Tracker",
+  labName: "My Lab",
 }
 
 export const fetchLabSettings = async (): Promise<LabSettings> => {
@@ -365,6 +374,12 @@ export const fetchLabSettings = async (): Promise<LabSettings> => {
 export const updateLabSettings = async (
   settings: LabSettings
 ): Promise<{ success: boolean; error?: string }> => {
+  const labId = await resolveCurrentUserLabId()
+  if (!labId) {
+    console.error("[updateLabSettings] No lab context — aborting.")
+    return { success: false, error: "No lab context." }
+  }
+
   const { error } = await supabase
     .from("lab_settings")
     .update({
@@ -373,7 +388,7 @@ export const updateLabSettings = async (
       urgent_days: settings.urgentDays,
       tech_dashboard_widget: settings.techDashboardWidget,
     })
-    .eq("id", 1)
+    .eq("lab_id", labId)
 
   if (error) {
     console.error("[updateLabSettings] Failed — retrying without tech_dashboard_widget.", {
@@ -392,7 +407,7 @@ export const updateLabSettings = async (
         expiring_soon_days: settings.expiringSoonDays,
         urgent_days: settings.urgentDays,
       })
-      .eq("id", 1)
+      .eq("lab_id", labId)
 
     if (retry.error) {
       console.error("[updateLabSettings] Legacy retry failed.", {
@@ -411,7 +426,12 @@ export const createItem = async (
   vendor?: string,
   vendorSku?: string
 ): Promise<Item | null> => {
-  const row: Record<string, string> = { name }
+  const labId = await resolveCurrentUserLabId()
+  if (!labId) {
+    console.error("createItem: No lab context.")
+    return null
+  }
+  const row: Record<string, string> = { name, lab_id: labId }
   if (vendor) row.vendor = vendor
   if (vendorSku) row.vendor_sku = vendorSku
 
@@ -537,11 +557,16 @@ export const CATALOG_DB: Record<string, { name: string; vendor: string; price: n
   "CAT-99887": { name: "FACS Clean", vendor: "BD Biosciences", price: 85.0 },
 }
 
-export const createRequestInSupabase = async (input: RequestMutationInput) => {
-  return supabase
+export const createRequestInSupabase = async (
+  input: RequestMutationInput
+): Promise<{ error: any }> => {
+  const labId = await resolveCurrentUserLabId()
+  if (!labId) return { error: "No lab context." }
+  const { error } = await supabase
     .from("requests")
     .insert([
       {
+        lab_id: labId,
         catalog_number: input.catalogNumber,
         item_name: input.itemName,
         vendor: input.vendor,
@@ -552,9 +577,12 @@ export const createRequestInSupabase = async (input: RequestMutationInput) => {
         notes: input.notes,
       },
     ])
+  return { error }
 }
 
 export const updateRequestInSupabase = async (requestId: string, input: RequestMutationInput) => {
+  const labId = await resolveCurrentUserLabId()
+  if (!labId) return { error: { message: "No lab context." } }
   return supabase
     .from("requests")
     .update({
@@ -567,6 +595,7 @@ export const updateRequestInSupabase = async (requestId: string, input: RequestM
       notes: input.notes,
     })
     .eq("id", requestId)
+    .eq("lab_id", labId)
 }
 
 export type ActivityActionType = "Added" | "Opened" | "Used" | "Disposed" | "Ordered" | "Received" | "Edited" | "Deleted from Bench" | "Deleted from Storage"
@@ -596,9 +625,13 @@ export const ACTION_STYLES: Record<string, string> = {
 }
 
 export const fetchInventoryFromSupabase = async (): Promise<InventoryGroup[]> => {
+  const labId = await resolveCurrentUserLabId()
+  if (!labId) return []
+
   const { data, error } = await supabase
     .from("inventory_lots")
     .select(`*, items(name, vendor)`)
+    .eq("lab_id", labId)
 
   if (error) {
     console.error(error)
@@ -689,8 +722,15 @@ export const logActivity = async (
     return
   }
 
+  const labId = await resolveCurrentUserLabId()
+  if (!labId) {
+    console.error("[logActivity] No lab context — aborting.")
+    return
+  }
+
   const { error } = await supabase.from("activity_logs").insert([
     {
+      lab_id: labId,
       user_name: identity.name,
       user_initials: identity.initials,
       action_type: actionType,
@@ -713,7 +753,7 @@ export interface LabProfile {
   isOwner: boolean
 }
 
-const resolveCurrentUserLabId = async (): Promise<string | null> => {
+export const resolveCurrentUserLabId = async (): Promise<string | null> => {
   const {
     data: { session },
   } = await supabase.auth.getSession()
@@ -739,6 +779,19 @@ const resolveCurrentUserLabId = async (): Promise<string | null> => {
   // super_admin has no tenant context and must not be scoped to a lab
   if (profile?.role === "super_admin") return null
   return profile?.lab_id ?? null
+}
+
+export const fetchLabName = async (): Promise<string> => {
+  const labId = await resolveCurrentUserLabId()
+  if (!labId) return "My Lab"
+
+  const { data } = await supabase
+    .from("labs")
+    .select("name")
+    .eq("id", labId)
+    .maybeSingle()
+
+  return data?.name ?? "My Lab"
 }
 
 export const fetchLabProfiles = async (): Promise<LabProfile[]> => {
@@ -863,7 +916,14 @@ export const updateUserRole = async (
 }
 
 export const fetchLogsFromSupabase = async (): Promise<ActivityLogEntry[]> => {
-  const { data, error } = await supabase.from("activity_logs").select("*").order("created_at", { ascending: false })
+  const labId = await resolveCurrentUserLabId()
+  if (!labId) return []
+
+  const { data, error } = await supabase
+    .from("activity_logs")
+    .select("*")
+    .eq("lab_id", labId)
+    .order("created_at", { ascending: false })
 
   if (error) {
     console.error(error)
@@ -884,9 +944,13 @@ export const fetchLogsFromSupabase = async (): Promise<ActivityLogEntry[]> => {
 }
 
 export const fetchActiveLotsFromSupabase = async (): Promise<LotInUseEntry[]> => {
+  const labId = await resolveCurrentUserLabId()
+  if (!labId) return []
+
   const { data, error } = await supabase
     .from("active_lots")
     .select(`*, items(name)`)
+    .eq("lab_id", labId)
     .order("opened_date", { ascending: false })
 
   if (error) {
@@ -917,6 +981,9 @@ export const openNewLotInSupabase = async (
   unitsToMove: number,
   openedDate: string
 ) => {
+  const labId = await resolveCurrentUserLabId()
+  if (!labId) throw new Error("No lab context.")
+
   const { data: invLot, error: fetchErr } = await supabase
     .from("inventory_lots")
     .select("count, units, quantity_type")
@@ -940,9 +1007,11 @@ export const openNewLotInSupabase = async (
       count_label: "units",
     })
     .eq("id", inventoryLotId)
+    .eq("lab_id", labId)
 
   const { error: activeErr } = await supabase.from("active_lots").insert([
     {
+      lab_id: labId,
       item_id: itemId,
       lot_number: lotNumber,
       opened_date: openedDate,
@@ -965,13 +1034,19 @@ export const logUsageInSupabase = async (
   itemName: string,
   lotNumber: string
 ) => {
+  const labId = await resolveCurrentUserLabId()
+  if (!labId) {
+    console.error("[logUsageInSupabase] No lab context — aborting.")
+    return
+  }
+
   const parts = currentQtyString.split(" ")
   const currentVal = parseInt(parts[0], 10)
   const label = parts.slice(1).join(" ")
   const newVal = currentVal - deductAmount
 
   if (newVal <= 0) {
-    await supabase.from("active_lots").delete().eq("id", activeLotId)
+    await supabase.from("active_lots").delete().eq("id", activeLotId).eq("lab_id", labId)
     await logActivity("Used", itemName, lotNumber, `Used remaining ${currentVal} ${label}. Lot cleared.`)
   } else {
     await supabase
@@ -981,6 +1056,7 @@ export const logUsageInSupabase = async (
         status: newVal < 5 ? "Low Volume" : "Active",
       })
       .eq("id", activeLotId)
+      .eq("lab_id", labId)
 
     await logActivity("Used", itemName, lotNumber, `Deducted ${deductAmount} ${label}.`)
   }
@@ -992,10 +1068,14 @@ export const deleteActiveLotInSupabase = async (
   lotNumber: string,
   reason: string
 ) => {
+  const labId = await resolveCurrentUserLabId()
+  if (!labId) throw new Error("No lab context.")
+
   const { error: deleteErr } = await supabase
     .from("active_lots")
     .delete()
     .eq("id", activeLotId)
+    .eq("lab_id", labId)
 
   if (deleteErr) throw deleteErr
 
@@ -1013,10 +1093,14 @@ export const deleteInventoryLotInSupabase = async (
   lotNumber: string,
   reason: string
 ) => {
+  const labId = await resolveCurrentUserLabId()
+  if (!labId) throw new Error("No lab context.")
+
   const { error } = await supabase
     .from("inventory_lots")
     .delete()
     .eq("id", lotId)
+    .eq("lab_id", labId)
 
   if (error) throw error
 
@@ -1029,10 +1113,14 @@ export const deleteInventoryLotInSupabase = async (
 }
 
 export const deleteRequestInSupabase = async (requestId: string) => {
+  const labId = await resolveCurrentUserLabId()
+  if (!labId) throw new Error("No lab context.")
+
   const { error } = await supabase
     .from("requests")
     .delete()
     .eq("id", requestId)
+    .eq("lab_id", labId)
 
   if (error) throw error
 }

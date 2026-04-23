@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'BuddyLab Tracker | Reagent & Inventory Management',
+  title: 'Lab Inventory Management | Reagent & Inventory Management',
   description: 'Professional clinical laboratory reagent and inventory tracking system for compliance and efficiency',
   icons: {
     icon: [

@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabase"
 import { 
   ReorderRequest, REQUEST_STATUS_STYLES, CATALOG_DB, 
   logActivity, createRequestInSupabase, updateRequestInSupabase,
-  deleteRequestInSupabase
+  deleteRequestInSupabase, resolveCurrentUserLabId
 } from "@/lib/inventory-utils"
 
 interface RequestsTabProps {
@@ -93,23 +93,37 @@ export default function RequestsTab({ requests, refreshRequests, userRole }: Req
 
   const updateStatus = async (id: string, newStatus: ReorderRequest["status"]) => {
     if (userRole !== 'manager') return alert("Unauthorized: Only managers can approve requests.")
-    const { error } = await supabase.from('requests').update({ status: newStatus }).eq('id', id)
+    const labId = await resolveCurrentUserLabId()
+    if (!labId) return alert("Could not resolve lab context. Please refresh and try again.")
+    const { error } = await supabase.from('requests').update({ status: newStatus }).eq('id', id).eq("lab_id", labId)
     if (error) alert("Error: " + error.message)
     else await refreshRequests()
   }
 
   const receiveToInventory = async () => {
     if (!showReceiveModal || !receiveLot) return alert("Lot number is required.")
+    const labId = await resolveCurrentUserLabId()
+    if (!labId) return alert("Could not resolve lab context. Please refresh and try again.")
 
-    const { data: itemData } = await supabase.from('items').select('id').eq('name', showReceiveModal.itemName).single()
+    const { data: itemData } = await supabase
+      .from('items')
+      .select('id')
+      .eq('name', showReceiveModal.itemName)
+      .eq("lab_id", labId)
+      .single()
     let finalItemId = itemData?.id
 
     if (!finalItemId) {
-      const { data: newItem } = await supabase.from('items').insert([{ name: showReceiveModal.itemName, vendor: showReceiveModal.vendor, catalog_number: showReceiveModal.catalogNumber }]).select().single()
+      const { data: newItem } = await supabase
+        .from('items')
+        .insert([{ lab_id: labId, name: showReceiveModal.itemName, vendor: showReceiveModal.vendor, catalog_number: showReceiveModal.catalogNumber }])
+        .select()
+        .single()
       finalItemId = newItem?.id
     }
 
     const { error: lotError } = await supabase.from('inventory_lots').insert([{
+        lab_id: labId,
         item_id: finalItemId,
         lot_number: receiveLot,
         expiry_date: receiveExpiry,
@@ -126,7 +140,7 @@ export default function RequestsTab({ requests, refreshRequests, userRole }: Req
 
     await logActivity("Received", showReceiveModal.itemName, receiveLot, `Received ${showReceiveModal.orderQty} units into inventory`)
     
-    await supabase.from('requests').update({ status: "Received" }).eq('id', showReceiveModal.id)
+    await supabase.from('requests').update({ status: "Received" }).eq('id', showReceiveModal.id).eq("lab_id", labId)
 
     await refreshRequests() // Updates Dashboard State automatically
     setShowReceiveModal(null)

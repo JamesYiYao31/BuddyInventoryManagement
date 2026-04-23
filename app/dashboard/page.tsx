@@ -12,7 +12,7 @@ import {
   getEarliestExpiry, LotInUseEntry, ReorderRequest, ActivityLogEntry,
   fetchInventoryFromSupabase, fetchLogsFromSupabase, fetchActiveLotsFromSupabase,
   calculateDashboardStats, DashboardStats, fetchLabSettings, getLotTotalCount,
-  getLabCurrentDateStr, ACTION_STYLES,
+  getLabCurrentDateStr, ACTION_STYLES, resolveCurrentUserLabId, fetchLabName,
 } from "@/lib/inventory-utils"
 
 // UI Components
@@ -221,6 +221,7 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
   
   const [labSettings, setLabSettings] = useState<LabSettings>({ lowStockThreshold: 5, expiringSoonDays: 30, urgentDays: 7, labTimezone: "America/Chicago", techDashboardWidget: "donut" })
+  const [labName, setLabName] = useState("My Lab")
   const [profileFullName, setProfileFullName] = useState("")
   const [loading, setLoading] = useState(true)
 
@@ -267,18 +268,22 @@ export default function DashboardPage() {
 
   const refreshData = useCallback(async () => {
     try {
-      const [invData, logData, activeData, settings] = await Promise.all([
+      const [invData, logData, activeData, settings, resolvedLabName] = await Promise.all([
         fetchInventoryFromSupabase(),
         fetchLogsFromSupabase(),
         fetchActiveLotsFromSupabase(),
-        fetchLabSettings()
+        fetchLabSettings(),
+        fetchLabName(),
       ])
       setLabSettings(settings)
+      setLabName(resolvedLabName)
 
       // Fetch Requests and map snake_case to camelCase
+      const labId = await resolveCurrentUserLabId()
       const { data: reqData, error: reqError } = await supabase
         .from('requests')
         .select('*')
+        .eq('lab_id', labId ?? '')
         .order('date_requested', { ascending: false })
       
       if (reqError) throw reqError
@@ -314,7 +319,7 @@ export default function DashboardPage() {
       const { data: { session } } = await supabase.auth.getSession()
       
       if (!session) {
-        router.push("/") 
+        router.push("/login") 
       } else {
         setUser(session.user)
         
@@ -354,6 +359,50 @@ export default function DashboardPage() {
     }
     checkSessionAndRole()
   }, [router, refreshData])
+
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+
+      if (!session) {
+        router.push("/login")
+        return
+      }
+
+      // Check if user profile still exists and lab isn't archived
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("lab_id, role")
+        .eq("id", session.user.id)
+        .single()
+
+      if (!profile) {
+        await supabase.auth.signOut()
+        router.push("/login")
+        return
+      }
+
+      if (profile.lab_id) {
+        const { data: lab } = await supabase
+          .from("labs")
+          .select("is_archived")
+          .eq("id", profile.lab_id)
+          .single()
+
+        if (lab?.is_archived) {
+          await supabase.auth.signOut()
+          router.push(
+            `/login?error=${encodeURIComponent(
+              "Your lab has been archived. Please contact support."
+            )}`
+          )
+          return
+        }
+      }
+    }, 30000) // Check every 30 seconds
+
+    return () => clearInterval(interval)
+  }, [router])
 
   // ── 3. FILTER LOGIC ──
 
@@ -475,7 +524,7 @@ export default function DashboardPage() {
 
       <div className="flex flex-1 flex-col pl-64 print:pl-0 print:block">
         <div className="print:hidden">
-          <DashboardHeader user={user} role={userRole} stats={stats} inventory={inventory} activeLots={lotsInUse} labSettings={labSettings} onNavigate={setActivePage} onProfileUpdated={refreshAuthUser} />
+          <DashboardHeader user={user} role={userRole} stats={stats} inventory={inventory} activeLots={lotsInUse} labSettings={labSettings} labName={labName} onNavigate={setActivePage} onProfileUpdated={refreshAuthUser} />
         </div>
 
         <main className="flex-1 overflow-y-auto p-8 print:overflow-visible print:p-0">
@@ -647,16 +696,16 @@ export default function DashboardPage() {
                 )}
 
                 {activePage === "analytics" && <AnalyticsTab inventory={inventory} requests={requests} activityLogs={activityLogs} labSettings={labSettings} userRole={userRole} />}
-                {activePage === "labsharing" && <LabSharingTab />}
+                {activePage === "labsharing" && <LabSharingTab labName={labName} />}
                 {activePage === "settings" && <LabSettingsTab labSettings={labSettings} refreshData={refreshData} userRole={userRole} />}
 
                 {["inventory", "lotinuse", "requests", "activitylog"].includes(activePage) && (
                   <div className="flex gap-8 items-start print:block">
                     <div className="flex-1 min-w-0 print:w-full">
                       {activePage === "inventory" && <InventoryTab inventory={inventory} sortedFlatInventory={sortedFlatInventory} labSettings={labSettings} refreshData={refreshData} userRole={userRole} requests={requests} />}
-                      {activePage === "lotinuse" && <LotInUseTab activeLots={filteredLotsInUse} inventory={inventory} refreshData={refreshData} userRole={userRole} labSettings={labSettings} currentUserName={currentUserName} />}
+                      {activePage === "lotinuse" && <LotInUseTab activeLots={filteredLotsInUse} inventory={inventory} refreshData={refreshData} userRole={userRole} labSettings={labSettings} currentUserName={currentUserName} labName={labName} />}
                       {activePage === "requests" && <RequestsTab requests={filteredRequests} refreshRequests={refreshData} userRole={userRole} />}
-                      {activePage === "activitylog" && <ActivityLogTab logs={filteredLogs} currentUserName={currentUserName} currentUserRole={userRole} labSettings={labSettings} filterUser={logUserFilter} filterAction={actionFilter} filterDateStart={logDateStart} filterDateEnd={logDateEnd} />}
+                      {activePage === "activitylog" && <ActivityLogTab logs={filteredLogs} currentUserName={currentUserName} currentUserRole={userRole} labSettings={labSettings} filterUser={logUserFilter} filterAction={actionFilter} filterDateStart={logDateStart} filterDateEnd={logDateEnd} labName={labName} />}
                     </div>
                     
                     <aside className="w-72 shrink-0 space-y-8 print:hidden">

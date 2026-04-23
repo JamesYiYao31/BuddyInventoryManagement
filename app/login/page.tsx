@@ -14,6 +14,7 @@ function LoginContent() {
 
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
   const [fullName, setFullName] = useState("")
   const [techKey, setTechKey] = useState("")
 
@@ -28,11 +29,26 @@ function LoginContent() {
     setError(null)
     setRegisterSuccessBanner(null)
 
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
+    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({ email, password })
     if (signInError) {
       setError(signInError.message)
     } else {
-      router.push("/dashboard")
+      const userId = signInData.user?.id
+      if (userId) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", userId)
+          .maybeSingle()
+
+        if (profile?.role === "super_admin") {
+          router.push("/super-admin")
+        } else {
+          router.push("/dashboard")
+        }
+      } else {
+        router.push("/dashboard")
+      }
     }
     setIsLoading(false)
   }
@@ -47,6 +63,12 @@ function LoginContent() {
 
     if (!fn || !em || !password) {
       setError("Please fill in all fields.")
+      setIsLoading(false)
+      return
+    }
+
+    if (password !== confirmPassword) {
+      setError("Passwords do not match.")
       setIsLoading(false)
       return
     }
@@ -117,6 +139,7 @@ function LoginContent() {
     setIsRegistering(false)
     setFullName("")
     setPassword("")
+    setConfirmPassword("")
     setTechKey("")
     setIsLoading(false)
   }
@@ -172,7 +195,7 @@ function LoginContent() {
               <div className="flex flex-col items-center text-center">
                 <Image src="/buddy-logo.png" alt="Logo" width={64} height={64} className="h-16 w-auto mb-8 drop-shadow-md" priority />
                 <h1 className="text-4xl font-black tracking-tight text-foreground">
-                  {isRegistering ? "Register" : "Oakwood Clinical Portal"}
+                  {isRegistering ? "Register" : "Buddy Lab"}
                 </h1>
                 <p className="text-lg text-muted-foreground mt-2 font-medium">
                   {isRegistering ? "Create your technician account" : "Authorized Personnel Access Only"}
@@ -246,6 +269,20 @@ function LoginContent() {
                     autoComplete={isRegistering ? "new-password" : "current-password"}
                   />
                 </div>
+
+                {isRegistering ? (
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase text-muted-foreground tracking-widest ml-2">Confirm Password</label>
+                    <input
+                      type="password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      className="h-16 w-full rounded-2xl border border-input bg-background px-6 text-lg focus:ring-4 focus:ring-primary/10 outline-none transition-all"
+                      placeholder="••••••••"
+                      autoComplete="new-password"
+                    />
+                  </div>
+                ) : null}
 
                 {isRegistering ? (
                   <button

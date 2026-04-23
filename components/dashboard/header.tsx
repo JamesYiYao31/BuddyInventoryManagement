@@ -30,6 +30,7 @@ import { ProfileSettingsDialog } from "@/components/dashboard/profile-settings-d
 interface DashboardHeaderProps {
   user?: any
   role?: "manager" | "technician"
+  labName?: string
   stats?: DashboardStats | null
   inventory?: InventoryGroup[]
   activeLots?: LotInUseEntry[]
@@ -63,7 +64,7 @@ const CATEGORY_META: Record<AlertCategory, { icon: typeof XCircle; color: string
 const MAX_NOTIFICATIONS = 12
 
 export function DashboardHeader({
-  user, role, stats, inventory = [], activeLots =[],
+  user, role, labName, stats, inventory = [], activeLots =[],
   labSettings, onNavigate, onProfileUpdated,
 }: DashboardHeaderProps) {
   const router = useRouter()
@@ -268,7 +269,7 @@ export function DashboardHeader({
 
       {/* ── LEFT SIDE: TITLE & FEEDBACK BUTTON ── */}
       <div className="flex items-center gap-4">
-        <h1 className="text-xl font-black text-foreground tracking-tight">BuddyLab Workspace</h1>
+        <h1 className="text-xl font-black text-foreground tracking-tight">{labName || "My Lab"}</h1>
         
         <Link 
           href="/dashboard/feedback" 

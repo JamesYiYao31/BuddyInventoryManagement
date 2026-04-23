@@ -3,7 +3,11 @@
 import { useState } from "react"
 import { Search, MapPin, ChevronsRight, ShieldCheck, Mail, Send } from "lucide-react"
 
-export default function LabSharingTab() {
+interface LabSharingTabProps {
+  labName?: string
+}
+
+export default function LabSharingTab({ labName }: LabSharingTabProps) {
   // ── STATE ──
   const [searchTerm, setSearchTerm] = useState("")
   const [requestedItems, setRequestedItems] = useState<number[]>([])
@@ -39,7 +43,7 @@ export default function LabSharingTab() {
       <div className="bg-primary/10 border-2 border-primary/20 rounded-[2.5rem] p-10 flex items-center justify-between">
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-primary font-black uppercase tracking-widest text-xs">
-            <ShieldCheck className="size-4" /> BuddyLab Verified Network
+            <ShieldCheck className="size-4" /> Buddy Verified Network
           </div>
           <h1 className="text-3xl font-black text-foreground">Lab Sharing System</h1>
           <p className="text-muted-foreground max-w-lg">

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import React, { useState, useRef, useEffect } from "react"
 import { Printer, PackageOpen, AlertCircle, Scan, Minus, Camera, X, CheckCircle2, ShieldAlert, List, Trash2 } from "lucide-react"
 import { 
   LotInUseEntry, 
@@ -24,13 +24,14 @@ interface LotInUseTabProps {
   refreshData: () => Promise<void> | void
   userRole: "manager" | "technician"
   labSettings: LabSettings
+  labName?: string
   /** Display name of the currently authenticated lab member (used in the print masthead). */
   currentUserName?: string
 }
 
-export default function LotInUseTab({ activeLots, inventory, refreshData, userRole, labSettings, currentUserName }: LotInUseTabProps) {
+export default function LotInUseTab({ activeLots, inventory, refreshData, userRole, labSettings, labName, currentUserName }: LotInUseTabProps) {
   // ── PRINT METADATA ──
-  const labName = labSettings.labName || "BuddyLab Tracker"
+  const reportLabName = labName || labSettings.labName || "My Lab"
   const printUserName = (currentUserName || "Unknown User").toUpperCase()
   const printGeneratedDate = getLabCurrentDateStr(labSettings.labTimezone)
   // ── MODAL STATES ──
@@ -274,7 +275,7 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
         <div className="flex justify-between items-start">
           <div>
             <h1 className="text-2xl font-black tracking-tight text-zinc-900 print:text-2xl">Reagent Usage Report</h1>
-            <p className="text-zinc-500 font-medium mt-1">{labName} | Clinical Laboratory Management</p>
+            <p className="text-zinc-500 font-medium mt-1">{reportLabName} | Clinical Laboratory Management</p>
           </div>
           <div className="text-right">
             <div className="text-lg font-black text-emerald-600">ACTIVE BENCH INVENTORY</div>
@@ -332,53 +333,61 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
 
           <tbody>
             {(activeLots || []).length > 0 ? (
-              activeLots.map((lot) => {
+              activeLots.map((lot, idx) => {
                 const effectiveExpiry = getEarliestExpiry(lot.workingExpiryDate, lot.actualExpiryDate)
                 const daysLeft = daysUntilExpiry(effectiveExpiry, labSettings.labTimezone)
                 const isExpired = daysLeft < 0
 
                 return (
-                  <tr
-                    key={lot.id}
-                    className={`border-t border-border/50 hover:bg-muted/20 transition-colors print:text-zinc-900 ${isExpired ? "bg-destructive/5 print:bg-red-50" : ""}`}
-                  >
-                    <td className="text-left align-middle px-6 py-4 print:border print:border-black print:px-2 print:py-1">
-                      <div className="flex items-center gap-3">
-                        <PackageOpen className="size-5 text-muted-foreground print:hidden" />
-                        <span className="font-bold text-foreground print:text-zinc-900">{lot.itemName}</span>
-                      </div>
-                    </td>
-                    <td className="text-left align-middle px-6 py-4 font-mono text-muted-foreground print:border print:border-black print:px-2 print:py-1 print:text-zinc-700">
-                      {lot.lotNumber}
-                    </td>
-                    <td className="text-center align-middle px-6 py-4 text-muted-foreground/80 print:border print:border-black print:px-2 print:py-1 print:text-zinc-700 tabular-nums">
-                      {lot.openedDate || "—"}
-                    </td>
-                    <td className={`text-center align-middle px-6 py-4 font-semibold tabular-nums print:border print:border-black print:px-2 print:py-1 ${daysLeft <= 7 ? 'text-red-500 print:text-red-700' : 'text-foreground print:text-zinc-900'}`}>
-                      {lot.workingExpiryDate || "—"}
-                    </td>
-                    <td className="text-center align-middle px-6 py-4 font-semibold text-muted-foreground tabular-nums print:border print:border-black print:px-2 print:py-1 print:text-zinc-700">
-                      {lot.actualExpiryDate || "—"}
-                    </td>
-                    <td className="text-center align-middle px-6 py-4 font-bold text-foreground tabular-nums print:border print:border-black print:px-2 print:py-1 print:text-zinc-900">
-                      {lot.quantityLeft}
-                    </td>
-                    <td className="text-center align-middle px-6 py-4 print:border print:border-black print:px-2 print:py-1">
-                      <span className={`inline-flex px-3 py-1 rounded-full text-[10px] font-bold print:rounded-none print:px-0 print:py-0 print:bg-transparent ${isExpired ? LOT_IN_USE_STYLES["Expired"] : LOT_IN_USE_STYLES[lot.status as keyof typeof LOT_IN_USE_STYLES]}`}>
-                        {isExpired ? "Expired" : lot.status}
-                      </span>
-                    </td>
-                    <td className="text-right align-middle px-6 py-4 print:hidden">
-                      <div className="flex justify-end gap-2">
-                        <button onClick={() => triggerManualUsage(lot)} className="flex items-center justify-center size-8 rounded-lg bg-primary/10 text-primary hover:bg-primary hover:text-primary-foreground transition-all" title="Deduct usage">
-                          <Minus className="size-5" />
-                        </button>
-                        <button onClick={() => { setDeleteReasonType("Expired"); setDeleteCustomReason(""); setShowDeleteModal(lot); }} className="flex items-center justify-center size-8 rounded-lg bg-destructive/10 text-destructive hover:bg-destructive hover:text-destructive-foreground transition-all" title="Delete from bench">
-                          <Trash2 className="size-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                  <React.Fragment key={lot.id}>
+                    <tr
+                      className={`border-t border-border/50 hover:bg-muted/20 transition-colors print:text-zinc-900 ${isExpired ? "bg-destructive/5 print:bg-red-50" : ""}`}
+                    >
+                      <td className="text-left align-middle px-6 py-4 print:border print:border-black print:px-2 print:py-1">
+                        <div className="flex items-center gap-3">
+                          <PackageOpen className="size-5 text-muted-foreground print:hidden" />
+                          <span className="font-bold text-foreground print:text-zinc-900">{lot.itemName}</span>
+                        </div>
+                      </td>
+                      <td className="text-left align-middle px-6 py-4 font-mono text-muted-foreground print:border print:border-black print:px-2 print:py-1 print:text-zinc-700">
+                        {lot.lotNumber}
+                      </td>
+                      <td className="text-center align-middle px-6 py-4 text-muted-foreground/80 print:border print:border-black print:px-2 print:py-1 print:text-zinc-700 tabular-nums">
+                        {lot.openedDate || "—"}
+                      </td>
+                      <td className={`text-center align-middle px-6 py-4 font-semibold tabular-nums print:border print:border-black print:px-2 print:py-1 ${daysLeft <= 7 ? 'text-red-500 print:text-red-700' : 'text-foreground print:text-zinc-900'}`}>
+                        {lot.workingExpiryDate || "—"}
+                      </td>
+                      <td className="text-center align-middle px-6 py-4 font-semibold text-muted-foreground tabular-nums print:border print:border-black print:px-2 print:py-1 print:text-zinc-700">
+                        {lot.actualExpiryDate || "—"}
+                      </td>
+                      <td className="text-center align-middle px-6 py-4 font-bold text-foreground tabular-nums print:border print:border-black print:px-2 print:py-1 print:text-zinc-900">
+                        {lot.quantityLeft}
+                      </td>
+                      <td className="text-center align-middle px-6 py-4 print:border print:border-black print:px-2 print:py-1">
+                        <span className={`inline-flex px-3 py-1 rounded-full text-[10px] font-bold print:rounded-none print:px-0 print:py-0 print:bg-transparent ${isExpired ? LOT_IN_USE_STYLES["Expired"] : LOT_IN_USE_STYLES[lot.status as keyof typeof LOT_IN_USE_STYLES]}`}>
+                          {isExpired ? "Expired" : lot.status}
+                        </span>
+                      </td>
+                      <td className="text-right align-middle px-6 py-4 print:hidden">
+                        <div className="flex justify-end gap-2">
+                          <button onClick={() => triggerManualUsage(lot)} className="flex items-center justify-center size-8 rounded-lg bg-primary/10 text-primary hover:bg-primary hover:text-primary-foreground transition-all" title="Deduct usage">
+                            <Minus className="size-5" />
+                          </button>
+                          <button onClick={() => { setDeleteReasonType("Expired"); setDeleteCustomReason(""); setShowDeleteModal(lot); }} className="flex items-center justify-center size-8 rounded-lg bg-destructive/10 text-destructive hover:bg-destructive hover:text-destructive-foreground transition-all" title="Delete from bench">
+                            <Trash2 className="size-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    {idx === activeLots.length - 1 ? (
+                      <tr>
+                        <td colSpan={8} className="px-3 py-4 text-center text-zinc-900 font-black uppercase tracking-widest">
+                          End of Report
+                        </td>
+                      </tr>
+                    ) : null}
+                  </React.Fragment>
                 )
               })
             ) : (
@@ -394,12 +403,9 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
 
      {/* ── PRINT SIGNATURE FOOTER — fixed to bottom of every printed page ── */}
 <div className="hidden print:block print-footer-fixed" style={{ paddingLeft: "1cm", paddingRight: "1cm" }}>
-  <div className="border-t-2 border-zinc-900 pt-3 pb-2 flex justify-between items-end">
-    <p className="text-sm font-black text-zinc-900 uppercase tracking-widest">End of Report</p>
-    <div className="flex items-end gap-3">
-      <span className="text-xs font-bold text-zinc-700 uppercase tracking-widest">Reviewed by:</span>
-      <span className="inline-block border-b border-zinc-900 w-64 h-4" />
-    </div>
+  <div className="border-t-2 border-zinc-900 pt-3 pb-2 flex justify-end items-end">
+    <span className="text-xs font-bold text-zinc-700 uppercase tracking-widest mr-3">Reviewed by:</span>
+    <span className="inline-block border-b border-zinc-900 w-64 h-4" />
   </div>
 </div>
       {/* ── MODALS (Hidden on Print) ── */}
