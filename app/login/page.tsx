@@ -146,12 +146,6 @@ function LoginContent() {
 
   return (
     <div className="relative flex min-h-screen flex-col bg-background font-sans antialiased overflow-hidden">
-      {/* ── BACKGROUND GRID ── */}
-      <div className="pointer-events-none absolute inset-0 opacity-[0.35]" aria-hidden>
-        <div className="absolute inset-0 bg-[linear-gradient(to_right,var(--border)_1px,transparent_1px)]" style={{ backgroundSize: "48px 48px" }} />
-        <div className="absolute inset-0 bg-[linear-gradient(to_bottom,var(--border)_1px,transparent_1px)]" style={{ backgroundSize: "48px 48px" }} />
-      </div>
-
       {/* ── HEADER ── */}
       <header className="relative z-10 border-b border-border bg-card/80 backdrop-blur-sm">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-8 py-5 md:px-14">
@@ -195,7 +189,7 @@ function LoginContent() {
               <div className="flex flex-col items-center text-center">
                 <Image src="/buddy-logo.png" alt="Logo" width={64} height={64} className="h-16 w-auto mb-8 drop-shadow-md" priority />
                 <h1 className="text-4xl font-black tracking-tight text-foreground">
-                  {isRegistering ? "Register" : "Buddy Lab"}
+                  {isRegistering ? "Register" : "Buddy Inventory Management"}
                 </h1>
                 <p className="text-lg text-muted-foreground mt-2 font-medium">
                   {isRegistering ? "Create your technician account" : "Authorized Personnel Access Only"}

@@ -1,5 +1,6 @@
 "use client"
 
+import React from "react"
 import { 
   PackagePlus, 
   PackageOpen, 
@@ -55,6 +56,13 @@ export default function ActivityLogTab({
   const printRows = sortedDates.flatMap((date) => groupedLogs[date].map((log) => ({ date, log })))
 
   const handlePrint = () => window.print()
+  const getInlineActionLabel = (actionType: string) => {
+    const normalized = actionType.toLowerCase()
+    if (normalized === "approved lot") return "Approved Lot"
+    if (normalized === "submitted lot validation") return "Submitted Lot Validation"
+    if (normalized === "submitted coa") return "Submitted COA"
+    return normalized
+  }
 
   // ── LOGIC: ACTION ICONS ──
   const getActionIcon = (type: string) => {
@@ -178,7 +186,7 @@ export default function ActivityLogTab({
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-black text-foreground">{log.user}</span>
-                          <span className="text-muted-foreground font-medium">{log.actionType.toLowerCase()}</span>
+                          <span className="text-muted-foreground font-medium">{getInlineActionLabel(log.actionType)}</span>
                           <span className="font-bold text-primary px-2 py-0.5 bg-primary/5 rounded-lg">{log.itemName}</span>
                           {log.lotNumber && (
                             <span className="font-mono text-[10px] font-bold text-muted-foreground uppercase bg-muted px-2 py-0.5 rounded-md border border-border">
@@ -241,8 +249,8 @@ export default function ActivityLogTab({
             <tbody>
               {printRows.length > 0 ? (
                 printRows.map(({ date, log }, idx) => (
-                  <>
-                    <tr key={log.id} className="align-top print:border-b print:border-black">
+                  <React.Fragment key={log.id}>
+                    <tr className="align-top print:border-b print:border-black">
                       <td className="text-left px-3 print:py-4 font-semibold text-black tabular-nums">{date}</td>
                       <td className="text-center px-3 print:py-4 tabular-nums text-zinc-700">{log.time}</td>
                       <td className="text-left px-3 print:py-4 font-semibold text-black">{log.user}</td>
@@ -262,7 +270,7 @@ export default function ActivityLogTab({
                         </td>
                       </tr>
                     ) : null}
-                  </>
+                  </React.Fragment>
                 ))
               ) : (
                 <tr>

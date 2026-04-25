@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { Settings, Save, Loader2, ShieldAlert, Package, Clock, AlertTriangle, LayoutDashboard, Users, ShieldCheck, User as UserIcon } from "lucide-react"
+import { Settings, Save, Loader2, ShieldAlert, Package, Clock, AlertTriangle, LayoutDashboard, Users, ShieldCheck, User as UserIcon, Shield } from "lucide-react"
 import {
   LabSettings, TechDashboardWidget, fetchLabSettings, updateLabSettings,
   LabProfile, fetchLabProfiles, updateUserRole,
@@ -96,7 +96,8 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
     form.lowStockThreshold !== labSettings.lowStockThreshold ||
     form.expiringSoonDays !== labSettings.expiringSoonDays ||
     form.urgentDays !== labSettings.urgentDays ||
-    form.techDashboardWidget !== labSettings.techDashboardWidget
+    form.techDashboardWidget !== labSettings.techDashboardWidget ||
+    (form.techsCanEditThresholds ?? true) !== (labSettings.techsCanEditThresholds ?? true)
 
   const handleSave = async () => {
     if (userRole !== "manager") return
@@ -146,7 +147,7 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
           <Loader2 className="size-8 text-primary animate-spin" />
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-8">
 
           {/* ── Low Stock Threshold ── */}
           <div className="rounded-2xl border border-border bg-card p-8 space-y-6 shadow-sm">
@@ -216,6 +217,44 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
               />
               <p className="text-xs text-muted-foreground ml-1">
                 Lots expiring within <span className="font-bold">{form.urgentDays}</span> days will show an <span className="font-bold text-red-600">Urgent</span> badge.
+              </p>
+            </div>
+          </div>
+
+          {/* ── Technician threshold editing (lab-wide) ── */}
+          <div className="rounded-2xl border border-border bg-card p-8 space-y-6 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-primary/10"><Shield className="size-5 text-primary" /></div>
+              <div>
+                <p className="text-sm font-bold text-foreground">Technician Threshold Editing</p>
+                <p className="text-xs text-muted-foreground">Control whether technicians can set and edit item thresholds</p>
+              </div>
+            </div>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-sm font-medium text-foreground">Allow technicians to set item thresholds</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={form.techsCanEditThresholds !== false}
+                  onClick={() =>
+                    setForm(f => ({ ...f, techsCanEditThresholds: !(f.techsCanEditThresholds !== false) }))
+                  }
+                  className={`relative w-11 h-6 shrink-0 rounded-full transition-colors ${
+                    form.techsCanEditThresholds !== false ? "bg-primary" : "bg-muted border border-border"
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 left-0.5 size-5 rounded-full bg-white shadow transition-transform ${
+                      form.techsCanEditThresholds !== false ? "translate-x-5" : ""
+                    }`}
+                  />
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                {form.techsCanEditThresholds !== false
+                  ? "Technicians can set expiring soon, urgent, low stock, and working expiry thresholds when adding or editing items."
+                  : "Only managers can set item thresholds. Technicians will see the fields as read-only."}
               </p>
             </div>
           </div>

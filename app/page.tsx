@@ -6,8 +6,9 @@ type HomePageProps = {
   }
 }
 
-export default function Home({ searchParams }: HomePageProps) {
-  const rawError = searchParams?.error
+export default async function Home({ searchParams }: HomePageProps) {
+  const resolvedParams = await searchParams
+  const rawError = resolvedParams?.error
   const error = Array.isArray(rawError) ? rawError[0] : rawError
 
   // Preserve dashboard redirect errors when forwarding / -> /login.

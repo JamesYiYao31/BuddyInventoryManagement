@@ -122,7 +122,7 @@ export default function FeedbackPage() {
                 id="companyName"
                 type="text"
                 required
-                placeholder="e.g., Northside Clinical"
+                placeholder="Company or lab name"
                 className="block w-full sm:w-1/2 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-gray-900 dark:text-white placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
                 value={formData.companyName}
                 onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
@@ -154,7 +154,7 @@ export default function FeedbackPage() {
                 id="title"
                 type="text"
                 required
-                placeholder="e.g., The print layout cuts off on the second page"
+                placeholder="Brief summary of the issue"
                 className="block w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-gray-900 dark:text-white placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
                 value={formData.title}
                 onChange={(e) => setFormData({ ...formData, title: e.target.value })}

@@ -153,6 +153,40 @@ export default function SuperAdminPage() {
     }
 
     setGenerateBusy(true)
+
+    // Check 1: Does a lab with this name already exist?
+    const { data: existingLab } = await supabase
+      .from("labs")
+      .select("id")
+      .ilike("name", name)
+      .maybeSingle()
+
+    if (existingLab) {
+      setGenerateMsg({
+        kind: "error",
+        text: `A lab named "${name}" already exists.`,
+      })
+      setGenerateBusy(false)
+      return
+    }
+
+    // Check 2: Is there already an unused invite for this name?
+    const { data: existingInvite } = await supabase
+      .from("lab_invites")
+      .select("id")
+      .ilike("lab_name", name)
+      .eq("used", false)
+      .maybeSingle()
+
+    if (existingInvite) {
+      setGenerateMsg({
+        kind: "error",
+        text: `An unused invite for "${name}" already exists.`,
+      })
+      setGenerateBusy(false)
+      return
+    }
+
     const token = crypto.randomUUID()
     const { error } = await supabase.from("lab_invites").insert({
       token,
@@ -219,7 +253,6 @@ export default function SuperAdminPage() {
   }
 
   const handleViewLab = (lab: LabRow) => {
-    console.log(lab.id)
   }
 
   const formatDate = (iso: string) => {

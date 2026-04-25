@@ -53,6 +53,15 @@ export function ProfileSettingsDialog({
     }
   }, [open, initialName])
 
+  useEffect(() => {
+    if (!open) return
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onOpenChange(false)
+    }
+    document.addEventListener("keydown", handleEsc)
+    return () => document.removeEventListener("keydown", handleEsc)
+  }, [open, onOpenChange])
+
   const nameDirty = displayName.trim() !== (initialName || "").trim()
 
   const handleSaveName = async () => {

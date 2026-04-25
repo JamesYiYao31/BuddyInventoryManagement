@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Plus, X, CheckCircle2, PackagePlus, DollarSign, Clock, ArrowRight, ShieldAlert, Trash2 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { 
@@ -23,17 +23,50 @@ export default function RequestsTab({ requests, refreshRequests, userRole }: Req
   const [catalogInput, setCatalogInput] = useState("")
   const [itemName, setItemName] = useState("")
   const [vendor, setVendor] = useState("")
+  const [linkedItemId, setLinkedItemId] = useState<string | null>(null)
+  const [linkedItemCatalogNumber, setLinkedItemCatalogNumber] = useState<string>("")
+  const [itemMatches, setItemMatches] = useState<Array<{ id: string; name: string; vendor: string | null; catalog_number: string | null }>>([])
+  const [showItemMatches, setShowItemMatches] = useState(false)
   const [orderQty, setOrderQty] = useState(1)
   const [unitPrice, setUnitPrice] = useState(0)
   const [notes, setNotes] = useState("")
 
   const [receiveLot, setReceiveLot] = useState("")
   const [receiveExpiry, setReceiveExpiry] = useState("")
+  const [receiveQty, setReceiveQty] = useState(1)
+
+  useEffect(() => {
+    if (!showRequestModal) return
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setShowRequestModal(false)
+        resetRequestForm()
+      }
+    }
+    document.addEventListener("keydown", handleEsc)
+    return () => document.removeEventListener("keydown", handleEsc)
+  }, [showRequestModal])
+
+  useEffect(() => {
+    if (!showReceiveModal) return
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setShowReceiveModal(null)
+        setReceiveQty(1)
+      }
+    }
+    document.addEventListener("keydown", handleEsc)
+    return () => document.removeEventListener("keydown", handleEsc)
+  }, [showReceiveModal])
 
   const resetRequestForm = () => {
     setCatalogInput("")
     setItemName("")
     setVendor("")
+    setLinkedItemId(null)
+    setLinkedItemCatalogNumber("")
+    setItemMatches([])
+    setShowItemMatches(false)
     setOrderQty(1)
     setUnitPrice(0)
     setNotes("")
@@ -45,15 +78,69 @@ export default function RequestsTab({ requests, refreshRequests, userRole }: Req
     const found = CATALOG_DB[cat]
     if (found) {
       setItemName(found.name); setVendor(found.vendor); setUnitPrice(found.price)
+      setLinkedItemId(null)
+      setLinkedItemCatalogNumber("")
+      setShowItemMatches(false)
     } else {
       setItemName(""); setVendor(""); setUnitPrice(0)
+      setLinkedItemId(null)
+      setLinkedItemCatalogNumber("")
+      setShowItemMatches(false)
     }
+  }
+
+  useEffect(() => {
+    if (!showRequestModal || editingRequestId) return
+    if (linkedItemId) return
+
+    const q = itemName.trim()
+    if (q.length < 2) {
+      setItemMatches([])
+      setShowItemMatches(false)
+      return
+    }
+
+    const timer = setTimeout(async () => {
+      const labId = await resolveCurrentUserLabId()
+      if (!labId) return
+      const { data, error } = await supabase
+        .from("items")
+        .select("id, name, vendor, catalog_number")
+        .eq("lab_id", labId)
+        .ilike("name", `%${q}%`)
+        .order("name", { ascending: true })
+        .limit(8)
+      if (error) return
+      const matches = (data || []) as Array<{ id: string; name: string; vendor: string | null; catalog_number: string | null }>
+      setItemMatches(matches)
+      setShowItemMatches(matches.length > 0)
+    }, 300)
+
+    return () => clearTimeout(timer)
+  }, [showRequestModal, itemName, linkedItemId, editingRequestId])
+
+  const handleSelectMatchedItem = (item: { id: string; name: string; vendor: string | null; catalog_number: string | null }) => {
+    setLinkedItemId(item.id)
+    setItemName(item.name)
+    setVendor(item.vendor || "")
+    setCatalogInput(item.catalog_number || "")
+    setLinkedItemCatalogNumber(item.catalog_number || "")
+    setShowItemMatches(false)
   }
 
   const submitRequest = async () => {
     if (!itemName) return alert("Please enter a valid item name.")
+    const typedCatalog = catalogInput.trim()
+    const shouldOfferCatalogSave = Boolean(
+      linkedItemId &&
+      !editingRequestId &&
+      typedCatalog &&
+      !linkedItemCatalogNumber
+    )
+
     const payload = {
-      catalogNumber: catalogInput,
+      itemId: linkedItemId,
+      catalogNumber: typedCatalog,
       itemName,
       vendor,
       orderQty,
@@ -75,6 +162,33 @@ export default function RequestsTab({ requests, refreshRequests, userRole }: Req
         ? `Updated request details to ${orderQty} units from ${vendor}`
         : `Requested ${orderQty} units from ${vendor}`
     )
+
+    if (shouldOfferCatalogSave && linkedItemId) {
+      const shouldSave = window.confirm(
+        `Save this catalog number (${typedCatalog}) to the item catalog for future use?`
+      )
+      if (shouldSave) {
+        const labId = await resolveCurrentUserLabId()
+        if (labId) {
+          const { data: currentItem } = await supabase
+            .from("items")
+            .select("catalog_number")
+            .eq("id", linkedItemId)
+            .eq("lab_id", labId)
+            .maybeSingle()
+
+          const existingCatalog = currentItem?.catalog_number?.trim() || ""
+          if (!existingCatalog) {
+            await supabase
+              .from("items")
+              .update({ catalog_number: typedCatalog })
+              .eq("id", linkedItemId)
+              .eq("lab_id", labId)
+          }
+        }
+      }
+    }
+
     await refreshRequests()
     setShowRequestModal(false)
     resetRequestForm()
@@ -85,6 +199,10 @@ export default function RequestsTab({ requests, refreshRequests, userRole }: Req
     setCatalogInput(request.catalogNumber || "")
     setItemName(request.itemName || "")
     setVendor(request.vendor || "")
+    setLinkedItemId(null)
+    setLinkedItemCatalogNumber("")
+    setItemMatches([])
+    setShowItemMatches(false)
     setOrderQty(request.orderQty || 1)
     setUnitPrice(request.unitPrice || 0)
     setNotes(request.notes || "")
@@ -102,6 +220,7 @@ export default function RequestsTab({ requests, refreshRequests, userRole }: Req
 
   const receiveToInventory = async () => {
     if (!showReceiveModal || !receiveLot) return alert("Lot number is required.")
+    if (receiveQty < 1) return alert("Quantity must be at least 1.")
     const labId = await resolveCurrentUserLabId()
     if (!labId) return alert("Could not resolve lab context. Please refresh and try again.")
 
@@ -131,19 +250,20 @@ export default function RequestsTab({ requests, refreshRequests, userRole }: Req
         quantity_type: "count_only",
         units: 0,
         unit_label: "units",
-        count: showReceiveModal.orderQty,
+        count: receiveQty,
         count_label: "units",
         status: "In Storage"
       }])
 
     if (lotError) return alert("Inventory Error: " + lotError.message)
 
-    await logActivity("Received", showReceiveModal.itemName, receiveLot, `Received ${showReceiveModal.orderQty} units into inventory`)
+    await logActivity("Received", showReceiveModal.itemName, receiveLot, `Received ${receiveQty} units into inventory`)
     
     await supabase.from('requests').update({ status: "Received" }).eq('id', showReceiveModal.id).eq("lab_id", labId)
 
     await refreshRequests() // Updates Dashboard State automatically
     setShowReceiveModal(null)
+    setReceiveQty(1)
   }
 
   const handleDeleteRequest = async (req: ReorderRequest) => {
@@ -216,7 +336,7 @@ export default function RequestsTab({ requests, refreshRequests, userRole }: Req
                 <button onClick={() => updateStatus(req.id, "Ordered")} className="px-3 py-1.5 bg-purple-500/10 text-purple-600 font-bold text-xs rounded-lg hover:bg-purple-500/20 transition-all">Mark Ordered</button>
               )}
               {req.status === "Ordered" && (
-                <button onClick={() => setShowReceiveModal(req)} className="px-3 py-1.5 bg-green-500 text-white font-bold text-xs rounded-lg shadow-sm hover:bg-green-600 transition-all">Receive Item</button>
+                <button onClick={() => { setShowReceiveModal(req); setReceiveQty(req.orderQty || 1) }} className="px-3 py-1.5 bg-green-500 text-white font-bold text-xs rounded-lg shadow-sm hover:bg-green-600 transition-all">Receive Item</button>
               )}
               {req.status === "Received" && <CheckCircle2 className="size-5 text-green-500 mr-2" />}
               {userRole === "manager" && (
@@ -247,11 +367,41 @@ export default function RequestsTab({ requests, refreshRequests, userRole }: Req
                 <p className="text-xs font-black text-primary uppercase tracking-widest">1. Item Details</p>
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-1">Catalog Number</label>
-                  <input value={catalogInput} onChange={e => handleCatalogChange(e.target.value)} placeholder="e.g. CAT-26542" className="w-full h-14 border border-input bg-background rounded-2xl px-6 font-mono text-base outline-none focus:ring-4 focus:ring-primary/10" />
+                  <input value={catalogInput} onChange={e => handleCatalogChange(e.target.value)} placeholder="Catalog number" className="w-full h-14 border border-input bg-background rounded-2xl px-6 font-mono text-base outline-none focus:ring-4 focus:ring-primary/10" />
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-1">Item Name *</label>
-                  <input value={itemName} onChange={e => setItemName(e.target.value)} placeholder="Reagent name" className="w-full h-14 border border-input bg-background rounded-2xl px-6 text-base font-medium outline-none" />
+                  <input
+                    value={itemName}
+                    onChange={e => {
+                      const v = e.target.value
+                      setItemName(v)
+                      if (!editingRequestId) {
+                        setLinkedItemId(null)
+                        setLinkedItemCatalogNumber("")
+                      }
+                    }}
+                    onFocus={() => { if (!editingRequestId && itemMatches.length > 0) setShowItemMatches(true) }}
+                    placeholder="Reagent name"
+                    className="w-full h-14 border border-input bg-background rounded-2xl px-6 text-base font-medium outline-none"
+                  />
+                  {!editingRequestId && showItemMatches && itemMatches.length > 0 && (
+                    <div className="mt-2 max-h-56 overflow-y-auto rounded-2xl border border-border bg-card shadow-xl">
+                      {itemMatches.map(match => (
+                        <button
+                          key={match.id}
+                          type="button"
+                          onClick={() => handleSelectMatchedItem(match)}
+                          className="w-full text-left px-5 py-3 hover:bg-muted/60 transition-colors border-b border-border/30 last:border-b-0"
+                        >
+                          <p className="text-sm font-semibold text-foreground">{match.name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {(match.vendor || "Unknown vendor")} · CAT: {match.catalog_number || "N/A"}
+                          </p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-1">Vendor / Company</label>
@@ -296,16 +446,26 @@ export default function RequestsTab({ requests, refreshRequests, userRole }: Req
               <div className="bg-green-500/10 border border-green-500/20 p-8 rounded-[2rem] text-center">
                 <p className="text-xs font-bold uppercase text-green-600 tracking-widest mb-2">Incoming Item</p>
                 <p className="font-black text-3xl text-foreground">{showReceiveModal.itemName}</p>
-                <p className="text-sm font-semibold text-muted-foreground mt-2">Adding {showReceiveModal.orderQty} unit(s) to Inventory</p>
+                <p className="text-sm font-semibold text-muted-foreground mt-2">Choose how many units to add to inventory</p>
               </div>
               <div className="grid grid-cols-2 gap-6">
                 <div className="space-y-2"><label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-1">Physical Lot Number *</label><input value={receiveLot} onChange={e => setReceiveLot(e.target.value)} placeholder="Check bottle..." className="w-full h-14 border border-input bg-background rounded-2xl px-6 font-mono font-bold text-lg focus:ring-2 focus:ring-green-500/50" /></div>
                 <div className="space-y-2"><label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-1">Expiration Date *</label><input type="date" value={receiveExpiry} onChange={e => setReceiveExpiry(e.target.value)} className="w-full h-14 border border-input bg-background rounded-2xl px-6 text-lg focus:ring-2 focus:ring-green-500/50" /></div>
               </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-1">Quantity to Add</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={receiveQty}
+                  onChange={e => setReceiveQty(Math.max(1, Number(e.target.value) || 1))}
+                  className="w-full h-14 border border-input bg-background rounded-2xl px-6 text-lg font-bold focus:ring-2 focus:ring-green-500/50"
+                />
+              </div>
             </div>
             <div className="flex gap-4 px-10 py-8 border-t border-border bg-muted/20">
                <button onClick={() => setShowReceiveModal(null)} className="px-8 py-4 rounded-2xl border border-border bg-card font-bold text-base text-muted-foreground hover:bg-muted transition-all">Cancel</button>
-               <button onClick={receiveToInventory} className="flex-1 h-14 rounded-2xl bg-green-500 text-white font-black text-lg hover:bg-green-600 flex items-center justify-center gap-2 shadow-lg shadow-green-500/20 transition-all">Add to Freezer <ArrowRight className="size-5"/></button>
+               <button onClick={receiveToInventory} className="flex-1 h-14 rounded-2xl bg-green-500 text-white font-black text-lg hover:bg-green-600 flex items-center justify-center gap-2 shadow-lg shadow-green-500/20 transition-all">Add to Inventory <ArrowRight className="size-5"/></button>
             </div>
           </div>
         </div>

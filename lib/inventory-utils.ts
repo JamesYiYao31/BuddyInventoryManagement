@@ -3,7 +3,7 @@ import { getEarliestExpiry } from "./expiry-utils.ts"
 
 export { getEarliestExpiry }
 
-export type SidebarPage = "dashboard" | "inventory" | "lotinuse" | "requests" | "activitylog" | "analytics" | "labsharing" | "settings"
+export type SidebarPage = "dashboard" | "inventory" | "lotinuse" | "requests" | "activitylog" | "validation" | "analytics" | "labsharing" | "settings"
 export type InventoryStatus = "In Storage" | "Low Stock" | "Expiring Soon" | "Expired" | "Watchlist"
 
 /** Single lowest-trackable count. Legacy DB rows (boxes × units) are normalized when reading. */
@@ -32,6 +32,7 @@ export interface LotEntry {
   notes: string
   totalUnits: number
   itemName?: string
+  validation_status?: string
 }
 
 export interface InventoryGroup {
@@ -40,11 +41,26 @@ export interface InventoryGroup {
   lots: LotEntry[]
 }
 
+/** Optional per-item overrides; null/undefined uses lab_settings. */
+export interface ItemThresholdFields {
+  expiring_soon_days?: number | null
+  urgent_days?: number | null
+  low_stock_threshold?: number | null
+  working_expiry_days?: number | null
+}
+
 export interface Item {
   id: string
   name: string
   vendor: string | null
   vendor_sku: string | null
+  requires_coa?: boolean
+  requires_lot_validation?: boolean
+  /** Nullable overrides; when null, use lab defaults. */
+  expiring_soon_days?: number | null
+  urgent_days?: number | null
+  low_stock_threshold?: number | null
+  working_expiry_days?: number | null
 }
 
 // ── SMART BARCODE PARSER (Waterfall: HIBC → GS1 → Code 128 Plaintext) ──
@@ -220,7 +236,9 @@ export const fetchAllItems = async (): Promise<Item[]> => {
 
   const { data, error } = await supabase
     .from("items")
-    .select("id, name, vendor, vendor_sku")
+    .select(
+      "id, name, vendor, vendor_sku, requires_coa, requires_lot_validation, expiring_soon_days, urgent_days, low_stock_threshold, working_expiry_days"
+    )
     .eq("lab_id", labId)
     .order("name", { ascending: true })
 
@@ -239,7 +257,9 @@ export const lookupItemByVendorSku = async (sku: string): Promise<Item | null> =
 
   const { data, error } = await supabase
     .from("items")
-    .select("id, name, vendor, vendor_sku")
+    .select(
+      "id, name, vendor, vendor_sku, requires_coa, requires_lot_validation, expiring_soon_days, urgent_days, low_stock_threshold, working_expiry_days"
+    )
     .eq("lab_id", labId)
     .eq("vendor_sku", sku)
     .maybeSingle()
@@ -259,12 +279,15 @@ export interface LabSettings {
   urgentDays: number
   labTimezone: string
   techDashboardWidget: TechDashboardWidget
+  /** When false, technicians see item threshold fields as read-only. */
+  techsCanEditThresholds?: boolean
   /**
    * Display name of the laboratory. Appears on printed reports and report headers.
    * Falls back to the product name when the `lab_name` column is not yet populated
    * in Supabase so reports never render a blank masthead.
    */
   labName?: string
+  requireCoaApproval?: boolean
 }
 
 export const LAB_SETTINGS_DEFAULTS: LabSettings = {
@@ -273,7 +296,9 @@ export const LAB_SETTINGS_DEFAULTS: LabSettings = {
   urgentDays: 7,
   labTimezone: "America/Chicago",
   techDashboardWidget: "donut",
+  techsCanEditThresholds: true,
   labName: "My Lab",
+  requireCoaApproval: false,
 }
 
 export const fetchLabSettings = async (): Promise<LabSettings> => {
@@ -310,7 +335,9 @@ export const fetchLabSettings = async (): Promise<LabSettings> => {
 
     const { data, error } = await supabase
       .from("lab_settings")
-      .select("low_stock_threshold, expiring_soon_days, urgent_days, lab_timezone, tech_dashboard_widget")
+      .select(
+        "low_stock_threshold, expiring_soon_days, urgent_days, lab_timezone, tech_dashboard_widget, techs_can_edit_thresholds"
+      )
       .eq("lab_id", labId)
       .maybeSingle()
 
@@ -347,6 +374,7 @@ export const fetchLabSettings = async (): Promise<LabSettings> => {
         urgentDays: legacy.data.urgent_days ?? d.urgentDays,
         labTimezone: legacy.data.lab_timezone ?? d.labTimezone,
         techDashboardWidget: d.techDashboardWidget,
+        techsCanEditThresholds: d.techsCanEditThresholds,
       }
     }
 
@@ -361,6 +389,7 @@ export const fetchLabSettings = async (): Promise<LabSettings> => {
       urgentDays: data.urgent_days ?? d.urgentDays,
       labTimezone: data.lab_timezone ?? d.labTimezone,
       techDashboardWidget: data.tech_dashboard_widget ?? d.techDashboardWidget,
+      techsCanEditThresholds: (data as { techs_can_edit_thresholds?: boolean }).techs_can_edit_thresholds ?? d.techsCanEditThresholds,
     }
   } catch (err: any) {
     console.error("[fetchLabSettings] Unexpected exception — using defaults.", {
@@ -387,6 +416,7 @@ export const updateLabSettings = async (
       expiring_soon_days: settings.expiringSoonDays,
       urgent_days: settings.urgentDays,
       tech_dashboard_widget: settings.techDashboardWidget,
+      techs_can_edit_thresholds: settings.techsCanEditThresholds ?? true,
     })
     .eq("lab_id", labId)
 
@@ -406,15 +436,31 @@ export const updateLabSettings = async (
         low_stock_threshold: settings.lowStockThreshold,
         expiring_soon_days: settings.expiringSoonDays,
         urgent_days: settings.urgentDays,
+        techs_can_edit_thresholds: settings.techsCanEditThresholds ?? true,
       })
       .eq("lab_id", labId)
 
     if (retry.error) {
-      console.error("[updateLabSettings] Legacy retry failed.", {
+      console.error("[updateLabSettings] Legacy retry failed — retrying without techs_can_edit_thresholds.", {
         message: retry.error?.message,
         details: retry.error?.details,
       })
-      return { success: false, error: retry.error.message }
+      const retry2 = await supabase
+        .from("lab_settings")
+        .update({
+          low_stock_threshold: settings.lowStockThreshold,
+          expiring_soon_days: settings.expiringSoonDays,
+          urgent_days: settings.urgentDays,
+        })
+        .eq("lab_id", labId)
+      if (retry2.error) {
+        console.error("[updateLabSettings] Second legacy retry failed.", {
+          message: retry2.error?.message,
+          details: retry2.error?.details,
+        })
+        return { success: false, error: retry2.error.message }
+      }
+      return { success: true }
     }
     return { success: true }
   }
@@ -424,21 +470,35 @@ export const updateLabSettings = async (
 export const createItem = async (
   name: string,
   vendor?: string,
-  vendorSku?: string
+  vendorSku?: string,
+  requiresCoa?: boolean,
+  requiresLotValidation?: boolean,
+  thresholds?: ItemThresholdFields | null
 ): Promise<Item | null> => {
   const labId = await resolveCurrentUserLabId()
   if (!labId) {
     console.error("createItem: No lab context.")
     return null
   }
-  const row: Record<string, string> = { name, lab_id: labId }
+  const row: Record<string, any> = { name, lab_id: labId }
   if (vendor) row.vendor = vendor
   if (vendorSku) row.vendor_sku = vendorSku
+  if (requiresCoa !== undefined) row.requires_coa = requiresCoa
+  if (requiresLotValidation !== undefined) row.requires_lot_validation = requiresLotValidation
+
+  if (thresholds) {
+    row.expiring_soon_days = thresholds.expiring_soon_days ?? null
+    row.urgent_days = thresholds.urgent_days ?? null
+    row.low_stock_threshold = thresholds.low_stock_threshold ?? null
+    row.working_expiry_days = thresholds.working_expiry_days ?? null
+  }
 
   const { data, error } = await supabase
     .from("items")
     .insert([row])
-    .select("id, name, vendor, vendor_sku")
+    .select(
+      "id, name, vendor, vendor_sku, requires_coa, requires_lot_validation, expiring_soon_days, urgent_days, low_stock_threshold, working_expiry_days"
+    )
     .single()
 
   if (error) {
@@ -446,6 +506,59 @@ export const createItem = async (
     return null
   }
   return data as Item
+}
+
+/** Calendar date `YYYY-MM-DD` plus whole days (no timezone drift vs lab date strings). */
+export function addCalendarDays(dateStr: string, daysToAdd: number): string {
+  if (!dateStr || !Number.isFinite(daysToAdd)) return dateStr
+  const d = new Date(dateStr + "T12:00:00")
+  d.setUTCDate(d.getUTCDate() + daysToAdd)
+  return d.toISOString().slice(0, 10)
+}
+
+export const updateItemThresholds = async (
+  itemId: string,
+  thresholds: ItemThresholdFields
+): Promise<{ success: boolean; error?: string }> => {
+  const labId = await resolveCurrentUserLabId()
+  if (!labId) return { success: false, error: "No lab context." }
+
+  const row: Record<string, unknown> = {}
+  if (thresholds.expiring_soon_days !== undefined) row.expiring_soon_days = thresholds.expiring_soon_days
+  if (thresholds.urgent_days !== undefined) row.urgent_days = thresholds.urgent_days
+  if (thresholds.low_stock_threshold !== undefined) row.low_stock_threshold = thresholds.low_stock_threshold
+  if (thresholds.working_expiry_days !== undefined) row.working_expiry_days = thresholds.working_expiry_days
+
+  const { error } = await supabase.from("items").update(row).eq("id", itemId).eq("lab_id", labId)
+
+  if (error) {
+    console.error("[updateItemThresholds] Failed:", error)
+    return { success: false, error: error.message }
+  }
+  return { success: true }
+}
+
+/** Suggested working expiry (capped by actual lot expiry) when `items.working_expiry_days` is set. */
+export async function suggestWorkingExpiryDate(
+  itemId: string,
+  openedDate: string,
+  actualExpiryDate: string
+): Promise<string | null> {
+  const labId = await resolveCurrentUserLabId()
+  if (!labId) return null
+
+  const { data, error } = await supabase
+    .from("items")
+    .select("working_expiry_days")
+    .eq("id", itemId)
+    .eq("lab_id", labId)
+    .maybeSingle()
+
+  if (error || !data?.working_expiry_days || data.working_expiry_days < 1) return null
+
+  const raw = addCalendarDays(openedDate, data.working_expiry_days)
+  if (!actualExpiryDate) return raw
+  return raw > actualExpiryDate ? actualExpiryDate : raw
 }
 
 export const STATUS_STYLES: Record<string, string> = {
@@ -535,6 +648,7 @@ export interface ReorderRequest {
 }
 
 export interface RequestMutationInput {
+  itemId?: string | null
   catalogNumber: string
   itemName: string
   vendor: string
@@ -567,6 +681,7 @@ export const createRequestInSupabase = async (
     .insert([
       {
         lab_id: labId,
+        item_id: input.itemId ?? null,
         catalog_number: input.catalogNumber,
         item_name: input.itemName,
         vendor: input.vendor,
@@ -586,6 +701,7 @@ export const updateRequestInSupabase = async (requestId: string, input: RequestM
   return supabase
     .from("requests")
     .update({
+      item_id: input.itemId ?? null,
       catalog_number: input.catalogNumber,
       item_name: input.itemName,
       vendor: input.vendor,
@@ -598,7 +714,21 @@ export const updateRequestInSupabase = async (requestId: string, input: RequestM
     .eq("lab_id", labId)
 }
 
-export type ActivityActionType = "Added" | "Opened" | "Used" | "Disposed" | "Ordered" | "Received" | "Edited" | "Deleted from Bench" | "Deleted from Storage"
+export type ActivityActionType =
+  | "Added"
+  | "Opened"
+  | "Used"
+  | "Disposed"
+  | "Ordered"
+  | "Received"
+  | "Edited"
+  | "Deleted from Bench"
+  | "Deleted from Storage"
+  | "Approved Lot"
+  | "Rejected Lot"
+  | "Submitted COA"
+  | "Submitted Lot Validation"
+  | "Archived Lot"
 
 export interface ActivityLogEntry {
   id: string
@@ -612,6 +742,15 @@ export interface ActivityLogEntry {
   details: string
 }
 
+export interface UsageReportRow {
+  user_name: string
+  user_initials: string
+  item_name: string
+  lot_number: string
+  details: string
+  created_at: string
+}
+
 export const ACTION_STYLES: Record<string, string> = {
   "Added": "bg-green-500/10 text-green-600 dark:text-green-400",
   "Received": "bg-green-500/10 text-green-600 dark:text-green-400",
@@ -622,6 +761,11 @@ export const ACTION_STYLES: Record<string, string> = {
   "Disposed": "bg-red-500/10 text-red-600 dark:text-red-400",
   "Deleted from Bench": "bg-red-500/10 text-red-600 dark:text-red-400",
   "Deleted from Storage": "bg-red-500/10 text-red-600 dark:text-red-400",
+  "Approved Lot": "bg-green-500/10 text-green-600 dark:text-green-400",
+  "Rejected Lot": "bg-red-500/10 text-red-600 dark:text-red-400",
+  "Submitted COA": "bg-blue-500/10 text-blue-600 dark:text-blue-400",
+  "Submitted Lot Validation": "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
+  "Archived Lot": "bg-zinc-500/10 text-zinc-600 dark:text-zinc-400",
 }
 
 export const fetchInventoryFromSupabase = async (): Promise<InventoryGroup[]> => {
@@ -655,6 +799,7 @@ export const fetchInventoryFromSupabase = async (): Promise<InventoryGroup[]> =>
       notes: row.notes,
       totalUnits: totalUnitsFromInventoryRow(row),
       itemName: name,
+      validation_status: row.validation_status ?? "not_required",
     }
 
     if (!groups[name]) {
@@ -943,6 +1088,99 @@ export const fetchLogsFromSupabase = async (): Promise<ActivityLogEntry[]> => {
   }))
 }
 
+function formatInTimeZoneParts(timeZone: string, date: Date): Record<string, number> {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(date)
+
+  const get = (type: string) => Number(parts.find(p => p.type === type)?.value ?? 0)
+  return {
+    year: get("year"),
+    month: get("month"),
+    day: get("day"),
+    hour: get("hour"),
+    minute: get("minute"),
+    second: get("second"),
+  }
+}
+
+/**
+ * Convert a wall-clock time in an IANA timezone (e.g. "America/Chicago") into a UTC Date.
+ * Uses a small iterative correction to handle DST transitions without extra deps.
+ */
+export function zonedDateTimeToUtc(
+  timeZone: string,
+  opts: { year: number; month: number; day: number; hour?: number; minute?: number; second?: number; millisecond?: number }
+): Date {
+  const { year, month, day } = opts
+  const hour = opts.hour ?? 0
+  const minute = opts.minute ?? 0
+  const second = opts.second ?? 0
+  const millisecond = opts.millisecond ?? 0
+
+  // Start with a UTC guess of the same components, then correct until the timezone-formatted
+  // components match the desired wall clock time.
+  let guess = new Date(Date.UTC(year, month - 1, day, hour, minute, second, millisecond))
+
+  for (let i = 0; i < 2; i++) {
+    const got = formatInTimeZoneParts(timeZone, guess)
+    const gotMs = Date.UTC(got.year, got.month - 1, got.day, got.hour, got.minute, got.second, 0)
+    const wantMs = Date.UTC(year, month - 1, day, hour, minute, second, 0)
+    const diffMs = wantMs - gotMs
+    if (diffMs === 0) break
+    guess = new Date(guess.getTime() + diffMs)
+  }
+
+  return guess
+}
+
+export function labDateRangeToUtcRange(
+  labTimezone: string,
+  fromDate: string,
+  toDate: string
+): { startIso: string; endIso: string } {
+  const [fy, fm, fd] = fromDate.split("-").map(n => parseInt(n, 10))
+  const [ty, tm, td] = toDate.split("-").map(n => parseInt(n, 10))
+  const start = zonedDateTimeToUtc(labTimezone, { year: fy, month: fm, day: fd, hour: 0, minute: 0, second: 0, millisecond: 0 })
+  const end = zonedDateTimeToUtc(labTimezone, { year: ty, month: tm, day: td, hour: 23, minute: 59, second: 59, millisecond: 999 })
+  return { startIso: start.toISOString(), endIso: end.toISOString() }
+}
+
+export const fetchUsageLogsFromSupabase = async (params: {
+  fromDate: string
+  toDate: string
+  labTimezone: string
+}): Promise<UsageReportRow[]> => {
+  const labId = await resolveCurrentUserLabId()
+  if (!labId) return []
+
+  const { startIso, endIso } = labDateRangeToUtcRange(params.labTimezone, params.fromDate, params.toDate)
+
+  const { data, error } = await supabase
+    .from("activity_logs")
+    .select("user_name, user_initials, item_name, lot_number, details, created_at")
+    .eq("lab_id", labId)
+    .eq("action_type", "Used")
+    .gte("created_at", startIso)
+    .lte("created_at", endIso)
+    .order("created_at", { ascending: false })
+    .limit(2000)
+
+  if (error) {
+    console.error("[fetchUsageLogsFromSupabase] Failed:", error)
+    return []
+  }
+
+  return (data || []) as UsageReportRow[]
+}
+
 export const fetchActiveLotsFromSupabase = async (): Promise<LotInUseEntry[]> => {
   const labId = await resolveCurrentUserLabId()
   if (!labId) return []
@@ -986,11 +1224,16 @@ export const openNewLotInSupabase = async (
 
   const { data: invLot, error: fetchErr } = await supabase
     .from("inventory_lots")
-    .select("count, units, quantity_type")
+    .select("count, units, quantity_type, validation_status")
     .eq("id", inventoryLotId)
+    .eq("lab_id", labId)
     .single()
 
   if (fetchErr || !invLot) throw new Error("Could not find inventory lot.")
+
+  if (!["not_required", "approved"].includes(invLot.validation_status || "")) {
+    throw new Error("This lot is not approved for bench use.")
+  }
 
   const current = totalUnitsFromInventoryRow(invLot)
   const newInventoryCount = current - unitsToMove
@@ -1024,7 +1267,16 @@ export const openNewLotInSupabase = async (
 
   if (activeErr) throw activeErr
 
-  await logActivity("Opened", "Item", lotNumber, `Opened ${unitsToMove} units for bench use.`)
+  const { data: itemInfo } = await supabase
+    .from("items")
+    .select("name")
+    .eq("id", itemId)
+    .eq("lab_id", labId)
+    .maybeSingle()
+
+  const openedItemName = itemInfo?.name || "Item"
+
+  await logActivity("Opened", openedItemName, lotNumber, `Opened ${unitsToMove} units for bench use.`)
 }
 
 export const logUsageInSupabase = async (
@@ -1176,4 +1428,400 @@ export const calculateDashboardStats = (
     pendingRequests: pending,
     totalMonthlySpend: monthlySpend,
   }
+}
+
+// ── VALIDATION & COA ──
+
+export type ValidationStatus =
+  | "not_required"
+  | "pending_coa"
+  | "pending_validation"
+  | "pending_approval"
+  | "approved"
+  | "rejected"
+  | "archived"
+
+export interface ValidationQueueEntry {
+  lotId: string
+  itemId: string
+  itemName: string
+  lotNumber: string
+  expiryDate: string
+  receivedDate: string
+  validationStatus: ValidationStatus
+  has_coa_record: boolean
+  has_validation_record: boolean
+  requires_coa: boolean
+  requires_lot_validation: boolean
+}
+
+export const fetchValidationQueue = async (): Promise<ValidationQueueEntry[]> => {
+  const labId = await resolveCurrentUserLabId()
+  if (!labId) return []
+
+  const { data, error } = await supabase
+    .from("inventory_lots")
+    .select("id, item_id, lot_number, expiry_date, received_date, validation_status, items(name, requires_coa, requires_lot_validation)")
+    .eq("lab_id", labId)
+    .in("validation_status", ["pending_coa", "pending_validation", "pending_approval"])
+    .order("received_date", { ascending: false })
+
+  if (error) {
+    console.error("[fetchValidationQueue] Failed:", error)
+    return []
+  }
+
+  const lotIds = (data || []).map((row: any) => row.id)
+  const coaLotIds = new Set<string>()
+  const validationLotIds = new Set<string>()
+
+  if (lotIds.length > 0) {
+    const [{ data: coaRows }, { data: validationRows }] = await Promise.all([
+      supabase
+        .from("coa_records")
+        .select("lot_id")
+        .eq("lab_id", labId)
+        .in("lot_id", lotIds),
+      supabase
+        .from("lot_validation_records")
+        .select("lot_id")
+        .eq("lab_id", labId)
+        .in("lot_id", lotIds),
+    ])
+
+    for (const row of coaRows || []) coaLotIds.add(row.lot_id)
+    for (const row of validationRows || []) validationLotIds.add(row.lot_id)
+  }
+
+  return (data || []).map((row: any) => ({
+    lotId: row.id,
+    itemId: row.item_id,
+    itemName: row.items?.name || "Unknown",
+    lotNumber: row.lot_number,
+    expiryDate: row.expiry_date,
+    receivedDate: row.received_date,
+    validationStatus: row.validation_status as ValidationStatus,
+    has_coa_record: coaLotIds.has(row.id),
+    has_validation_record: validationLotIds.has(row.id),
+    requires_coa: Boolean(row.items?.requires_coa),
+    requires_lot_validation: Boolean(row.items?.requires_lot_validation),
+  }))
+}
+
+export const submitLotValidation = async (
+  lotId: string,
+  previousLotNumber: string,
+  result: string,
+  notes: string,
+  fileUrl: string,
+  fileName: string
+): Promise<{ success: boolean; error?: string }> => {
+  const labId = await resolveCurrentUserLabId()
+  if (!labId) return { success: false, error: "No lab context." }
+
+  const identity = await resolveCurrentUserIdentity()
+  if (!identity) return { success: false, error: "Not authenticated." }
+
+  const { error: insertError } = await supabase.from("lot_validation_records").insert([{
+    lab_id: labId,
+    lot_id: lotId,
+    previous_lot_number: previousLotNumber,
+    result,
+    notes,
+    file_url: fileUrl,
+    file_name: fileName,
+    submitted_by: identity.name,
+    submitted_at: new Date().toISOString(),
+  }])
+
+  if (insertError) {
+    console.error("[submitLotValidation] Insert failed:", insertError)
+    return { success: false, error: insertError.message }
+  }
+
+  const { data: lotData } = await supabase
+    .from("inventory_lots")
+    .select("item_id, lot_number, items(requires_coa)")
+    .eq("id", lotId)
+    .eq("lab_id", labId)
+    .single()
+
+  // Lot validation always requires manager approval
+  // regardless of COA status or lab settings
+  let newStatus = "pending_approval"
+
+  // Only exception: if item also requires COA and it
+  // hasn't been submitted yet, stay on pending_coa
+  const requiresCoa = (lotData?.items as any)?.requires_coa ?? false
+  if (requiresCoa) {
+    const { data: coaData } = await supabase
+      .from("coa_records")
+      .select("id")
+      .eq("lot_id", lotId)
+      .eq("lab_id", labId)
+      .maybeSingle()
+    if (!coaData) newStatus = "pending_coa"
+  }
+
+  const { error: updateError } = await supabase
+    .from("inventory_lots")
+    .update({ validation_status: newStatus })
+    .eq("id", lotId)
+    .eq("lab_id", labId)
+
+  if (updateError) {
+    console.error("[submitLotValidation] Status update failed:", updateError)
+    return { success: false, error: updateError.message }
+  }
+
+  await logActivity(
+    "Submitted Lot Validation",
+    "",
+    lotData?.lot_number ?? lotId,
+    `Lot Validation submitted by ${identity.name}`
+  )
+
+  return { success: true }
+}
+
+export const submitCOARecord = async (
+  lotId: string,
+  fileUrl: string,
+  fileName: string,
+  lotNumber: string,
+  expiryDate: string,
+  notes: string
+): Promise<{ success: boolean; error?: string }> => {
+  const labId = await resolveCurrentUserLabId()
+  if (!labId) return { success: false, error: "No lab context." }
+
+  const identity = await resolveCurrentUserIdentity()
+  if (!identity) return { success: false, error: "Not authenticated." }
+
+  const { error: insertError } = await supabase.from("coa_records").insert([{
+    lab_id: labId,
+    lot_id: lotId,
+    file_url: fileUrl,
+    file_name: fileName,
+    lot_number: lotNumber,
+    expiry_date: expiryDate,
+    notes,
+    uploaded_by: identity.name,
+    uploaded_at: new Date().toISOString(),
+  }])
+
+  if (insertError) {
+    console.error("[submitCOARecord] Insert failed:", insertError)
+    return { success: false, error: insertError.message }
+  }
+
+  const { data: settingsData } = await supabase
+    .from("lab_settings")
+    .select("require_coa_approval")
+    .eq("lab_id", labId)
+    .maybeSingle()
+
+  const requireApproval = settingsData?.require_coa_approval ?? false
+
+  let newStatus: string
+  if (requireApproval) {
+    newStatus = "pending_approval"
+  } else {
+    const { data: lotData } = await supabase
+      .from("inventory_lots")
+      .select("item_id, items(requires_lot_validation)")
+      .eq("id", lotId)
+      .eq("lab_id", labId)
+      .single()
+  
+    const requiresLotValidation = 
+      (lotData?.items as any)?.requires_lot_validation ?? false
+  
+    if (requiresLotValidation) {
+      // Check if lot validation already submitted
+      const { data: validationData } = await supabase
+        .from("lot_validation_records")
+        .select("id")
+        .eq("lot_id", lotId)
+        .eq("lab_id", labId)
+        .maybeSingle()
+      
+      // If validation already done → pending_approval
+      // If validation not yet done → pending_validation (tech needs to submit it)
+      newStatus = validationData ? "pending_approval" : "pending_validation"
+    } else {
+      newStatus = "approved"
+    }
+  }
+
+  const { error: updateError } = await supabase
+    .from("inventory_lots")
+    .update({ validation_status: newStatus })
+    .eq("id", lotId)
+    .eq("lab_id", labId)
+
+  if (updateError) {
+    console.error("[submitCOARecord] Status update failed:", updateError)
+    return { success: false, error: updateError.message }
+  }
+
+  await logActivity(
+    "Submitted COA",
+    "",
+    lotNumber,
+    `COA uploaded by ${identity.name}`
+  )
+
+  return { success: true }
+}
+
+export const approveLot = async (lotId: string): Promise<{ success: boolean; error?: string }> => {
+  const labId = await resolveCurrentUserLabId()
+  if (!labId) return { success: false, error: "No lab context." }
+
+  const identity = await resolveCurrentUserIdentity()
+  if (!identity) return { success: false, error: "Not authenticated." }
+
+  const { error: updateError } = await supabase
+    .from("inventory_lots")
+    .update({ validation_status: "approved" })
+    .eq("id", lotId)
+    .eq("lab_id", labId)
+
+  if (updateError) {
+    console.error("[approveLot] Status update failed:", updateError)
+    return { success: false, error: updateError.message }
+  }
+
+  await supabase
+    .from("lot_validation_records")
+    .update({ approved_by: identity.name, approved_at: new Date().toISOString() })
+    .eq("lot_id", lotId)
+    .eq("lab_id", labId)
+
+  const { data: lotInfo } = await supabase
+    .from("inventory_lots")
+    .select("lot_number")
+    .eq("id", lotId)
+    .single()
+  const lotNumber = lotInfo?.lot_number ?? lotId
+
+  await logActivity(
+    "Approved Lot",
+    "",
+    lotNumber,
+    `Lot Approved by ${identity.name}`
+  )
+
+  return { success: true }
+}
+
+export const rejectLot = async (lotId: string, reason: string): Promise<{ success: boolean; error?: string }> => {
+  const labId = await resolveCurrentUserLabId()
+  if (!labId) return { success: false, error: "No lab context." }
+
+  const identity = await resolveCurrentUserIdentity()
+  if (!identity) return { success: false, error: "Not authenticated." }
+
+  const { error: updateError } = await supabase
+    .from("inventory_lots")
+    .update({ validation_status: "rejected" })
+    .eq("id", lotId)
+    .eq("lab_id", labId)
+
+  if (updateError) {
+    console.error("[rejectLot] Status update failed:", updateError)
+    return { success: false, error: updateError.message }
+  }
+
+  await supabase
+    .from("lot_validation_records")
+    .update({ rejection_reason: reason })
+    .eq("lot_id", lotId)
+    .eq("lab_id", labId)
+
+  const { data: lotInfo } = await supabase
+    .from("inventory_lots")
+    .select("lot_number")
+    .eq("id", lotId)
+    .single()
+  const lotNumber = lotInfo?.lot_number ?? lotId
+
+  await logActivity(
+    "Rejected Lot",
+    "",
+    lotNumber,
+    `Lot Rejected by ${identity.name}. Reason: ${reason}`
+  )
+
+  return { success: true }
+}
+
+export const archiveLotToHistory = async (lotId: string): Promise<{ success: boolean; error?: string }> => {
+  const labId = await resolveCurrentUserLabId()
+  if (!labId) return { success: false, error: "No lab context." }
+
+  const identity = await resolveCurrentUserIdentity()
+  if (!identity) return { success: false, error: "Not authenticated." }
+
+  const { data: lotInfo } = await supabase
+    .from("inventory_lots")
+    .select("lot_number")
+    .eq("id", lotId)
+    .eq("lab_id", labId)
+    .single()
+  const lotNumber = lotInfo?.lot_number ?? lotId
+
+  const { error: updateError } = await supabase
+    .from("inventory_lots")
+    .update({
+      validation_status: "archived",
+      validation_archived_at: new Date().toISOString(),
+    })
+    .eq("id", lotId)
+    .eq("lab_id", labId)
+
+  if (updateError) {
+    console.error("[archiveLotToHistory] Status update failed:", updateError)
+    return { success: false, error: updateError.message }
+  }
+
+  await logActivity(
+    "Archived Lot",
+    "",
+    lotNumber,
+    `Lot moved to history by ${identity.name}`
+  )
+
+  return { success: true }
+}
+
+export const uploadCOAFile = async (
+  lotId: string,
+  labId: string,
+  file: File
+): Promise<{ fileUrl: string; fileName: string } | null> => {
+  // Change the path to include a timestamp to avoid conflicts
+  const timestamp = Date.now()
+  const path = `${labId}/${lotId}/${timestamp}_${file.name}`
+
+  const { error } = await supabase.storage
+    .from("coa-documents")
+    .upload(path, file, { upsert: true })
+
+  if (error) {
+    console.error("[uploadCOAFile] Upload failed:", error)
+    return null
+  }
+
+  const { data: urlData, error: urlError } = await supabase.storage
+    .from("coa-documents")
+    .createSignedUrl(path, 60 * 60 * 24 * 365) // 1 year expiry
+
+  if (urlError || !urlData?.signedUrl) {
+    console.error("[uploadCOAFile] URL generation failed:", urlError)
+    return null
+  }
+
+  return { fileUrl: urlData.signedUrl, fileName: file.name }
 }

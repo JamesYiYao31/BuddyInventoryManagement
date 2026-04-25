@@ -12,6 +12,7 @@ import {
   BarChart3,
   Network,
   Shield,
+  ShieldCheck,
 } from "lucide-react"
 import { SidebarPage } from "@/lib/inventory-utils"
 import Image from "next/image"
@@ -21,15 +22,17 @@ interface DashboardSidebarProps {
   setActivePage: (page: SidebarPage) => void
   /** When true, show internal link to the super-admin control panel (never for manager/technician). */
   showSuperAdminLink?: boolean
+  userRole?: "manager" | "technician"
 }
 
-export function DashboardSidebar({ activePage, setActivePage, showSuperAdminLink = false }: DashboardSidebarProps) {
+export function DashboardSidebar({ activePage, setActivePage, showSuperAdminLink = false, userRole }: DashboardSidebarProps) {
   const navItems = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "inventory", label: "Inventory", icon: Package },
     { id: "lotinuse", label: "Lot in Use", icon: PackageOpen },
     { id: "requests", label: "Requests", icon: ClipboardList },
     { id: "activitylog", label: "Activity Log", icon: Activity },
+    ...(userRole === "manager" ? [{ id: "validation", label: "Validation & COA", icon: ShieldCheck }] : []),
     { id: "analytics", label: "Analytics", icon: BarChart3 },
     { id: "labsharing", label: "Lab Sharing", icon: Network },
     { id: "settings", label: "Settings", icon: Settings },

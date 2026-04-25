@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { useRouter } from "next/navigation" 
-import { Search, CalendarClock, CalendarDays, CheckCircle2, User, Scan, Minus, PackagePlus, FlaskConical, AlertTriangle, Activity, Skull, DollarSign } from "lucide-react"
+import { Search, CalendarClock, CalendarDays, CheckCircle2, User, Scan, Minus, PackagePlus, FlaskConical, AlertTriangle, Activity, Skull, DollarSign, ShieldCheck } from "lucide-react"
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts"
 import { supabase } from "@/lib/supabase"
 
@@ -26,6 +26,7 @@ import ActivityLogTab from "@/components/dashboard/activity-log-table"
 import AnalyticsTab from "@/components/dashboard/analytics-tab"
 import LabSharingTab from "@/components/dashboard/lab-sharing-tab"
 import LabSettingsTab from "@/components/dashboard/lab-settings-tab"
+import ValidationTab from "@/components/dashboard/validation-tab"
 import type { TechDashboardWidget } from "@/lib/inventory-utils"
 
 // Builds a natural-language sentence for the "My Recent Activities" timeline.
@@ -220,8 +221,16 @@ export default function DashboardPage() {
   const [lotsInUse, setLotsInUse] = useState<LotInUseEntry[]>([]) 
   const [stats, setStats] = useState<DashboardStats | null>(null)
   
-  const [labSettings, setLabSettings] = useState<LabSettings>({ lowStockThreshold: 5, expiringSoonDays: 30, urgentDays: 7, labTimezone: "America/Chicago", techDashboardWidget: "donut" })
+  const [labSettings, setLabSettings] = useState<LabSettings>({
+    lowStockThreshold: 5,
+    expiringSoonDays: 30,
+    urgentDays: 7,
+    labTimezone: "America/Chicago",
+    techDashboardWidget: "donut",
+    techsCanEditThresholds: true,
+  })
   const [labName, setLabName] = useState("My Lab")
+  const [pendingValidationCount, setPendingValidationCount] = useState(0)
   const [profileFullName, setProfileFullName] = useState("")
   const [loading, setLoading] = useState(true)
 
@@ -285,6 +294,16 @@ export default function DashboardPage() {
         .select('*')
         .eq('lab_id', labId ?? '')
         .order('date_requested', { ascending: false })
+
+      // Count pending validation lots
+      if (labId) {
+        const { count: valCount } = await supabase
+          .from("inventory_lots")
+          .select("id", { count: "exact", head: true })
+          .eq("lab_id", labId)
+          .in("validation_status", ["pending_coa", "pending_validation", "pending_approval"])
+        setPendingValidationCount(valCount ?? 0)
+      }
       
       if (reqError) throw reqError
 
@@ -519,6 +538,7 @@ export default function DashboardPage() {
           activePage={activePage}
           setActivePage={setActivePage}
           showSuperAdminLink={isSuperAdmin}
+          userRole={userRole}
         />
       </div>
 
@@ -544,7 +564,20 @@ export default function DashboardPage() {
                     </div>
                     
                     <AlertCards stats={stats} />
-                    
+
+                    {pendingValidationCount > 0 && (
+                      <button
+                        onClick={() => setActivePage("validation")}
+                        className="flex items-center gap-3 w-full rounded-2xl border border-yellow-500/20 bg-yellow-500/5 px-6 py-4 hover:bg-yellow-500/10 transition-all text-left"
+                      >
+                        <ShieldCheck className="size-5 text-yellow-600 shrink-0" />
+                        <p className="text-sm font-bold text-yellow-700 flex-1">
+                          {pendingValidationCount} lot{pendingValidationCount !== 1 ? "s" : ""} pending validation
+                        </p>
+                        <span className="text-xs font-bold text-yellow-700 opacity-70">View Queue →</span>
+                      </button>
+                    )}
+
                     {/* ── Unified Dashboard Layout (Managers & Technicians) ── */}
                     {(() => {
                       // Lab Bench — shared workspace, same filter for both roles
@@ -698,6 +731,7 @@ export default function DashboardPage() {
                 {activePage === "analytics" && <AnalyticsTab inventory={inventory} requests={requests} activityLogs={activityLogs} labSettings={labSettings} userRole={userRole} />}
                 {activePage === "labsharing" && <LabSharingTab labName={labName} />}
                 {activePage === "settings" && <LabSettingsTab labSettings={labSettings} refreshData={refreshData} userRole={userRole} />}
+                {activePage === "validation" && userRole === "manager" && <ValidationTab userRole={userRole} refreshData={refreshData} />}
 
                 {["inventory", "lotinuse", "requests", "activitylog"].includes(activePage) && (
                   <div className="flex gap-8 items-start print:block">
