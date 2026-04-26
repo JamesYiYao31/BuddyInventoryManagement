@@ -287,7 +287,7 @@ export function DashboardHeader({
           className="ml-4 inline-flex items-center gap-2 bg-muted border border-border px-4 py-1.5 rounded-lg shadow-sm hover:bg-muted/80 text-xs font-bold transition-colors text-muted-foreground hover:text-foreground"
         >
           <span>🐞</span>
-          <span>Submit Feedback / Report Bug</span>
+          <span className="hidden sm:inline">Submit Feedback / Report Bug</span>
         </Link>
       </div>
 

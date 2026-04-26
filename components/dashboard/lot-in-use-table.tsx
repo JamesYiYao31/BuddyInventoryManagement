@@ -545,11 +545,11 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
           <h1 className="text-2xl font-bold text-foreground">Lot in Use</h1>
           <p className="text-sm text-muted-foreground mt-1">Active reagents currently on the bench.</p>
         </div>
-        <div className="flex gap-3">
-          <button onClick={() => { setScanMode("use"); setShowScanModal(true); setBarcodeInput(""); setScanInputMode("usb"); setScanCameraError(""); }} className="flex items-center gap-2 rounded-xl bg-primary text-primary-foreground px-6 py-2.5 text-sm font-bold shadow-md hover:opacity-90 transition-all">
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:gap-3">
+          <button onClick={() => { setScanMode("use"); setShowScanModal(true); setBarcodeInput(""); setScanInputMode("usb"); setScanCameraError(""); }} className="w-full justify-center sm:w-auto flex items-center gap-2 rounded-xl bg-primary text-primary-foreground px-6 py-2.5 text-sm font-bold shadow-md hover:opacity-90 transition-all">
             <Scan className="size-5" /> Scan Reagent
           </button>
-          <button onClick={() => { setManualMode("use"); setShowManualModal(true); setSelectedManualLotId(""); }} className="flex items-center gap-2 rounded-xl border border-border bg-card px-6 py-2.5 text-sm font-bold text-foreground hover:bg-muted transition-all">
+          <button onClick={() => { setManualMode("use"); setShowManualModal(true); setSelectedManualLotId(""); }} className="w-full justify-center sm:w-auto flex items-center gap-2 rounded-xl border border-border bg-card px-6 py-2.5 text-sm font-bold text-foreground hover:bg-muted transition-all">
             <List className="size-5" /> Manual Select
           </button>
           <button
@@ -562,11 +562,11 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
               setUsageError(null)
               setShowUsageReportModal(true)
             }}
-            className="flex items-center gap-2 rounded-xl border border-border bg-card text-foreground px-6 py-2.5 text-sm font-bold hover:bg-muted transition-all"
+            className="w-full justify-center sm:w-auto flex items-center gap-2 rounded-xl border border-border bg-card text-foreground px-6 py-2.5 text-sm font-bold hover:bg-muted transition-all"
           >
             <History className="size-5 text-muted-foreground" /> Usage Report
           </button>
-          <button onClick={handlePrint} className="flex items-center gap-2 rounded-xl border border-border bg-card text-foreground px-6 py-2.5 text-sm font-bold hover:bg-muted transition-all">
+          <button onClick={handlePrint} className="w-full justify-center sm:w-auto flex items-center gap-2 rounded-xl border border-border bg-card text-foreground px-6 py-2.5 text-sm font-bold hover:bg-muted transition-all">
             <Printer className="size-5 text-muted-foreground" /> Print Report
           </button>
         </div>
@@ -622,11 +622,23 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
                     {isExpired ? "Expired" : lot.status}
                   </span>
                 </div>
-                <div className="mb-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-                  <div>Opened <span className="font-medium text-foreground">{lot.openedDate || "—"}</span></div>
-                  <div>Working Exp <span className={`font-medium ${daysLeft <= 7 ? "text-red-500" : "text-foreground"}`}>{lot.workingExpiryDate || "—"}</span></div>
-                  <div>Actual Exp <span className="font-medium text-foreground">{lot.actualExpiryDate || "—"}</span></div>
-                  <div>Qty Left <span className="font-bold text-foreground">{lot.quantityLeft}</span></div>
+                <div className="mb-3 space-y-1 text-xs text-muted-foreground">
+                  <div className="flex justify-between">
+                    <span>Opened</span>
+                    <span className="text-foreground font-medium">{lot.openedDate || "—"}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Working Exp</span>
+                    <span className={`font-medium ${daysLeft <= 7 ? "text-red-500" : "text-foreground"}`}>{lot.workingExpiryDate || "—"}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Actual Exp</span>
+                    <span className="text-foreground font-medium">{lot.actualExpiryDate || "—"}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Qty Left</span>
+                    <span className="text-foreground font-bold">{lot.quantityLeft}</span>
+                  </div>
                 </div>
                 <div className="flex justify-end gap-2">
                   <button onClick={() => triggerManualUsage(lot)} className="flex items-center justify-center size-8 rounded-lg bg-primary/10 text-primary hover:bg-primary hover:text-primary-foreground transition-all" title="Deduct usage">

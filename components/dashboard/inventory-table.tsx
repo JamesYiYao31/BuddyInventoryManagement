@@ -783,12 +783,12 @@ export default function InventoryTab({
       {/* ── HEADER ── */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-foreground">Inventory List</h1>
-        <div className="flex gap-3">
-          <button onClick={() => { resetBarcodeState(); setShowBarcodeModal(true) }} className="flex items-center gap-2 rounded-xl bg-primary text-primary-foreground px-6 py-2.5 text-sm font-bold shadow-md hover:opacity-90 transition-all">
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:gap-3">
+          <button onClick={() => { resetBarcodeState(); setShowBarcodeModal(true) }} className="w-full justify-center sm:w-auto flex items-center gap-2 rounded-xl bg-primary text-primary-foreground px-6 py-2.5 text-sm font-bold shadow-md hover:opacity-90 transition-all">
             <Scan className="size-5" /> Scan Reagent
           </button>
 
-          <button onClick={openManualEntry} className="flex items-center gap-2 rounded-xl border border-border bg-card px-6 py-2.5 text-sm font-bold text-foreground hover:bg-muted transition-all">
+          <button onClick={openManualEntry} className="w-full justify-center sm:w-auto flex items-center gap-2 rounded-xl border border-border bg-card px-6 py-2.5 text-sm font-bold text-foreground hover:bg-muted transition-all">
             <Plus className="size-5" /> Add Manually
           </button>
         </div>
