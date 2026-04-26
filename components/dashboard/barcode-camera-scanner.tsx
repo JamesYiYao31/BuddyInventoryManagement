@@ -1,7 +1,8 @@
 "use client"
 
-import { useEffect, useRef } from "react"
-import { BrowserMultiFormatReader } from "@zxing/browser"
+import { useEffect, useRef, useState } from "react"
+import { FlipHorizontal2 } from "lucide-react"
+import { BrowserMultiFormatReader, IScannerControls } from "@zxing/browser"
 
 interface BarcodeCameraScannerProps {
   onResult: (code: string) => void
@@ -13,8 +14,10 @@ const CAMERA_UNAVAILABLE_MESSAGE = "Camera not available. Use USB scanner or typ
 const HTTPS_REQUIRED_MESSAGE = "Camera scanning requires a secure connection (HTTPS). Use USB scanner or type lot number manually."
 
 export default function BarcodeCameraScanner({ onResult, onError, active }: BarcodeCameraScannerProps) {
+  const [facingMode, setFacingMode] = useState<"environment" | "user">("environment")
   const videoRef = useRef<HTMLVideoElement>(null)
   const readerRef = useRef<BrowserMultiFormatReader | null>(null)
+  const controlsRef = useRef<IScannerControls | null>(null)
   const pauseUntilRef = useRef<number>(0)
 
   const stopStream = () => {
@@ -25,7 +28,8 @@ export default function BarcodeCameraScanner({ onResult, onError, active }: Barc
   }
 
   const stopScanner = () => {
-    readerRef.current?.reset()
+    controlsRef.current?.stop()
+    controlsRef.current = null
     stopStream()
   }
 
@@ -54,10 +58,10 @@ export default function BarcodeCameraScanner({ onResult, onError, active }: Barc
 
     const startScan = async () => {
       try {
-        await reader.decodeFromConstraints(
+        const controls = await reader.decodeFromConstraints(
           {
             video: {
-              facingMode: { exact: "environment" },
+              facingMode: { ideal: facingMode },
             },
           },
           videoEl,
@@ -69,24 +73,13 @@ export default function BarcodeCameraScanner({ onResult, onError, active }: Barc
             onResult(result.getText())
           }
         )
-      } catch {
-        try {
-          await reader.decodeFromConstraints(
-            {
-              video: true,
-            },
-            videoEl,
-            (result) => {
-              if (!result) return
-              const now = Date.now()
-              if (now < pauseUntilRef.current) return
-              pauseUntilRef.current = now + 1000
-              onResult(result.getText())
-            }
-          )
-        } catch {
-          handleCameraFailure()
+        if (cancelled) {
+          controls.stop()
+          return
         }
+        controlsRef.current = controls
+      } catch {
+        handleCameraFailure()
       }
     }
 
@@ -96,7 +89,7 @@ export default function BarcodeCameraScanner({ onResult, onError, active }: Barc
       cancelled = true
       stopScanner()
     }
-  }, [active, onError, onResult])
+  }, [active, facingMode, onError, onResult])
 
   if (typeof window !== "undefined" && !window.isSecureContext) {
     return (
@@ -109,6 +102,14 @@ export default function BarcodeCameraScanner({ onResult, onError, active }: Barc
   return (
     <div className="relative h-56 overflow-hidden rounded-[2rem] border border-border bg-black/80">
       <video ref={videoRef} className="h-full w-full object-cover" autoPlay playsInline muted />
+      <button
+        type="button"
+        onClick={() => setFacingMode(prev => (prev === "environment" ? "user" : "environment"))}
+        className="absolute right-3 top-3 z-10 rounded-xl border border-white/20 bg-black/60 p-2 text-white transition-all hover:bg-black/75"
+        aria-label="Flip camera"
+      >
+        <FlipHorizontal2 className="size-4" />
+      </button>
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
         <div className="relative h-32 w-56">
           <span className="absolute left-0 top-0 h-8 w-8 border-l-4 border-t-4 border-green-400" />
