@@ -373,10 +373,10 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
 
       {/* ── Preview & Save ── */}
       {!loading && (
-        <div className="flex items-center justify-between rounded-2xl border border-border bg-muted/30 px-8 py-6">
-          <div className="flex items-center gap-6 text-sm">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-4 sm:px-8 sm:py-4 rounded-2xl border border-border bg-muted/30">
+          <div className="min-w-0 flex-1 flex items-center gap-6 text-sm">
             <p className="text-muted-foreground font-medium">Preview:</p>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="inline-flex px-3 py-1 rounded-full text-[10px] font-bold bg-green-500/10 text-green-600 dark:text-green-400">In Storage</span>
               <span className="text-muted-foreground">&rarr;</span>
               <span className="inline-flex px-3 py-1 rounded-full text-[10px] font-bold bg-yellow-500/10 text-yellow-600 dark:text-yellow-400">&le; {form.lowStockThreshold} units</span>
@@ -391,7 +391,7 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
           <button
             onClick={handleSave}
             disabled={saving || !isDirty}
-            className="flex items-center gap-2 px-8 py-3 rounded-xl bg-primary text-primary-foreground font-bold text-sm shadow-md hover:opacity-90 transition-all disabled:opacity-40 disabled:pointer-events-none"
+            className="w-full sm:w-auto flex items-center gap-2 px-8 py-3 rounded-xl bg-primary text-primary-foreground font-bold text-sm shadow-md hover:opacity-90 transition-all disabled:opacity-40 disabled:pointer-events-none"
           >
             {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
             {saving ? "Saving…" : "Save Changes"}
