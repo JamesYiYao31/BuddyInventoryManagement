@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { useRouter } from "next/navigation" 
-import { Search, CalendarClock, CalendarDays, CheckCircle2, User, Scan, Minus, PackagePlus, FlaskConical, AlertTriangle, Activity, Skull, DollarSign, ShieldCheck } from "lucide-react"
+import { Search, CalendarClock, CalendarDays, CheckCircle2, User, Scan, Minus, PackagePlus, FlaskConical, AlertTriangle, Activity, Skull, DollarSign, ShieldCheck, ChevronRight } from "lucide-react"
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts"
 import { supabase } from "@/lib/supabase"
 
@@ -635,12 +635,16 @@ export default function DashboardPage() {
                                       ? "Expires today"
                                       : `Expires in ${days} day${days === 1 ? "" : "s"}`
                                   return (
-                                    <div key={lot.id} className="flex items-center gap-4 px-5 py-4 hover:bg-muted/30 transition-colors">
+                                    <div
+                                      key={lot.id}
+                                      onClick={() => setActivePage("lotinuse")}
+                                      className="flex cursor-pointer flex-col gap-2 px-5 py-4 transition-colors hover:bg-muted/30 sm:flex-row sm:items-center sm:gap-4"
+                                    >
                                       <div className="flex-1 min-w-0">
-                                        <p className="font-bold text-foreground truncate">{lot.itemName}</p>
+                                        <p className="font-bold text-foreground break-words">{lot.itemName}</p>
                                         <p className="text-xs font-mono text-muted-foreground">Lot: {lot.lotNumber}</p>
                                       </div>
-                                      <div className="flex flex-wrap items-center gap-2 justify-end">
+                                      <div className="flex flex-wrap items-center gap-2 sm:justify-end">
                                         {days <= 7 && (
                                           <span className="flex items-center gap-1 px-3 py-1 rounded-full text-[10px] font-bold bg-red-500/10 text-red-600">
                                             <AlertTriangle className="size-3" />
@@ -653,6 +657,7 @@ export default function DashboardPage() {
                                           </span>
                                         )}
                                       </div>
+                                      <ChevronRight className="hidden size-4 shrink-0 text-muted-foreground sm:block" />
                                     </div>
                                   )
                                 })}
@@ -663,7 +668,7 @@ export default function DashboardPage() {
                           </div>
 
                           {/* Section B: Quick Actions (both roles) */}
-                          <div className="grid grid-cols-2 gap-3 overflow-x-hidden sm:grid-cols-3 lg:flex lg:gap-4">
+                          <div className="grid grid-cols-1 gap-3 overflow-x-hidden sm:grid-cols-3 lg:flex lg:gap-4">
                             <button onClick={() => setActivePage("inventory")} className="group w-full lg:w-auto flex flex-col items-center gap-4 p-8 rounded-[2.5rem] border border-border bg-card hover:border-primary/40 hover:bg-primary/5 transition-all shadow-sm">
                               <div className="p-4 rounded-2xl bg-primary/10 group-hover:scale-110 transition-transform"><Scan className="size-8 text-primary" /></div>
                               <span className="text-sm font-black uppercase tracking-widest text-foreground">Scan Reagent</span>

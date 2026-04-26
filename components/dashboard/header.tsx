@@ -340,7 +340,7 @@ export function DashboardHeader({
         </div>
 
         {/* ── NOTIFICATION BELL ── */}
-        <div ref={bellRef} className="relative">
+        <div ref={bellRef} className="static sm:relative">
           <button
             onClick={handleBellClick}
             className="relative p-1.5 lg:p-2 text-muted-foreground hover:text-foreground transition-colors rounded-full hover:bg-muted"
@@ -354,7 +354,7 @@ export function DashboardHeader({
           </button>
 
           {bellOpen && (
-            <div className="absolute right-0 top-full z-50 mt-1 w-[calc(100vw-2rem)] rounded-xl border border-border bg-card shadow-xl overflow-hidden animate-in fade-in slide-in-from-top-1 duration-150 sm:w-96">
+            <div className="absolute top-full mt-1 right-0 w-screen max-w-[calc(100vw-2rem)] sm:w-96 rounded-xl border border-border bg-card shadow-xl overflow-hidden animate-in fade-in slide-in-from-top-1 duration-150 z-50">
               <div className="px-4 py-3 border-b border-border bg-muted/30 flex items-center justify-between">
                 <p className="text-xs font-black uppercase tracking-widest text-muted-foreground">Lab Alerts</p>
                 {notifications.length > 0 && (

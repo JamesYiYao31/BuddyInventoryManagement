@@ -291,19 +291,19 @@ export default function RequestsTab({ requests, refreshRequests, userRole }: Req
       </div>
 
       {/* ── METRICS ── */}
-      <div className="grid grid-cols-3 gap-2 sm:flex sm:gap-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
         <div className="min-w-0 overflow-hidden bg-card border border-border p-5 rounded-2xl flex items-center gap-4 shadow-sm">
            <div className="p-3 bg-yellow-500/10 text-yellow-600 rounded-xl"><Clock className="size-6" /></div>
-           <div className="min-w-0"><p className="hidden truncate text-xs font-bold text-muted-foreground uppercase tracking-widest sm:block">Pending</p><p className="text-2xl font-black text-foreground">{requests.filter(r => r.status === "Pending").length}</p></div>
+           <div className="min-w-0"><p className="truncate text-xs font-bold text-muted-foreground uppercase tracking-widest">Pending</p><p className="text-2xl font-black text-foreground">{requests.filter(r => r.status === "Pending").length}</p></div>
         </div>
         <div className="min-w-0 overflow-hidden bg-card border border-border p-5 rounded-2xl flex items-center gap-4 shadow-sm">
            <div className="p-3 bg-purple-500/10 text-purple-600 rounded-xl"><PackagePlus className="size-6" /></div>
-           <div className="min-w-0"><p className="hidden truncate text-xs font-bold text-muted-foreground uppercase tracking-widest sm:block">Ordered</p><p className="text-2xl font-black text-foreground">{requests.filter(r => r.status === "Ordered").length}</p></div>
+           <div className="min-w-0"><p className="truncate text-xs font-bold text-muted-foreground uppercase tracking-widest">Ordered</p><p className="text-2xl font-black text-foreground">{requests.filter(r => r.status === "Ordered").length}</p></div>
         </div>
         {userRole === "manager" && (
           <div className="min-w-0 overflow-hidden bg-card border border-border p-5 rounded-2xl flex items-center gap-4 shadow-sm">
              <div className="p-3 bg-green-500/10 text-green-600 rounded-xl"><DollarSign className="size-6" /></div>
-             <div className="min-w-0"><p className="hidden truncate text-xs font-bold text-muted-foreground uppercase tracking-widest sm:block">Total Spend</p><p className="text-2xl font-black text-foreground">${requests.reduce((sum, r) => sum + r.totalPrice, 0).toFixed(2)}</p></div>
+             <div className="min-w-0"><p className="truncate text-xs font-bold text-muted-foreground uppercase tracking-widest">Total Spend</p><p className="text-2xl font-black text-foreground">${requests.reduce((sum, r) => sum + r.totalPrice, 0).toFixed(2)}</p></div>
           </div>
         )}
       </div>
@@ -399,7 +399,7 @@ export default function RequestsTab({ requests, refreshRequests, userRole }: Req
       {/* ── MODAL: CREATE REORDER REQUEST (1.5x Giant Layout) ── */}
       {showRequestModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-md p-4">
-          <div className="mx-2 w-full max-w-7xl rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 sm:mx-auto">
+          <div className="mx-2 flex w-full max-w-7xl max-h-[90vh] flex-col rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 sm:mx-auto">
             <div className="flex justify-between items-center px-4 py-8 border-b border-border bg-muted/20 sm:px-12">
               <div className="flex items-center gap-4 font-bold text-2xl text-foreground">
                 <div className="p-3 rounded-2xl bg-primary/10"><Plus className="size-8 text-primary" /></div>
@@ -407,6 +407,7 @@ export default function RequestsTab({ requests, refreshRequests, userRole }: Req
               </div>
               <button onClick={() => { setShowRequestModal(false); resetRequestForm() }} className="p-2 rounded-full hover:bg-muted text-muted-foreground transition-all"><X className="size-7" /></button>
             </div>
+            <div className="overflow-y-auto flex-1">
             <div className="grid grid-cols-1 gap-12 p-4 sm:grid-cols-3 sm:p-12">
               <div className="space-y-8 sm:border-r sm:border-border sm:pr-12">
                 <p className="text-xs font-black text-primary uppercase tracking-widest">1. Item Details</p>
@@ -470,6 +471,7 @@ export default function RequestsTab({ requests, refreshRequests, userRole }: Req
                 <p className="text-xs font-black text-primary uppercase tracking-widest">3. Additional Info</p>
                 <div className="space-y-2"><label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-1">Notes for Manager</label><textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Urgent..." className="w-full h-48 border border-input bg-background rounded-3xl p-6 text-base resize-none outline-none focus:ring-4 focus:ring-primary/10" /></div>
               </div>
+            </div>
             </div>
             <div className="flex justify-end gap-5 border-t border-border bg-muted/20 px-4 py-10 sm:px-12">
               <button onClick={() => { setShowRequestModal(false); resetRequestForm() }} className="px-10 py-4 rounded-2xl border border-border bg-card font-bold text-base text-muted-foreground hover:bg-muted transition-all">Cancel</button>

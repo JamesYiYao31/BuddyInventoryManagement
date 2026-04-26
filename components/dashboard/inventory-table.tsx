@@ -1200,7 +1200,7 @@ export default function InventoryTab({
          ══════════════════════════════════════════════════════════════════ */}
       {showItemModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-md p-4">
-          <div className="mx-2 w-full max-w-7xl rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 sm:mx-auto">
+          <div className="mx-2 flex w-full max-w-7xl max-h-[90vh] flex-col rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 sm:mx-auto">
 
             {/* Modal header */}
             <div className="flex justify-between items-center border-b border-border bg-muted/20 px-4 py-8 sm:px-12">
@@ -1236,7 +1236,7 @@ export default function InventoryTab({
             )}
 
             {/* Form grid + optional thresholds */}
-            <div className="space-y-10 p-4 sm:p-12">
+            <div className="space-y-10 overflow-y-auto flex-1 p-4 sm:p-12">
             <div className="grid grid-cols-1 gap-12 sm:grid-cols-2">
 
               {/* ── Column 1: Identity ── */}
