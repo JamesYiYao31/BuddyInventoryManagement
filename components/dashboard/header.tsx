@@ -278,7 +278,7 @@ export function DashboardHeader({
 
       {/* ── LEFT SIDE: TITLE & FEEDBACK BUTTON ── */}
       <div className="flex items-center gap-4">
-        <h1 className="text-xl font-black text-foreground tracking-tight">{labName || "My Lab"}</h1>
+        <h1 className="max-w-[120px] truncate text-xl font-black text-foreground tracking-tight sm:max-w-none">{labName || "My Lab"}</h1>
         
         <Link 
           href="/dashboard/feedback" 

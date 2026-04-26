@@ -767,8 +767,8 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
         {/* UNIFIED MANUAL SELECTION MODAL */}
         {showManualModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-md p-4">
-            <div className="w-full max-w-2xl rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-              <div className="flex justify-between items-center px-10 py-8 border-b border-border bg-muted/20">
+            <div className="mx-2 w-full max-w-2xl rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 sm:mx-auto">
+              <div className="flex justify-between items-center border-b border-border bg-muted/20 px-4 py-8 sm:px-10">
                 <div className="flex items-center gap-4 font-bold text-2xl text-foreground">
                   <div className="p-3 bg-primary/10 rounded-2xl">
                     <List className="size-8 text-primary" />
@@ -778,7 +778,7 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
                 <button onClick={() => setShowManualModal(false)} className="p-2 rounded-full hover:bg-muted text-muted-foreground"><X className="size-6" /></button>
               </div>
               
-              <div className="p-10 space-y-8">
+              <div className="space-y-8 p-4 sm:p-10">
                 <div className="flex p-1.5 bg-muted rounded-2xl border border-border">
                   <button onClick={() => { setManualMode("use"); setSelectedManualLotId(""); }} className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all ${manualMode === "use" ? "bg-card shadow-md text-foreground border border-border" : "text-muted-foreground"}`}>Log Usage </button>
                   <button onClick={() => { setManualMode("open"); setSelectedManualLotId(""); }} className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all ${manualMode === "open" ? "bg-card shadow-md text-foreground border border-border" : "text-muted-foreground"}`}>Open New Lot </button>
@@ -819,7 +819,7 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
                   </select>
                 </div>
               </div>
-              <div className="flex justify-end gap-5 px-10 py-8 border-t border-border bg-muted/20">
+              <div className="flex justify-end gap-5 border-t border-border bg-muted/20 px-4 py-8 sm:px-10">
                  <button onClick={() => setShowManualModal(false)} className="px-8 py-4 rounded-2xl border border-border bg-card font-bold text-muted-foreground hover:bg-muted transition-all">Cancel</button>
                  <button onClick={handleManualSubmit} disabled={!selectedManualLotId} className="px-12 py-4 rounded-2xl bg-primary text-primary-foreground font-black text-lg shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50">
                    {manualMode === "use" ? "Proceed to Deduct" : "Proceed to Bench"}
@@ -832,12 +832,12 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
         {/* Scanner Modal */}
         {showScanModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-md p-4">
-            <div className="w-full max-w-xl rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-              <div className="flex justify-between items-center px-10 py-8 border-b border-border bg-muted/20">
+            <div className="mx-2 w-full max-w-xl rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 sm:mx-auto">
+              <div className="flex justify-between items-center border-b border-border bg-muted/20 px-4 py-8 sm:px-10">
                 <div className="flex items-center gap-4 font-bold text-xl text-foreground"><Scan className="size-8 text-primary" /> Scan Action</div>
                 <button onClick={() => setShowScanModal(false)} className="p-2 rounded-full hover:bg-muted text-muted-foreground"><X className="size-6" /></button>
               </div>
-              <div className="p-10 space-y-8 text-center">
+              <div className="space-y-8 p-4 text-center sm:p-10">
                 <div className="flex p-1.5 bg-muted rounded-2xl border border-border">
                   <button onClick={() => setScanMode("use")} className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all ${scanMode === "use" ? "bg-card shadow-md text-foreground border border-border" : "text-muted-foreground"}`}>Log Usage</button>
                   <button onClick={() => setScanMode("open")} className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all ${scanMode === "open" ? "bg-card shadow-md text-foreground border border-border" : "text-muted-foreground"}`}>Open New Lot</button>
@@ -878,12 +878,12 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
         {/* Usage Modal */}
         {showUsageModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-md p-4">
-            <div className="w-full max-w-2xl rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-              <div className="flex justify-between items-center px-10 py-8 border-b border-border bg-muted/20">
+            <div className="mx-2 w-full max-w-2xl rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 sm:mx-auto">
+              <div className="flex justify-between items-center border-b border-border bg-muted/20 px-4 py-8 sm:px-10">
                 <div className="flex items-center gap-4 font-bold text-2xl text-foreground"><Minus className="size-8 text-primary" /> Log Usage</div>
                 <button onClick={() => setShowUsageModal(null)} className="p-2 rounded-full hover:bg-muted text-muted-foreground"><X className="size-6" /></button>
               </div>
-              <div className="p-10 space-y-8">
+              <div className="space-y-8 p-4 sm:p-10">
                 <div className="bg-primary/5 border-2 border-primary/20 p-8 rounded-[2rem] text-center">
                   <p className="font-black text-3xl text-foreground">{showUsageModal.itemName}</p>
                   <p className="text-sm font-mono text-muted-foreground mt-2">Lot: {showUsageModal.lotNumber} | Qty: {showUsageModal.quantityLeft}</p>
@@ -896,7 +896,7 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
                   </div>
                 </div>
               </div>
-              <div className="flex justify-end gap-5 px-10 py-8 border-t border-border bg-muted/20">
+              <div className="flex justify-end gap-5 border-t border-border bg-muted/20 px-4 py-8 sm:px-10">
                  <button onClick={() => setShowUsageModal(null)} className="px-8 py-4 rounded-2xl border border-border bg-card font-bold text-muted-foreground hover:bg-muted transition-all">Cancel</button>
                  <button onClick={handleConfirmDeduction} className="px-12 py-4 rounded-2xl bg-primary text-primary-foreground font-black text-lg shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all">Confirm Deduction</button>
               </div>
@@ -907,12 +907,12 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
         {/* Delete from Bench Modal */}
         {showDeleteModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-md p-4">
-            <div className="w-full max-w-2xl rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-              <div className="flex justify-between items-center px-10 py-8 border-b border-border bg-destructive/5">
+            <div className="mx-2 w-full max-w-2xl rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 sm:mx-auto">
+              <div className="flex justify-between items-center border-b border-border bg-destructive/5 px-4 py-8 sm:px-10">
                 <div className="flex items-center gap-4 font-bold text-2xl text-destructive"><Trash2 className="size-8" /> Delete from Bench</div>
                 <button onClick={() => setShowDeleteModal(null)} className="p-2 rounded-full hover:bg-muted text-muted-foreground"><X className="size-6" /></button>
               </div>
-              <div className="p-10 space-y-8">
+              <div className="space-y-8 p-4 sm:p-10">
                 <div className="bg-destructive/5 border-2 border-destructive/20 p-8 rounded-[2rem] text-center">
                   <p className="font-black text-3xl text-foreground">{showDeleteModal.itemName}</p>
                   <p className="text-sm font-mono text-muted-foreground mt-2">Lot: {showDeleteModal.lotNumber}</p>
@@ -950,7 +950,7 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
                   <p className="text-sm text-muted-foreground">This will permanently remove the lot from the bench and log the reason to the audit trail.</p>
                 </div>
               </div>
-              <div className="flex justify-end gap-5 px-10 py-8 border-t border-border bg-muted/20">
+              <div className="flex justify-end gap-5 border-t border-border bg-muted/20 px-4 py-8 sm:px-10">
                 <button onClick={() => setShowDeleteModal(null)} className="px-8 py-4 rounded-2xl border border-border bg-card font-bold text-muted-foreground hover:bg-muted transition-all">Cancel</button>
                 <button
                   onClick={handleConfirmDelete}
@@ -967,8 +967,8 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
         {/* Open New Lot Modal (1.5x Giant Pro) */}
         {showOpenModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-md p-4">
-            <div className="w-full max-w-7xl rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-               <div className="flex justify-between items-center px-10 py-10 border-b border-border bg-muted/20">
+            <div className="mx-2 w-full max-w-7xl rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 sm:mx-auto">
+               <div className="flex justify-between items-center border-b border-border bg-muted/20 px-4 py-10 sm:px-10">
                 <div className="flex items-center gap-4 font-bold text-3xl text-foreground">
                   <div className="p-3 bg-primary/10 rounded-2xl"><PackageOpen className="size-10 text-primary" /></div>
                   Open New Lot to Bench
@@ -976,7 +976,7 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
                 <button onClick={() => setShowOpenModal(null)} className="p-3 rounded-full hover:bg-muted text-muted-foreground"><X className="size-8" /></button>
               </div>
 
-              <div className="p-12 grid grid-cols-3 gap-12">
+              <div className="grid grid-cols-3 gap-12 p-4 sm:p-12">
                 {/* Column 1 */}
                 <div className="space-y-6">
                    <h3 className="text-lg font-bold text-foreground flex items-center gap-2"><div className="w-2 h-6 bg-primary rounded-full" /> 1. Source Details</h3>
@@ -1046,7 +1046,7 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
                 </div>
               </div>
               
-              <div className="flex justify-end gap-5 px-12 py-10 border-t border-border bg-muted/20">
+              <div className="flex justify-end gap-5 border-t border-border bg-muted/20 px-4 py-10 sm:px-12">
                  <button onClick={() => setShowOpenModal(null)} className="px-10 py-5 rounded-2xl border border-border bg-card font-bold text-lg text-muted-foreground hover:bg-muted transition-all">Cancel</button>
                  <button onClick={() => { void handleConfirmOpen() }} className="px-20 py-5 rounded-2xl bg-primary text-primary-foreground font-black text-xl shadow-2xl shadow-primary/30 hover:scale-[1.02] active:scale-95 transition-all flex items-center gap-3">
                    <CheckCircle2 className="size-6" /> Start Tracking on Bench
@@ -1059,8 +1059,8 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
         {/* FEFO soft warning modal */}
         {showFefoWarningModal && fefoWarningData && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-md p-4">
-            <div className="w-full max-w-2xl rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-              <div className="flex justify-between items-center px-10 py-8 border-b border-border bg-amber-500/10">
+            <div className="mx-2 w-full max-w-2xl rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 sm:mx-auto">
+              <div className="flex justify-between items-center border-b border-border bg-amber-500/10 px-4 py-8 sm:px-10">
                 <div className="flex items-center gap-4 font-bold text-2xl text-amber-700">
                   <AlertTriangle className="size-8" />
                   Earlier Expiry Lot Available
@@ -1073,7 +1073,7 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
                 </button>
               </div>
 
-              <div className="p-10 space-y-6">
+              <div className="space-y-6 p-4 sm:p-10">
                 <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-6 space-y-4">
                   <p className="text-base text-foreground leading-relaxed">
                     Lot <span className="font-mono font-bold">{fefoWarningData.suggestedLotNumber}</span> of{" "}
@@ -1088,7 +1088,7 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
                 </div>
               </div>
 
-              <div className="flex flex-wrap justify-end gap-3 px-10 py-8 border-t border-border bg-muted/20">
+              <div className="flex flex-wrap justify-end gap-3 border-t border-border bg-muted/20 px-4 py-8 sm:px-10">
                 <button
                   onClick={() => { setShowFefoWarningModal(false); setFefoWarningData(null) }}
                   className="px-6 py-3 rounded-xl bg-transparent text-muted-foreground font-bold text-sm hover:bg-muted transition-all"
@@ -1212,8 +1212,8 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
          ══════════════════════════════════════════════ */}
       {showUsageReportModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-md p-4 print:hidden">
-          <div className="w-full max-w-6xl rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="flex justify-between items-center px-10 py-8 border-b border-border bg-muted/20">
+          <div className="mx-2 w-full max-w-6xl rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 sm:mx-auto">
+            <div className="flex justify-between items-center border-b border-border bg-muted/20 px-4 py-8 sm:px-10">
               <div className="flex items-center gap-4 font-bold text-2xl text-foreground">
                 <History className="size-7 text-primary" />
                 Usage Report
@@ -1227,7 +1227,7 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
               </button>
             </div>
 
-            <div className="p-10 space-y-6">
+            <div className="space-y-6 p-4 sm:p-10">
               <div className="flex flex-wrap items-end justify-between gap-4">
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest ml-1">
@@ -1374,7 +1374,7 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
               </div>
             </div>
 
-            <div className="flex flex-wrap justify-between gap-3 px-10 py-8 border-t border-border bg-muted/20">
+            <div className="flex flex-wrap justify-between gap-3 border-t border-border bg-muted/20 px-4 py-8 sm:px-10">
               <button
                 type="button"
                 onClick={() => setShowUsageReportModal(false)}

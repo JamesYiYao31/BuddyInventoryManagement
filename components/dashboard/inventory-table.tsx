@@ -1091,12 +1091,12 @@ export default function InventoryTab({
          ══════════════════════════════════════════════════════════════════ */}
       {showBarcodeModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-md p-4">
-          <div className="w-full max-w-xl rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95">
-            <div className="flex justify-between items-center px-10 py-8 border-b border-border bg-muted/20">
+          <div className="mx-2 w-full max-w-xl rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 sm:mx-auto">
+            <div className="flex justify-between items-center border-b border-border bg-muted/20 px-4 py-8 sm:px-10">
               <div className="flex items-center gap-4 font-bold text-xl text-foreground"><Scan className="size-8 text-primary" /> Scan Barcode</div>
               <button onClick={() => { setShowBarcodeModal(false); resetBarcodeState() }} className="p-2 rounded-full hover:bg-muted text-muted-foreground"><X className="size-6" /></button>
             </div>
-            <div className="p-10 space-y-8 text-center">
+            <div className="space-y-8 p-4 text-center sm:p-10">
 
               {/* Awaiting scan input */}
               {!barcodeMatched && !barcodeScanning && !barcodeError && (
@@ -1200,10 +1200,10 @@ export default function InventoryTab({
          ══════════════════════════════════════════════════════════════════ */}
       {showItemModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-md p-4">
-          <div className="w-full max-w-7xl rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+          <div className="mx-2 w-full max-w-7xl rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 sm:mx-auto">
 
             {/* Modal header */}
-            <div className="flex justify-between items-center px-12 py-8 border-b border-border bg-muted/20">
+            <div className="flex justify-between items-center border-b border-border bg-muted/20 px-4 py-8 sm:px-12">
               <div className="flex items-center gap-4 font-bold text-2xl text-foreground">
                 <div className="p-3 rounded-2xl bg-primary/10"><Plus className="size-8 text-primary" /></div>
                 <span>{editingLot ? "Edit Lot Entry" : "Add New Item / Lot"}</span>
@@ -1236,11 +1236,11 @@ export default function InventoryTab({
             )}
 
             {/* Form grid + optional thresholds */}
-            <div className="p-12 space-y-10">
-            <div className="grid grid-cols-2 gap-12">
+            <div className="space-y-10 p-4 sm:p-12">
+            <div className="grid grid-cols-1 gap-12 sm:grid-cols-2">
 
               {/* ── Column 1: Identity ── */}
-              <div className="space-y-8 border-r border-border pr-12">
+              <div className="space-y-8 sm:border-r sm:border-border sm:pr-12">
                 <div className="space-y-4">
                   <p className="text-xs font-black text-primary uppercase tracking-[0.2em]">1. Item & Lot</p>
 
@@ -1388,7 +1388,7 @@ export default function InventoryTab({
               {/* ── Column 2: Logistics & Quantity ── */}
               <div className="space-y-8">
                 <p className="text-xs font-black text-primary uppercase tracking-[0.2em]">2. Logistics & Quantity</p>
-                <div className="grid grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
                   <div className="space-y-2"><label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-1">Expiry Date</label><input type="date" value={lotForm.expiry} onChange={e => setLotForm({ ...lotForm, expiry: e.target.value })} className="w-full h-14 border border-input bg-background rounded-2xl px-6 text-base" /></div>
                   <div className="space-y-2"><label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-1">Vendor</label><input value={lotForm.vendor} onChange={e => setLotForm({ ...lotForm, vendor: e.target.value })} placeholder="Vendor name" className="w-full h-14 border border-input bg-background rounded-2xl px-6 text-base" /></div>
                   <div className="space-y-2"><label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-1">Storage Location</label><input value={lotForm.storage} onChange={e => setLotForm({ ...lotForm, storage: e.target.value })} placeholder="Storage location" className="w-full h-14 border border-input bg-background rounded-2xl px-6 text-base" /></div>
@@ -1481,7 +1481,7 @@ export default function InventoryTab({
             </div>
 
             {/* Modal footer */}
-            <div className="flex justify-end gap-5 px-12 py-10 border-t border-border bg-muted/20">
+            <div className="flex justify-end gap-5 border-t border-border bg-muted/20 px-4 py-10 sm:px-12">
               <button onClick={() => { setShowItemModal(false); setScanBadge(null); setPendingVendorSku(""); resetThresholdForm() }} className="px-10 py-4 rounded-2xl border border-border bg-card font-bold text-base text-muted-foreground hover:bg-muted transition-all">Cancel</button>
               <button
                 onClick={saveItem}
@@ -1501,12 +1501,12 @@ export default function InventoryTab({
          ══════════════════════════════════════════════════════════════════ */}
       {showInventoryDeleteModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-md p-4">
-          <div className="w-full max-w-2xl rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="flex justify-between items-center px-10 py-8 border-b border-border bg-destructive/5">
+          <div className="mx-2 w-full max-w-2xl rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 sm:mx-auto">
+            <div className="flex justify-between items-center border-b border-border bg-destructive/5 px-4 py-8 sm:px-10">
               <div className="flex items-center gap-4 font-bold text-2xl text-destructive"><Trash2 className="size-8" /> Delete from Inventory</div>
               <button onClick={() => setShowInventoryDeleteModal(null)} className="p-2 rounded-full hover:bg-muted text-muted-foreground"><X className="size-6" /></button>
             </div>
-            <div className="p-10 space-y-8">
+            <div className="space-y-8 p-4 sm:p-10">
               <div className="bg-destructive/5 border-2 border-destructive/20 p-8 rounded-[2rem] text-center">
                 <p className="font-black text-3xl text-foreground">{showInventoryDeleteModal.itemName}</p>
                 <p className="text-sm font-mono text-muted-foreground mt-2">Lot: {showInventoryDeleteModal.lot} &middot; {showInventoryDeleteModal.totalUnits} units</p>
@@ -1527,7 +1527,7 @@ export default function InventoryTab({
                 <p className="text-sm text-muted-foreground">This will permanently remove the lot from storage and log the reason to the audit trail.</p>
               </div>
             </div>
-            <div className="flex justify-end gap-5 px-10 py-8 border-t border-border bg-muted/20">
+            <div className="flex justify-end gap-5 border-t border-border bg-muted/20 px-4 py-8 sm:px-10">
               <button onClick={() => setShowInventoryDeleteModal(null)} className="px-8 py-4 rounded-2xl border border-border bg-card font-bold text-muted-foreground hover:bg-muted transition-all">Cancel</button>
               <button
                 onClick={handleConfirmInventoryDelete}
@@ -1546,7 +1546,7 @@ export default function InventoryTab({
          ══════════════════════════════════════════════════════════════════ */}
       {showReorderModal && reorderLot && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-md p-4">
-          <div className="w-full max-w-md rounded-[2rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+          <div className="mx-2 w-full max-w-md rounded-[2rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 sm:mx-auto">
             <div className="flex justify-between items-center px-8 py-6 border-b border-border bg-muted/20">
               <div className="flex items-center gap-3 font-bold text-lg text-foreground">
                 <div className="p-2 rounded-xl bg-primary/10"><Send className="size-5 text-primary" /></div>
