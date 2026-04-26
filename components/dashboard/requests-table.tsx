@@ -291,19 +291,19 @@ export default function RequestsTab({ requests, refreshRequests, userRole }: Req
       </div>
 
       {/* ── METRICS ── */}
-      <div className={`grid gap-6 ${userRole === "manager" ? "grid-cols-3" : "grid-cols-2"}`}>
-        <div className="bg-card border border-border p-5 rounded-2xl flex items-center gap-4 shadow-sm">
+      <div className="grid grid-cols-3 gap-2 sm:flex sm:gap-4">
+        <div className="min-w-0 overflow-hidden bg-card border border-border p-5 rounded-2xl flex items-center gap-4 shadow-sm">
            <div className="p-3 bg-yellow-500/10 text-yellow-600 rounded-xl"><Clock className="size-6" /></div>
-           <div><p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Pending</p><p className="text-2xl font-black text-foreground">{requests.filter(r => r.status === "Pending").length}</p></div>
+           <div className="min-w-0"><p className="truncate text-xs font-bold text-muted-foreground uppercase tracking-widest">Pending</p><p className="text-2xl font-black text-foreground">{requests.filter(r => r.status === "Pending").length}</p></div>
         </div>
-        <div className="bg-card border border-border p-5 rounded-2xl flex items-center gap-4 shadow-sm">
+        <div className="min-w-0 overflow-hidden bg-card border border-border p-5 rounded-2xl flex items-center gap-4 shadow-sm">
            <div className="p-3 bg-purple-500/10 text-purple-600 rounded-xl"><PackagePlus className="size-6" /></div>
-           <div><p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Ordered</p><p className="text-2xl font-black text-foreground">{requests.filter(r => r.status === "Ordered").length}</p></div>
+           <div className="min-w-0"><p className="truncate text-xs font-bold text-muted-foreground uppercase tracking-widest">Ordered</p><p className="text-2xl font-black text-foreground">{requests.filter(r => r.status === "Ordered").length}</p></div>
         </div>
         {userRole === "manager" && (
-          <div className="bg-card border border-border p-5 rounded-2xl flex items-center gap-4 shadow-sm">
+          <div className="min-w-0 overflow-hidden bg-card border border-border p-5 rounded-2xl flex items-center gap-4 shadow-sm">
              <div className="p-3 bg-green-500/10 text-green-600 rounded-xl"><DollarSign className="size-6" /></div>
-             <div><p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Total Spend</p><p className="text-2xl font-black text-foreground">${requests.reduce((sum, r) => sum + r.totalPrice, 0).toFixed(2)}</p></div>
+             <div className="min-w-0"><p className="truncate text-xs font-bold text-muted-foreground uppercase tracking-widest">Total Spend</p><p className="text-2xl font-black text-foreground">${requests.reduce((sum, r) => sum + r.totalPrice, 0).toFixed(2)}</p></div>
           </div>
         )}
       </div>

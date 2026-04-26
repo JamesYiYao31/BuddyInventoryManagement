@@ -48,11 +48,11 @@ export function AlertCards({ stats }: AlertCardsProps) {
     <div className="space-y-6">
 
       {/* ── KPI STATS GRID ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
+      <div className="grid w-full grid-cols-2 gap-3 overflow-hidden lg:grid-cols-4 lg:gap-4">
         {kpis.map((item, i) => (
           <div 
             key={i} 
-            className={`group bg-card border-2 ${item.border} p-8 rounded-[2.5rem] flex flex-col gap-4 shadow-sm transition-all hover:shadow-md hover:scale-[1.01]`}
+            className={`group min-w-0 overflow-hidden bg-card border-2 ${item.border} p-8 rounded-[2.5rem] flex flex-col gap-4 shadow-sm transition-all hover:shadow-md hover:scale-[1.01]`}
           >
             <div className="flex items-center justify-between">
               <div className={`p-4 rounded-[1.5rem] ${item.bg} group-hover:scale-110 transition-transform`}>

@@ -533,7 +533,7 @@ export default function DashboardPage() {
 
   // ── 5. RENDER ──
   return (
-    <div className="flex h-screen bg-background overflow-hidden print:h-auto print:block print:bg-white">
+    <div className="flex h-screen max-w-[100vw] bg-background overflow-hidden overflow-x-hidden print:h-auto print:block print:bg-white">
       <div className="print:hidden">
         <DashboardSidebar
           activePage={activePage}
@@ -545,7 +545,7 @@ export default function DashboardPage() {
         />
       </div>
 
-      <div className="flex flex-1 flex-col lg:pl-64 print:pl-0 print:block">
+      <div className="flex w-full max-w-full flex-1 flex-col overflow-x-hidden lg:pl-64 print:pl-0 print:block">
         <div className="print:hidden">
           <DashboardHeader user={user} role={userRole} stats={stats} inventory={inventory} activeLots={lotsInUse} labSettings={labSettings} labName={labName} onNavigate={setActivePage} onProfileUpdated={refreshAuthUser} onMobileMenuOpen={() => setMobileMenuOpen(true)} />
         </div>
@@ -663,16 +663,16 @@ export default function DashboardPage() {
                           </div>
 
                           {/* Section B: Quick Actions (both roles) */}
-                          <div className="grid grid-cols-3 gap-6">
-                            <button onClick={() => setActivePage("inventory")} className="group flex flex-col items-center gap-4 p-8 rounded-[2.5rem] border border-border bg-card hover:border-primary/40 hover:bg-primary/5 transition-all shadow-sm">
+                          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:flex lg:gap-4">
+                            <button onClick={() => setActivePage("inventory")} className="group w-full lg:w-auto flex flex-col items-center gap-4 p-8 rounded-[2.5rem] border border-border bg-card hover:border-primary/40 hover:bg-primary/5 transition-all shadow-sm">
                               <div className="p-4 rounded-2xl bg-primary/10 group-hover:scale-110 transition-transform"><Scan className="size-8 text-primary" /></div>
                               <span className="text-sm font-black uppercase tracking-widest text-foreground">Scan Reagent</span>
                             </button>
-                            <button onClick={() => setActivePage("lotinuse")} className="group flex flex-col items-center gap-4 p-8 rounded-[2.5rem] border border-border bg-card hover:border-primary/40 hover:bg-primary/5 transition-all shadow-sm">
+                            <button onClick={() => setActivePage("lotinuse")} className="group w-full lg:w-auto flex flex-col items-center gap-4 p-8 rounded-[2.5rem] border border-border bg-card hover:border-primary/40 hover:bg-primary/5 transition-all shadow-sm">
                               <div className="p-4 rounded-2xl bg-indigo-500/10 group-hover:scale-110 transition-transform"><Minus className="size-8 text-indigo-500" /></div>
                               <span className="text-sm font-black uppercase tracking-widest text-foreground">Log Usage</span>
                             </button>
-                            <button onClick={() => setActivePage("requests")} className="group flex flex-col items-center gap-4 p-8 rounded-[2.5rem] border border-border bg-card hover:border-primary/40 hover:bg-primary/5 transition-all shadow-sm">
+                            <button onClick={() => setActivePage("requests")} className="group w-full lg:w-auto flex flex-col items-center gap-4 p-8 rounded-[2.5rem] border border-border bg-card hover:border-primary/40 hover:bg-primary/5 transition-all shadow-sm">
                               <div className="p-4 rounded-2xl bg-purple-500/10 group-hover:scale-110 transition-transform"><PackagePlus className="size-8 text-purple-500" /></div>
                               <span className="text-sm font-black uppercase tracking-widest text-foreground">Request Restock</span>
                             </button>
