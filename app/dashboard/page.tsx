@@ -550,8 +550,8 @@ export default function DashboardPage() {
           <DashboardHeader user={user} role={userRole} stats={stats} inventory={inventory} activeLots={lotsInUse} labSettings={labSettings} labName={labName} onNavigate={setActivePage} onProfileUpdated={refreshAuthUser} onMobileMenuOpen={() => setMobileMenuOpen(true)} />
         </div>
 
-        <main className="flex-1 overflow-y-auto p-8 print:overflow-visible print:p-0">
-          <div className="max-w-[1600px] mx-auto space-y-8">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden p-8 print:overflow-visible print:p-0">
+          <div className="max-w-[1600px] mx-auto space-y-8 overflow-x-hidden">
             
             {loading ? (
               <div className="flex flex-col items-center justify-center p-20 text-center space-y-4 h-full">
@@ -663,7 +663,7 @@ export default function DashboardPage() {
                           </div>
 
                           {/* Section B: Quick Actions (both roles) */}
-                          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:flex lg:gap-4">
+                          <div className="grid grid-cols-2 gap-3 overflow-x-hidden sm:grid-cols-3 lg:flex lg:gap-4">
                             <button onClick={() => setActivePage("inventory")} className="group w-full lg:w-auto flex flex-col items-center gap-4 p-8 rounded-[2.5rem] border border-border bg-card hover:border-primary/40 hover:bg-primary/5 transition-all shadow-sm">
                               <div className="p-4 rounded-2xl bg-primary/10 group-hover:scale-110 transition-transform"><Scan className="size-8 text-primary" /></div>
                               <span className="text-sm font-black uppercase tracking-widest text-foreground">Scan Reagent</span>
@@ -737,7 +737,7 @@ export default function DashboardPage() {
                 {activePage === "validation" && userRole === "manager" && <ValidationTab userRole={userRole} refreshData={refreshData} />}
 
                 {["inventory", "lotinuse", "requests", "activitylog"].includes(activePage) && (
-                  <div className="flex gap-8 items-start print:block">
+                  <div className="flex gap-8 items-start overflow-x-hidden print:block">
                     <div className="w-full min-w-0 lg:flex-1 print:w-full">
                       {activePage === "inventory" && <InventoryTab inventory={inventory} sortedFlatInventory={sortedFlatInventory} labSettings={labSettings} refreshData={refreshData} userRole={userRole} requests={requests} />}
                       {activePage === "lotinuse" && <LotInUseTab activeLots={filteredLotsInUse} inventory={inventory} refreshData={refreshData} userRole={userRole} labSettings={labSettings} currentUserName={currentUserName} labName={labName} />}

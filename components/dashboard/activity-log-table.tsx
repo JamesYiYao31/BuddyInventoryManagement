@@ -79,7 +79,7 @@ export default function ActivityLogTab({
   }
 
   return (
-    <div className="print:font-sans">
+    <div className="w-full overflow-x-hidden print:font-sans">
       <div className="relative flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-4 duration-700 print:animate-none print:transform-none">
         
         {/* ── SCREEN HEADER (Hidden on Print) ── */}
@@ -172,14 +172,15 @@ export default function ActivityLogTab({
                 {groupedLogs[date].map((log) => (
                   <div 
                     key={log.id} 
-                    className="group relative bg-card border border-border p-6 rounded-[2rem] shadow-sm hover:shadow-md hover:border-primary/20 transition-all flex items-center justify-between"
+                    className="group relative w-full min-w-0 rounded-[2rem] border border-border bg-card p-6 shadow-sm transition-all hover:border-primary/20 hover:shadow-md flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between"
                   >
-                    <div className={`absolute -left-[49px] p-3 rounded-full border-4 border-background shadow-sm z-10 transition-transform group-hover:scale-110 ${ACTION_STYLES[log.actionType]}`}>
+                    <div className={`absolute -left-[49px] z-10 flex-shrink-0 rounded-full border-4 border-background p-3 shadow-sm transition-transform group-hover:scale-110 ${ACTION_STYLES[log.actionType]}`}>
                       {getActionIcon(log.actionType)}
                     </div>
 
-                    <div className="flex items-center gap-6 flex-1">
-                      <div className="size-12 rounded-2xl bg-muted flex items-center justify-center text-sm font-black text-muted-foreground border border-border shrink-0">
+                    <div className="flex w-full min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex min-w-0 items-center gap-4 sm:gap-6">
+                      <div className="size-12 rounded-2xl bg-muted flex items-center justify-center text-sm font-black text-muted-foreground border border-border shrink-0 flex-shrink-0">
                         {log.userInitials}
                       </div>
 
@@ -198,11 +199,12 @@ export default function ActivityLogTab({
                       </div>
                     </div>
 
-                    <div className="text-right shrink-0 ml-4">
+                    <div className="flex-shrink-0 text-left sm:ml-4 sm:text-right">
                       <p className="text-xs font-black text-muted-foreground uppercase tracking-widest">{log.time}</p>
                       <div className={`inline-flex items-center gap-1.5 mt-1 px-3 py-1 rounded-full text-[10px] font-bold ${ACTION_STYLES[log.actionType]}`}>
                         {log.actionType}
                       </div>
+                    </div>
                     </div>
                   </div>
                 ))}

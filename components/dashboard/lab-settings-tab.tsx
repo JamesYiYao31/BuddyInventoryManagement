@@ -131,7 +131,7 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
   }
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex w-full flex-col gap-8 overflow-x-hidden">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <div className="p-3 rounded-2xl bg-primary/10"><Settings className="size-7 text-primary" /></div>
@@ -147,7 +147,7 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
           <Loader2 className="size-8 text-primary animate-spin" />
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-8">
+        <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 xl:grid-cols-4">
 
           {/* ── Low Stock Threshold ── */}
           <div className="rounded-2xl border border-border bg-card p-8 space-y-6 shadow-sm">

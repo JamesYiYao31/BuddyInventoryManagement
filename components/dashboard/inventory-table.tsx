@@ -1132,9 +1132,9 @@ export default function InventoryTab({
                   )}
                   <div className="space-y-4">
                     <label className="text-xs font-bold uppercase text-muted-foreground tracking-widest block text-left ml-2">Scan or Paste Barcode</label>
-                    <div className="flex gap-3">
+                    <div className="flex flex-col gap-2 sm:flex-row">
                       <input ref={barcodeRef} value={barcodeInput} onChange={e => setBarcodeInput(e.target.value)} onKeyDown={e => e.key === "Enter" && triggerScan(barcodeInput)} placeholder="Scan barcode here…" className="flex-1 h-16 border border-input bg-background rounded-2xl px-6 text-lg font-mono focus:ring-4 focus:ring-primary/10 focus:border-primary outline-none transition-all" />
-                      <button onClick={() => triggerScan(barcodeInput)} className="px-8 bg-primary text-primary-foreground rounded-2xl font-bold text-lg hover:opacity-90 transition-all shadow-sm shadow-primary/20">Look up</button>
+                      <button onClick={() => triggerScan(barcodeInput)} className="w-full sm:w-auto px-8 bg-primary text-primary-foreground rounded-2xl font-bold text-lg hover:opacity-90 transition-all shadow-sm shadow-primary/20">Look up</button>
                     </div>
                   </div>
                   <button onClick={openManualEntry} className="text-sm font-semibold text-muted-foreground hover:text-primary underline underline-offset-8">Barcode unreadable? Click to enter manually</button>

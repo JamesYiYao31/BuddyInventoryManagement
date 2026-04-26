@@ -278,7 +278,7 @@ export function DashboardHeader({
 
       {/* ── LEFT SIDE: TITLE & FEEDBACK BUTTON ── */}
       <div className="flex items-center gap-4">
-        <h1 className="max-w-[120px] truncate text-xl font-black text-foreground tracking-tight sm:max-w-none">{labName || "My Lab"}</h1>
+        <h1 className="max-w-[150px] truncate text-xl font-black text-foreground tracking-tight sm:max-w-none">{labName || "My Lab"}</h1>
         
         <Link 
           href="/dashboard/feedback" 
@@ -354,7 +354,7 @@ export function DashboardHeader({
           </button>
 
           {bellOpen && (
-            <div className="absolute right-0 top-full mt-1 w-96 rounded-xl border border-border bg-card shadow-xl overflow-hidden animate-in fade-in slide-in-from-top-1 duration-150 z-50">
+            <div className="absolute right-0 top-full z-50 mt-1 w-[calc(100vw-2rem)] rounded-xl border border-border bg-card shadow-xl overflow-hidden animate-in fade-in slide-in-from-top-1 duration-150 sm:w-96">
               <div className="px-4 py-3 border-b border-border bg-muted/30 flex items-center justify-between">
                 <p className="text-xs font-black uppercase tracking-widest text-muted-foreground">Lab Alerts</p>
                 {notifications.length > 0 && (
@@ -362,7 +362,7 @@ export function DashboardHeader({
                 )}
               </div>
               {notifications.length > 0 ? (
-                <div className="max-h-80 overflow-y-auto">
+                <div className="max-h-[60vh] overflow-y-auto">
                   {notifications.map(n => {
                     const meta = CATEGORY_META[n.category]
                     const Icon = meta.icon
