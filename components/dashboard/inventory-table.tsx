@@ -885,9 +885,9 @@ export default function InventoryTab({
       </div>
 
       {/* ── MAIN TABLE ── */}
-      <div className="hidden sm:block rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
-        <div className="grid grid-cols-[2.5fr_1.2fr_1.2fr_1fr_1.2fr_0.5fr] border-b border-border bg-muted/30 px-6 py-4 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
-          <span>Item / Lot</span><span>Received</span><span>Expiry</span><span>Total units</span><span>Status</span><span></span>
+      <div className="hidden sm:block table-fixed rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
+        <div className="grid border-b border-border bg-muted/30 px-6 py-4 text-[11px] font-bold uppercase tracking-widest text-muted-foreground md:grid-cols-[35%_15%_15%_15%_20%_80px] lg:grid-cols-[2.5fr_1.2fr_1.2fr_1fr_1.2fr_0.5fr]">
+          <span className="px-4">Item / Lot</span><span className="px-4">Received</span><span className="px-4">Expiry</span><span className="px-4 text-center">Total units</span><span className="px-4">Status</span><span className="px-4"></span>
         </div>
         {visibleInventoryLots.length > 0 ? (
           visibleInventoryLots.map((lot: LotEntry, idx: number, arr: LotEntry[]) => {
@@ -903,17 +903,17 @@ export default function InventoryTab({
               <div key={lot.lotId} className={`${isFirst && idx !== 0 ? "border-t-border border-t-2" : ""}`}>
                 <div
                   onClick={() => handleExpandedRowToggle(lot)}
-                  className="w-full grid grid-cols-[2.5fr_1.2fr_1.2fr_1fr_1.2fr_0.5fr] px-6 py-4 items-center border-t border-border/50 text-sm hover:bg-muted/20 transition-colors text-left cursor-pointer"
+                  className="w-full grid px-6 py-4 items-center border-t border-border/50 text-sm hover:bg-muted/20 transition-colors text-left cursor-pointer md:grid-cols-[35%_15%_15%_15%_20%_80px] lg:grid-cols-[2.5fr_1.2fr_1.2fr_1fr_1.2fr_0.5fr]"
                 >
-                  <div className="flex flex-col gap-0.5 min-w-0">
+                  <div className="flex flex-col gap-0.5 min-w-0 px-4">
                     <span className="font-bold text-foreground truncate">{lot.itemName}</span>
                     <span className="font-mono text-sm font-semibold text-primary">Lot {lot.lot}</span>
                   </div>
-                  <span className="text-muted-foreground/80">{lot.receivedDate}</span>
-                  <span className="font-medium text-foreground/90">{lot.expiry}</span>
-                  <span className="font-semibold text-foreground tabular-nums">{lot.totalUnits}</span>
+                  <span className="px-4 text-muted-foreground/80">{lot.receivedDate}</span>
+                  <span className="px-4 font-medium text-foreground/90">{lot.expiry}</span>
+                  <span className="px-4 text-center font-semibold text-foreground tabular-nums">{lot.totalUnits}</span>
 
-                  <div className="flex flex-col gap-1.5 items-start">
+                  <div className="flex flex-col gap-1.5 items-start px-4">
                     {badges.map(b => (
                       <span key={b.label} className={`inline-flex px-3 py-1 rounded-full text-[10px] font-bold ${b.color}`}>{b.label}</span>
                     ))}
@@ -944,7 +944,7 @@ export default function InventoryTab({
                     )}
                   </div>
 
-                  <div className="flex justify-end items-center gap-2">
+                  <div className="flex justify-end items-center gap-2 px-4">
                     {userRole === "manager" ? (
                       <>
                         <button onClick={(e) => { e.stopPropagation(); setEditingLot(lot); setLotForm(lot); setSelectedItemId(lot.itemId); setNewItemName(""); setItemSearchQuery(""); setScanBadge(null); setShowItemModal(true) }} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-primary transition-all"><Pencil className="size-4" /></button>

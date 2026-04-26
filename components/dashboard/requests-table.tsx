@@ -399,7 +399,7 @@ export default function RequestsTab({ requests, refreshRequests, userRole }: Req
       {/* ── MODAL: CREATE REORDER REQUEST (1.5x Giant Layout) ── */}
       {showRequestModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-md p-4">
-          <div className="mx-2 flex w-full max-w-7xl max-h-[90vh] flex-col rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 sm:mx-auto">
+          <div className="mx-2 flex w-full max-w-2xl md:max-w-3xl lg:max-w-7xl max-h-[90vh] flex-col rounded-[2.5rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 sm:mx-auto">
             <div className="flex justify-between items-center px-4 py-8 border-b border-border bg-muted/20 sm:px-12">
               <div className="flex items-center gap-4 font-bold text-2xl text-foreground">
                 <div className="p-3 rounded-2xl bg-primary/10"><Plus className="size-8 text-primary" /></div>
@@ -408,7 +408,7 @@ export default function RequestsTab({ requests, refreshRequests, userRole }: Req
               <button onClick={() => { setShowRequestModal(false); resetRequestForm() }} className="p-2 rounded-full hover:bg-muted text-muted-foreground transition-all"><X className="size-7" /></button>
             </div>
             <div className="overflow-y-auto flex-1">
-            <div className="grid grid-cols-1 gap-12 p-4 sm:grid-cols-3 sm:p-12">
+            <div className="grid grid-cols-1 gap-12 p-4 md:grid-cols-3 sm:p-12">
               <div className="space-y-8 sm:border-r sm:border-border sm:pr-12">
                 <p className="text-xs font-black text-primary uppercase tracking-widest">1. Item Details</p>
                 <div className="space-y-2">
