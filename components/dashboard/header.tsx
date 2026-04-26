@@ -266,7 +266,7 @@ export function DashboardHeader({
   const showSearchDropdown = searchFocused && q.length >= 2
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-background/95 px-8 backdrop-blur supports-[backdrop-filter]:bg-background/60 print:hidden">
+    <header className="sticky top-0 z-30 flex h-12 lg:h-16 items-center justify-between border-b border-border bg-background/95 px-8 backdrop-blur supports-[backdrop-filter]:bg-background/60 print:hidden">
       <button
         type="button"
         onClick={onMobileMenuOpen}
@@ -284,7 +284,7 @@ export function DashboardHeader({
           href="/dashboard/feedback" 
           target="_blank" 
           rel="noopener noreferrer"
-          className="ml-4 inline-flex items-center gap-2 bg-muted border border-border px-4 py-1.5 rounded-lg shadow-sm hover:bg-muted/80 text-xs font-bold transition-colors text-muted-foreground hover:text-foreground"
+          className="ml-4 inline-flex items-center gap-2 bg-muted border border-border p-1.5 lg:p-2 lg:px-4 lg:py-1.5 rounded-lg shadow-sm hover:bg-muted/80 text-xs font-bold transition-colors text-muted-foreground hover:text-foreground"
         >
           <span>🐞</span>
           <span className="hidden sm:inline">Submit Feedback / Report Bug</span>
@@ -292,7 +292,7 @@ export function DashboardHeader({
       </div>
 
       {/* ── RIGHT SIDE: SEARCH, ALERTS, PROFILE ── */}
-      <div className="flex items-center gap-6">
+      <div className="flex items-center gap-3 lg:gap-6">
 
         {/* ── GLOBAL SEARCH ── */}
         <div ref={searchRef} className="relative hidden lg:block">
@@ -343,7 +343,7 @@ export function DashboardHeader({
         <div ref={bellRef} className="relative">
           <button
             onClick={handleBellClick}
-            className="relative p-2 text-muted-foreground hover:text-foreground transition-colors rounded-full hover:bg-muted"
+            className="relative p-1.5 lg:p-2 text-muted-foreground hover:text-foreground transition-colors rounded-full hover:bg-muted"
           >
             <Bell className="size-5" />
             {hasUnread && notifications.length > 0 && (
@@ -407,7 +407,7 @@ export function DashboardHeader({
                 </span>
               </div>
 
-              <div className={`relative size-9 rounded-xl flex items-center justify-center text-sm font-black shadow-sm transition-all group-hover:scale-105 ${
+              <div className={`relative size-8 lg:size-9 rounded-xl flex items-center justify-center text-sm font-black shadow-sm transition-all group-hover:scale-105 ${
                 role === "manager"
                   ? "bg-primary text-primary-foreground shadow-primary/20"
                   : "bg-muted text-muted-foreground border border-border"

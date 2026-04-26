@@ -48,7 +48,7 @@ export function AlertCards({ stats }: AlertCardsProps) {
     <div className="space-y-6">
 
       {/* ── KPI STATS GRID ── */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
         {kpis.map((item, i) => (
           <div 
             key={i} 
@@ -56,14 +56,14 @@ export function AlertCards({ stats }: AlertCardsProps) {
           >
             <div className="flex items-center justify-between">
               <div className={`p-4 rounded-[1.5rem] ${item.bg} group-hover:scale-110 transition-transform`}>
-                <item.icon className={`size-8 ${item.color}`} />
+                <item.icon className={`size-8 lg:size-12 ${item.color}`} />
               </div>
               <div className={`text-5xl font-black tracking-tighter ${item.color}`}>
                 {item.value}
               </div>
             </div>
             <div>
-              <p className="text-[10px] font-black uppercase text-muted-foreground tracking-[0.2em]">
+              <p className="text-[10px] lg:text-xs font-black uppercase text-muted-foreground tracking-[0.2em]">
                 {item.label}
               </p>
               <div className="mt-1 h-1 w-8 bg-border rounded-full group-hover:w-full group-hover:bg-primary/30 transition-all duration-500" />

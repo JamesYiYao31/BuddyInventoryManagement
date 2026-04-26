@@ -83,12 +83,12 @@ export default function ActivityLogTab({
       <div className="relative flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-4 duration-700 print:animate-none print:transform-none">
         
         {/* ── SCREEN HEADER (Hidden on Print) ── */}
-        <div className="flex items-end justify-between print:hidden">
+        <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between print:hidden">
           <div>
             <h1 className="text-3xl sm:text-4xl font-black text-foreground tracking-tight">Activity Log</h1>
             <p className="text-sm sm:text-base text-muted-foreground mt-2 font-medium">Complete immutable audit trail for ISO/CAP compliance.</p>
           </div>
-          <div className="flex gap-3">
+          <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
             <div className="px-5 py-2.5 bg-muted rounded-2xl border border-border flex items-center gap-2">
               <User className="size-4 text-muted-foreground" />
               <span className="text-[10px] sm:text-xs font-bold text-muted-foreground uppercase tracking-widest">
