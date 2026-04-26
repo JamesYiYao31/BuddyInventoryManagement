@@ -214,6 +214,7 @@ export default function DashboardPage() {
   const [user, setUser] = useState<any>(null)
   const [userRole, setUserRole] = useState<"manager" | "technician">("technician")
   const [isSuperAdmin, setIsSuperAdmin] = useState(false)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   
   const [inventory, setInventory] = useState<InventoryGroup[]>([])
   const [requests, setRequests] = useState<ReorderRequest[]>([])
@@ -537,14 +538,16 @@ export default function DashboardPage() {
         <DashboardSidebar
           activePage={activePage}
           setActivePage={setActivePage}
+          isMobileOpen={mobileMenuOpen}
+          onMobileClose={() => setMobileMenuOpen(false)}
           showSuperAdminLink={isSuperAdmin}
           userRole={userRole}
         />
       </div>
 
-      <div className="flex flex-1 flex-col pl-64 print:pl-0 print:block">
+      <div className="flex flex-1 flex-col lg:pl-64 print:pl-0 print:block">
         <div className="print:hidden">
-          <DashboardHeader user={user} role={userRole} stats={stats} inventory={inventory} activeLots={lotsInUse} labSettings={labSettings} labName={labName} onNavigate={setActivePage} onProfileUpdated={refreshAuthUser} />
+          <DashboardHeader user={user} role={userRole} stats={stats} inventory={inventory} activeLots={lotsInUse} labSettings={labSettings} labName={labName} onNavigate={setActivePage} onProfileUpdated={refreshAuthUser} onMobileMenuOpen={() => setMobileMenuOpen(true)} />
         </div>
 
         <main className="flex-1 overflow-y-auto p-8 print:overflow-visible print:p-0">

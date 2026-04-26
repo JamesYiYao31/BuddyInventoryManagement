@@ -794,8 +794,98 @@ export default function InventoryTab({
         </div>
       </div>
 
+      <div className="block sm:hidden space-y-3 p-4">
+        {inventory.length > 0 ? (
+          inventory.map((group) => {
+            const groupLots = (group.lots || []).filter((lot: LotEntry) => (lot.totalUnits ?? 0) > 0)
+            if (groupLots.length === 0) return null
+
+            return (
+              <div key={group.itemId} className="rounded-2xl border border-border bg-card p-4">
+                <div className="mb-3 flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-bold text-foreground">{group.name}</p>
+                    <p className="text-xs text-muted-foreground">{group.vendor || "—"}</p>
+                  </div>
+                  {userRole === "manager" && (
+                    <button
+                      type="button"
+                      onClick={openManualEntry}
+                      className="inline-flex items-center gap-1 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-bold text-foreground hover:bg-muted transition-all"
+                    >
+                      <Plus className="size-3.5" />
+                      Add Item
+                    </button>
+                  )}
+                </div>
+
+                {groupLots.map((lot: LotEntry) => {
+                  const badges = getStatusBadges(lot)
+                  const hasWarning = badges.some(b => b.label === "Low Stock" || b.label === "Expiring Soon")
+                  const itemConfig = itemById.get(lot.itemId)
+                  const requiresCoaForLot = Boolean(itemConfig?.requires_coa)
+                  const requiresValidationForLot = Boolean(itemConfig?.requires_lot_validation)
+
+                  return (
+                    <div key={lot.lotId} className="mt-2 rounded-xl border border-border/50 bg-muted/40 p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-mono font-bold text-primary">Lot {lot.lot}</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">Exp: {lot.expiry || "—"}</p>
+                        </div>
+                        <div className="flex flex-col items-end gap-1">
+                          {badges.map(b => (
+                            <span key={b.label} className={`inline-flex px-2.5 py-1 rounded-full text-[10px] font-bold ${b.color}`}>{b.label}</span>
+                          ))}
+                          {lot.validation_status && (
+                            <>
+                              {requiresCoaForLot && requiresValidationForLot && (lot.validation_status === "pending_coa" || lot.validation_status === "pending_validation") ? (
+                                <>
+                                  <span className={`inline-flex px-2.5 py-1 rounded-full text-[10px] font-bold ${VALIDATION_BADGE_MAP["pending_coa"].color}`}>
+                                    {VALIDATION_BADGE_MAP["pending_coa"].label}
+                                  </span>
+                                  <span className={`inline-flex px-2.5 py-1 rounded-full text-[10px] font-bold ${VALIDATION_BADGE_MAP["pending_validation"].color}`}>
+                                    {VALIDATION_BADGE_MAP["pending_validation"].label}
+                                  </span>
+                                </>
+                              ) : VALIDATION_BADGE_MAP[lot.validation_status] ? (
+                                <span className={`inline-flex px-2.5 py-1 rounded-full text-[10px] font-bold ${VALIDATION_BADGE_MAP[lot.validation_status].color}`}>
+                                  {VALIDATION_BADGE_MAP[lot.validation_status].label}
+                                </span>
+                              ) : null}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      <div className="mt-2 flex items-center justify-between">
+                        <p className="text-sm font-bold text-foreground">{lot.totalUnits} units</p>
+                        <div className="flex gap-2">
+                          {hasWarning && !pendingItemNames.has((group.name || "").toLowerCase()) && (
+                            <button onClick={() => openReorderModal(lot)} className="px-2.5 py-1 rounded-lg bg-primary/10 text-primary text-[10px] font-black uppercase hover:bg-primary/20 transition-all">Reorder</button>
+                          )}
+                          {userRole === "manager" ? (
+                            <>
+                              <button onClick={() => { setEditingLot(lot); setLotForm(lot); setSelectedItemId(lot.itemId); setNewItemName(""); setItemSearchQuery(""); setScanBadge(null); setShowItemModal(true) }} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-primary transition-all"><Pencil className="size-4" /></button>
+                              <button onClick={() => openDeleteModal(lot)} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-destructive transition-all"><Trash2 className="size-4" /></button>
+                            </>
+                          ) : (
+                            <span title="Manager Only" className="p-2"><ShieldAlert className="size-4 text-muted-foreground/30" /></span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })
+        ) : (
+          <div className="rounded-2xl border border-border bg-card p-8 text-center text-muted-foreground">No items match the selected filters.</div>
+        )}
+      </div>
+
       {/* ── MAIN TABLE ── */}
-      <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
+      <div className="hidden sm:block rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
         <div className="grid grid-cols-[2.5fr_1.2fr_1.2fr_1fr_1.2fr_0.5fr] border-b border-border bg-muted/30 px-6 py-4 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
           <span>Item / Lot</span><span>Received</span><span>Expiry</span><span>Total units</span><span>Status</span><span></span>
         </div>

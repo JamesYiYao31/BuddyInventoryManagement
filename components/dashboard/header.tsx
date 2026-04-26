@@ -6,7 +6,7 @@ import { useTheme } from "next-themes"
 import Link from "next/link"
 import {
   Bell, Search, XCircle, Timer, PackageSearch, Package, FlaskConical,
-  ChevronRight, ChevronDown, UserCog, LogOut, Sun, Moon, Monitor, Palette, Check,
+  ChevronRight, ChevronDown, UserCog, LogOut, Sun, Moon, Monitor, Palette, Check, Menu,
 } from "lucide-react"
 import {
   DashboardStats, InventoryGroup, LotInUseEntry, LabSettings, SidebarPage,
@@ -37,6 +37,7 @@ interface DashboardHeaderProps {
   labSettings?: LabSettings
   onNavigate?: (page: SidebarPage) => void
   onProfileUpdated?: () => void | Promise<void>
+  onMobileMenuOpen: () => void
 }
 
 interface SearchResult {
@@ -65,7 +66,7 @@ const MAX_NOTIFICATIONS = 12
 
 export function DashboardHeader({
   user, role, labName, stats, inventory = [], activeLots =[],
-  labSettings, onNavigate, onProfileUpdated,
+  labSettings, onNavigate, onProfileUpdated, onMobileMenuOpen,
 }: DashboardHeaderProps) {
   const router = useRouter()
   const { toast } = useToast()
@@ -266,6 +267,14 @@ export function DashboardHeader({
 
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-background/95 px-8 backdrop-blur supports-[backdrop-filter]:bg-background/60 print:hidden">
+      <button
+        type="button"
+        onClick={onMobileMenuOpen}
+        className="lg:hidden p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+        aria-label="Open menu"
+      >
+        <Menu className="size-5" />
+      </button>
 
       {/* ── LEFT SIDE: TITLE & FEEDBACK BUTTON ── */}
       <div className="flex items-center gap-4">

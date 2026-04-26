@@ -309,7 +309,52 @@ export default function RequestsTab({ requests, refreshRequests, userRole }: Req
       </div>
 
       {/* ── MAIN TABLE ── */}
-      <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
+      <div className="block sm:hidden space-y-3 p-4">
+        {requests.length > 0 ? requests.map((req) => (
+          <div key={req.id} className="rounded-2xl border border-border bg-card p-4">
+            <div className="mb-2 flex items-start justify-between gap-3">
+              <div>
+                <p className="font-bold text-foreground">{req.itemName}</p>
+                <p className="text-xs text-muted-foreground">{req.vendor}</p>
+              </div>
+              <span className={`inline-flex px-3 py-1 rounded-full text-[10px] font-bold ${REQUEST_STATUS_STYLES[req.status]}`}>{req.status}</span>
+            </div>
+            <div className="mb-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+              <div>Catalog <span className="font-medium text-foreground">{req.catalogNumber || "N/A"}</span></div>
+              <div>Qty <span className="font-medium text-foreground">{req.orderQty}</span></div>
+              <div>Unit Price <span className="font-medium text-foreground">{req.unitPrice || "—"}</span></div>
+              <div>Date <span className="font-medium text-foreground">{req.dateRequested}</span></div>
+            </div>
+            {req.notes && (
+              <p className="mb-3 text-xs text-muted-foreground">{req.notes}</p>
+            )}
+            <div className="flex justify-end gap-2">
+              {req.status === "Pending" && userRole === "manager" && (
+                <button onClick={() => updateStatus(req.id, "Approved")} className="px-3 py-1.5 bg-blue-500/10 text-blue-600 font-bold text-xs rounded-lg hover:bg-blue-500/20 transition-all">Approve</button>
+              )}
+              {req.status === "Pending" && (
+                <button onClick={() => openEditModal(req)} className="px-3 py-1.5 bg-muted text-foreground font-bold text-xs rounded-lg hover:bg-muted/80 transition-all">Edit</button>
+              )}
+              {req.status === "Approved" && userRole === "manager" && (
+                <button onClick={() => updateStatus(req.id, "Ordered")} className="px-3 py-1.5 bg-purple-500/10 text-purple-600 font-bold text-xs rounded-lg hover:bg-purple-500/20 transition-all">Mark Ordered</button>
+              )}
+              {req.status === "Ordered" && (
+                <button onClick={() => { setShowReceiveModal(req); setReceiveQty(req.orderQty || 1) }} className="px-3 py-1.5 bg-green-500 text-white font-bold text-xs rounded-lg shadow-sm hover:bg-green-600 transition-all">Receive Item</button>
+              )}
+              {req.status === "Received" && <CheckCircle2 className="size-5 text-green-500" />}
+              {userRole === "manager" && (
+                <button onClick={() => handleDeleteRequest(req)} className="p-1.5 rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-all" title="Delete request">
+                  <Trash2 className="size-4" />
+                </button>
+              )}
+            </div>
+          </div>
+        )) : (
+          <div className="rounded-2xl border border-border bg-card p-8 text-center text-muted-foreground">No purchase requests found.</div>
+        )}
+      </div>
+
+      <div className="hidden sm:block rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
         <div className="grid grid-cols-[1fr_2fr_1.5fr_1fr_1fr_1fr_1.5fr] border-b border-border bg-muted/30 px-6 py-4 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
           <span>Req ID</span><span>Item Name</span><span>Vendor</span><span>Qty</span><span>Total</span><span>Status</span><span className="text-right">Actions</span>
         </div>

@@ -20,12 +20,14 @@ import Image from "next/image"
 interface DashboardSidebarProps {
   activePage: SidebarPage
   setActivePage: (page: SidebarPage) => void
+  isMobileOpen: boolean
+  onMobileClose: () => void
   /** When true, show internal link to the super-admin control panel (never for manager/technician). */
   showSuperAdminLink?: boolean
   userRole?: "manager" | "technician"
 }
 
-export function DashboardSidebar({ activePage, setActivePage, showSuperAdminLink = false, userRole }: DashboardSidebarProps) {
+export function DashboardSidebar({ activePage, setActivePage, isMobileOpen, onMobileClose, showSuperAdminLink = false, userRole }: DashboardSidebarProps) {
   const navItems = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "inventory", label: "Inventory", icon: Package },
@@ -39,7 +41,16 @@ export function DashboardSidebar({ activePage, setActivePage, showSuperAdminLink
   ]
 
   return (
-    <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-border bg-card">
+    <>
+      {isMobileOpen && (
+        <button
+          type="button"
+          aria-label="Close sidebar"
+          onClick={onMobileClose}
+          className="fixed inset-0 z-30 bg-black/50 lg:hidden"
+        />
+      )}
+      <aside className={`fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-border bg-card transition-transform duration-300 ease-in-out lg:translate-x-0 ${isMobileOpen ? "translate-x-0" : "-translate-x-full"}`}>
       <div className="flex h-16 items-center px-6 border-b border-border">
         <Image src="/buddy-logo.png" alt="Buddy Logo" width={40} height={40} className="h-10 w-auto object-contain" priority />
       </div>
@@ -47,7 +58,7 @@ export function DashboardSidebar({ activePage, setActivePage, showSuperAdminLink
         {navItems.map((item) => (
           <button
             key={item.id}
-            onClick={() => setActivePage(item.id as SidebarPage)}
+            onClick={() => { setActivePage(item.id as SidebarPage); onMobileClose(); }}
             className={cn(
               "flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-bold transition-all",
               activePage === item.id
@@ -83,6 +94,7 @@ export function DashboardSidebar({ activePage, setActivePage, showSuperAdminLink
           <p className="mt-0.5 text-xs text-muted-foreground">Valid until Dec 2026</p>
         </div>
       </div>
-    </aside>
+      </aside>
+    </>
   )
 }

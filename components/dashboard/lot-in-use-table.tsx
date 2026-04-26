@@ -605,7 +605,46 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
           (a) <thead> and <tfoot> repeat automatically on every printed page, and
           (b) column widths align flawlessly across <th> / <td> pairs on paper.
       */}
-      <div className={`rounded-2xl border border-border bg-card overflow-hidden shadow-sm print:border-none print:rounded-none print:shadow-none print:overflow-visible print-table-wrapper ${printingUsageReport ? "print:hidden" : ""}`}>
+      <div className="block sm:hidden space-y-3 p-4">
+        {(activeLots || []).length > 0 ? (
+          activeLots.map((lot) => {
+            const effectiveExpiry = getEarliestExpiry(lot.workingExpiryDate, lot.actualExpiryDate)
+            const daysLeft = daysUntilExpiry(effectiveExpiry, labSettings.labTimezone)
+            const isExpired = daysLeft < 0
+            return (
+              <div key={lot.id} className="rounded-2xl border border-border bg-card p-4">
+                <div className="mb-2 flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-bold text-foreground">{lot.itemName}</p>
+                    <p className="text-xs font-mono text-primary">Lot {lot.lotNumber}</p>
+                  </div>
+                  <span className={`inline-flex px-3 py-1 rounded-full text-[10px] font-bold ${isExpired ? LOT_IN_USE_STYLES["Expired"] : LOT_IN_USE_STYLES[lot.status as keyof typeof LOT_IN_USE_STYLES]}`}>
+                    {isExpired ? "Expired" : lot.status}
+                  </span>
+                </div>
+                <div className="mb-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                  <div>Opened <span className="font-medium text-foreground">{lot.openedDate || "—"}</span></div>
+                  <div>Working Exp <span className={`font-medium ${daysLeft <= 7 ? "text-red-500" : "text-foreground"}`}>{lot.workingExpiryDate || "—"}</span></div>
+                  <div>Actual Exp <span className="font-medium text-foreground">{lot.actualExpiryDate || "—"}</span></div>
+                  <div>Qty Left <span className="font-bold text-foreground">{lot.quantityLeft}</span></div>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button onClick={() => triggerManualUsage(lot)} className="flex items-center justify-center size-8 rounded-lg bg-primary/10 text-primary hover:bg-primary hover:text-primary-foreground transition-all" title="Deduct usage">
+                    <Minus className="size-5" />
+                  </button>
+                  <button onClick={() => { setDeleteReasonType("Expired"); setDeleteCustomReason(""); setShowDeleteModal(lot); }} className="flex items-center justify-center size-8 rounded-lg bg-destructive/10 text-destructive hover:bg-destructive hover:text-destructive-foreground transition-all" title="Delete from bench">
+                    <Trash2 className="size-4" />
+                  </button>
+                </div>
+              </div>
+            )
+          })
+        ) : (
+          <div className="rounded-2xl border border-border bg-card p-8 text-center text-muted-foreground">No active lots on the bench.</div>
+        )}
+      </div>
+
+      <div className={`hidden sm:block rounded-2xl border border-border bg-card overflow-hidden shadow-sm print:border-none print:rounded-none print:shadow-none print:overflow-visible print-table-wrapper ${printingUsageReport ? "print:hidden" : ""}`}>
         <table className="w-full border-collapse text-sm print:text-[11px] print:text-zinc-900 print:border-collapse print:border-2 print:border-black">
           <colgroup>
             <col className="w-[26%]" />
