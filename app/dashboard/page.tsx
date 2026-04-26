@@ -738,14 +738,14 @@ export default function DashboardPage() {
 
                 {["inventory", "lotinuse", "requests", "activitylog"].includes(activePage) && (
                   <div className="flex gap-8 items-start print:block">
-                    <div className="flex-1 min-w-0 print:w-full">
+                    <div className="w-full min-w-0 lg:flex-1 print:w-full">
                       {activePage === "inventory" && <InventoryTab inventory={inventory} sortedFlatInventory={sortedFlatInventory} labSettings={labSettings} refreshData={refreshData} userRole={userRole} requests={requests} />}
                       {activePage === "lotinuse" && <LotInUseTab activeLots={filteredLotsInUse} inventory={inventory} refreshData={refreshData} userRole={userRole} labSettings={labSettings} currentUserName={currentUserName} labName={labName} />}
                       {activePage === "requests" && <RequestsTab requests={filteredRequests} refreshRequests={refreshData} userRole={userRole} />}
                       {activePage === "activitylog" && <ActivityLogTab logs={filteredLogs} currentUserName={currentUserName} currentUserRole={userRole} labSettings={labSettings} filterUser={logUserFilter} filterAction={actionFilter} filterDateStart={logDateStart} filterDateEnd={logDateEnd} labName={labName} />}
                     </div>
                     
-                    <aside className="w-72 shrink-0 space-y-8 print:hidden">
+                    <aside className="hidden w-72 shrink-0 space-y-8 print:hidden lg:block">
                       <div className="rounded-2xl border border-border bg-card p-6 space-y-8 sticky top-0 shadow-sm">
                         <div className="space-y-3">
                           <p className="text-[10px] font-bold uppercase text-muted-foreground tracking-widest">Global Search</p>

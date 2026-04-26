@@ -537,7 +537,7 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
   }
 
   return (
-    <div className="relative flex flex-col gap-6">
+    <div className="relative flex w-full flex-col gap-6">
       
       {/* ── 1. SCREEN HEADER (Hidden on Print) ── */}
       <div className={`flex flex-wrap items-center justify-between gap-4 print:hidden ${printingUsageReport ? "hidden" : ""}`}>

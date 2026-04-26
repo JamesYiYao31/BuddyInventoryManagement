@@ -278,7 +278,7 @@ export default function RequestsTab({ requests, refreshRequests, userRole }: Req
   }
 
   return (
-    <div className="relative flex flex-col gap-6">
+    <div className="relative flex w-full flex-col gap-6">
       {/* ── HEADER ── */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>

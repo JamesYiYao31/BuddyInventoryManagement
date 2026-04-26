@@ -778,7 +778,7 @@ export default function InventoryTab({
 
   // ── RENDER ──
   return (
-    <div className="relative flex flex-col gap-6">
+    <div className="relative flex w-full flex-col gap-6">
 
       {/* ── HEADER ── */}
       <div className="flex items-center justify-between">
