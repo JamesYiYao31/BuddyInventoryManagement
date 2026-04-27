@@ -218,9 +218,9 @@ const VALID_SIDEBAR_PAGES = new Set<SidebarPage>([
   "settings",
 ])
 
-const IDLE_TIMEOUT_MS = 45 * 60 * 1000
-const IDLE_WARNING_MS = 2 * 60 * 1000
-const IDLE_BEFORE_WARNING_MS = IDLE_TIMEOUT_MS - IDLE_WARNING_MS
+const IDLE_TIMEOUT_MS = 15000
+const IDLE_WARNING_MS = 10000
+const IDLE_BEFORE_WARNING_MS = 5000
 
 function DashboardPageContent() {
   const router = useRouter()
