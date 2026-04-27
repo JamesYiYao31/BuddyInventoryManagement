@@ -1,8 +1,8 @@
 "use client"
 
-import { useState, useEffect, useCallback, useMemo } from "react"
-import { useRouter } from "next/navigation" 
-import { Search, CalendarClock, CalendarDays, CheckCircle2, User, Scan, Minus, PackagePlus, FlaskConical, AlertTriangle, Activity, Skull, DollarSign, ShieldCheck, ChevronRight, ChevronLeft } from "lucide-react"
+import { Suspense, useState, useEffect, useCallback, useMemo, useRef } from "react"
+import { useRouter, useSearchParams } from "next/navigation" 
+import { Search, CalendarClock, CalendarDays, CheckCircle2, User, Scan, Minus, PackagePlus, FlaskConical, AlertTriangle, Activity, Skull, DollarSign, ShieldCheck, ChevronRight, ChevronLeft, Timer } from "lucide-react"
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts"
 import { supabase } from "@/lib/supabase"
 
@@ -206,8 +206,25 @@ function dashboardRoleFromProfile(role: string | null | undefined): {
   return { uiRole: "technician", isSuperAdmin: false }
 }
 
-export default function DashboardPage() {
+const VALID_SIDEBAR_PAGES = new Set<SidebarPage>([
+  "dashboard",
+  "inventory",
+  "lotinuse",
+  "requests",
+  "activitylog",
+  "validation",
+  "analytics",
+  "labsharing",
+  "settings",
+])
+
+const IDLE_TIMEOUT_MS = 45 * 60 * 1000
+const IDLE_WARNING_MS = 2 * 60 * 1000
+const IDLE_BEFORE_WARNING_MS = IDLE_TIMEOUT_MS - IDLE_WARNING_MS
+
+function DashboardPageContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   
   // ── 1. STATE ──
   const [activePage, setActivePage] = useState<SidebarPage>("dashboard")
@@ -235,6 +252,12 @@ export default function DashboardPage() {
   const [profileFullName, setProfileFullName] = useState("")
   const [loading, setLoading] = useState(true)
   const [rightPanelOpen, setRightPanelOpen] = useState(false)
+  const [showIdleWarning, setShowIdleWarning] = useState(false)
+  const [idleCountdownSeconds, setIdleCountdownSeconds] = useState(Math.floor(IDLE_WARNING_MS / 1000))
+
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const warningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const warningCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Filter State
   const [searchQuery, setSearchQuery] = useState("")
@@ -274,6 +297,49 @@ export default function DashboardPage() {
       }
     }
   }, [])
+
+  const handleSignOut = useCallback(async () => {
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
+    if (warningTimerRef.current) clearTimeout(warningTimerRef.current)
+    if (warningCountdownRef.current) clearInterval(warningCountdownRef.current)
+    setShowIdleWarning(false)
+    const { error } = await supabase.auth.signOut()
+    if (error) {
+      console.error("Idle Sign Out Error:", error)
+    }
+    router.replace("/login")
+  }, [router])
+
+  const resetIdleTimers = useCallback(() => {
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
+    if (warningTimerRef.current) clearTimeout(warningTimerRef.current)
+    if (warningCountdownRef.current) clearInterval(warningCountdownRef.current)
+
+    setShowIdleWarning(false)
+    setIdleCountdownSeconds(Math.floor(IDLE_WARNING_MS / 1000))
+
+    idleTimerRef.current = setTimeout(() => {
+      setShowIdleWarning(true)
+      setIdleCountdownSeconds(Math.floor(IDLE_WARNING_MS / 1000))
+
+      warningCountdownRef.current = setInterval(() => {
+        setIdleCountdownSeconds(prev => (prev > 0 ? prev - 1 : 0))
+      }, 1000)
+
+      warningTimerRef.current = setTimeout(() => {
+        void handleSignOut()
+      }, IDLE_WARNING_MS)
+    }, IDLE_BEFORE_WARNING_MS)
+  }, [handleSignOut])
+
+  const handleStayLoggedIn = useCallback(() => {
+    resetIdleTimers()
+  }, [resetIdleTimers])
+
+  const handleNavigatePage = useCallback((newPage: SidebarPage) => {
+    setActivePage(newPage)
+    router.replace(`/dashboard?tab=${newPage}`, { scroll: false })
+  }, [router])
 
   // ── 2. DATABASE FETCH FUNCTIONS ──
 
@@ -425,6 +491,45 @@ export default function DashboardPage() {
     return () => clearInterval(interval)
   }, [router])
 
+  useEffect(() => {
+    const tabParam = searchParams.get("tab")
+    if (tabParam && VALID_SIDEBAR_PAGES.has(tabParam as SidebarPage)) {
+      setActivePage(tabParam as SidebarPage)
+      return
+    }
+    setActivePage("dashboard")
+  }, [searchParams])
+
+  useEffect(() => {
+    const activityEvents: Array<keyof DocumentEventMap> = [
+      "mousemove",
+      "mousedown",
+      "keydown",
+      "touchstart",
+      "scroll",
+      "click",
+    ]
+
+    const handleActivity = () => {
+      resetIdleTimers()
+    }
+
+    for (const eventName of activityEvents) {
+      document.addEventListener(eventName, handleActivity, { passive: true })
+    }
+
+    resetIdleTimers()
+
+    return () => {
+      for (const eventName of activityEvents) {
+        document.removeEventListener(eventName, handleActivity)
+      }
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
+      if (warningTimerRef.current) clearTimeout(warningTimerRef.current)
+      if (warningCountdownRef.current) clearInterval(warningCountdownRef.current)
+    }
+  }, [resetIdleTimers])
+
   // ── 3. FILTER LOGIC ──
 
   const tz = labSettings.labTimezone
@@ -532,13 +637,19 @@ export default function DashboardPage() {
     return { items: monthRequests, total: monthRequests.reduce((s, r) => s + r.totalPrice, 0) }
   }, [requests, tz])
 
+  const idleCountdownLabel = useMemo(() => {
+    const minutes = Math.floor(idleCountdownSeconds / 60)
+    const seconds = idleCountdownSeconds % 60
+    return `${minutes}:${seconds.toString().padStart(2, "0")}`
+  }, [idleCountdownSeconds])
+
   // ── 5. RENDER ──
   return (
     <div className="flex h-screen max-w-[100vw] bg-background overflow-hidden overflow-x-hidden print:h-auto print:block print:bg-white">
       <div className="print:hidden">
         <DashboardSidebar
           activePage={activePage}
-          setActivePage={setActivePage}
+          setActivePage={handleNavigatePage}
           isMobileOpen={mobileMenuOpen}
           onMobileClose={() => setMobileMenuOpen(false)}
           showSuperAdminLink={isSuperAdmin}
@@ -548,7 +659,7 @@ export default function DashboardPage() {
 
       <div className="flex w-full max-w-full flex-1 flex-col overflow-x-hidden lg:pl-16 xl:pl-64 print:pl-0 print:block">
         <div className="print:hidden">
-          <DashboardHeader user={user} role={userRole} stats={stats} inventory={inventory} activeLots={lotsInUse} labSettings={labSettings} labName={labName} onNavigate={setActivePage} onProfileUpdated={refreshAuthUser} onMobileMenuOpen={() => setMobileMenuOpen(true)} />
+          <DashboardHeader user={user} role={userRole} stats={stats} inventory={inventory} activeLots={lotsInUse} labSettings={labSettings} labName={labName} onNavigate={handleNavigatePage} onProfileUpdated={refreshAuthUser} onMobileMenuOpen={() => setMobileMenuOpen(true)} />
         </div>
 
         <main className="flex-1 overflow-y-auto overflow-x-hidden p-8 print:overflow-visible print:p-0">
@@ -571,7 +682,7 @@ export default function DashboardPage() {
 
                     {pendingValidationCount > 0 && (
                       <button
-                        onClick={() => setActivePage("validation")}
+                        onClick={() => handleNavigatePage("validation")}
                         className="flex items-center gap-3 w-full rounded-2xl border border-yellow-500/20 bg-yellow-500/5 px-6 py-4 hover:bg-yellow-500/10 transition-all text-left"
                       >
                         <ShieldCheck className="size-5 text-yellow-600 shrink-0" />
@@ -638,7 +749,7 @@ export default function DashboardPage() {
                                   return (
                                     <div
                                       key={lot.id}
-                                      onClick={() => setActivePage("lotinuse")}
+                                      onClick={() => handleNavigatePage("lotinuse")}
                                       className="flex cursor-pointer flex-col gap-2 px-5 py-4 transition-colors hover:bg-muted/30 sm:flex-row sm:items-center sm:gap-4"
                                     >
                                       <div className="flex-1 min-w-0">
@@ -670,15 +781,15 @@ export default function DashboardPage() {
 
                           {/* Section B: Quick Actions (both roles) */}
                           <div className="grid grid-cols-1 gap-3 overflow-x-hidden sm:grid-cols-3 lg:flex lg:gap-4">
-                            <button onClick={() => setActivePage("inventory")} className="group w-full lg:w-auto flex flex-col items-center gap-4 p-8 rounded-[2.5rem] border border-border bg-card hover:border-primary/40 hover:bg-primary/5 transition-all shadow-sm">
+                            <button onClick={() => handleNavigatePage("inventory")} className="group w-full lg:w-auto flex flex-col items-center gap-4 p-8 rounded-[2.5rem] border border-border bg-card hover:border-primary/40 hover:bg-primary/5 transition-all shadow-sm">
                               <div className="p-4 rounded-2xl bg-primary/10 group-hover:scale-110 transition-transform"><Scan className="size-8 text-primary" /></div>
                               <span className="text-sm font-black uppercase tracking-widest text-foreground">Scan Reagent</span>
                             </button>
-                            <button onClick={() => setActivePage("lotinuse")} className="group w-full lg:w-auto flex flex-col items-center gap-4 p-8 rounded-[2.5rem] border border-border bg-card hover:border-primary/40 hover:bg-primary/5 transition-all shadow-sm">
+                            <button onClick={() => handleNavigatePage("lotinuse")} className="group w-full lg:w-auto flex flex-col items-center gap-4 p-8 rounded-[2.5rem] border border-border bg-card hover:border-primary/40 hover:bg-primary/5 transition-all shadow-sm">
                               <div className="p-4 rounded-2xl bg-indigo-500/10 group-hover:scale-110 transition-transform"><Minus className="size-8 text-indigo-500" /></div>
                               <span className="text-sm font-black uppercase tracking-widest text-foreground">Log Usage</span>
                             </button>
-                            <button onClick={() => setActivePage("requests")} className="group w-full lg:w-auto flex flex-col items-center gap-4 p-8 rounded-[2.5rem] border border-border bg-card hover:border-primary/40 hover:bg-primary/5 transition-all shadow-sm">
+                            <button onClick={() => handleNavigatePage("requests")} className="group w-full lg:w-auto flex flex-col items-center gap-4 p-8 rounded-[2.5rem] border border-border bg-card hover:border-primary/40 hover:bg-primary/5 transition-all shadow-sm">
                               <div className="p-4 rounded-2xl bg-purple-500/10 group-hover:scale-110 transition-transform"><PackagePlus className="size-8 text-purple-500" /></div>
                               <span className="text-sm font-black uppercase tracking-widest text-foreground">Request Restock</span>
                             </button>
@@ -856,6 +967,50 @@ export default function DashboardPage() {
           </div>
         </main>
       </div>
+      {showIdleWarning && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-background/80 backdrop-blur-md p-4">
+          <div className="mx-2 w-full max-w-lg rounded-[2rem] border border-border bg-card shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 sm:mx-auto">
+            <div className="flex items-center gap-3 border-b border-border bg-amber-500/10 px-6 py-5">
+              <div className="rounded-xl bg-amber-500/15 p-2">
+                <Timer className="size-5 text-amber-600" />
+              </div>
+              <h2 className="text-lg font-black text-foreground">Session Expiring Soon</h2>
+            </div>
+            <div className="space-y-4 px-6 py-6">
+              <p className="text-sm text-muted-foreground">
+                You&apos;ve been inactive for a while. You&apos;ll be automatically logged out in 2 minutes to keep your lab data secure.
+              </p>
+              <p className="text-sm font-bold text-amber-700">
+                Logging out in {idleCountdownLabel}...
+              </p>
+            </div>
+            <div className="flex flex-col-reverse gap-3 border-t border-border bg-muted/20 px-6 py-5 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => { void handleSignOut() }}
+                className="rounded-xl border border-border bg-card px-5 py-2.5 text-sm font-bold text-foreground hover:bg-muted transition-all"
+              >
+                Log Out Now
+              </button>
+              <button
+                type="button"
+                onClick={handleStayLoggedIn}
+                className="rounded-xl bg-primary px-5 py-2.5 text-sm font-bold text-primary-foreground shadow-md hover:opacity-90 transition-all"
+              >
+                Stay Logged In
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
+  )
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={<div className="flex h-screen w-full items-center justify-center bg-background" />}>
+      <DashboardPageContent />
+    </Suspense>
   )
 }
