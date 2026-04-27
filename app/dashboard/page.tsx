@@ -545,7 +545,7 @@ export default function DashboardPage() {
         />
       </div>
 
-      <div className="flex w-full max-w-full flex-1 flex-col overflow-x-hidden lg:pl-64 print:pl-0 print:block">
+      <div className="flex w-full max-w-full flex-1 flex-col overflow-x-hidden lg:pl-16 xl:pl-64 print:pl-0 print:block">
         <div className="print:hidden">
           <DashboardHeader user={user} role={userRole} stats={stats} inventory={inventory} activeLots={lotsInUse} labSettings={labSettings} labName={labName} onNavigate={setActivePage} onProfileUpdated={refreshAuthUser} onMobileMenuOpen={() => setMobileMenuOpen(true)} />
         </div>

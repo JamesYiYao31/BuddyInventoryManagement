@@ -659,14 +659,14 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
       <div className={`hidden sm:block rounded-2xl border border-border bg-card overflow-hidden shadow-sm print:border-none print:rounded-none print:shadow-none print:overflow-visible print-table-wrapper ${printingUsageReport ? "print:hidden" : ""}`}>
         <table className="w-full border-collapse text-sm print:text-[11px] print:text-zinc-900 print:border-collapse print:border-2 print:border-black">
           <colgroup>
-            <col className="w-[26%]" />
+            <col className="w-[25%]" />
             <col className="w-[12%]" />
-            <col className="w-[11%]" />
+            <col className="w-[12%]" />
             <col className="w-[12%]" />
             <col className="w-[12%]" />
             <col className="w-[10%]" />
-            <col className="w-[11%]" />
-            <col className="w-[6%] print:hidden" />
+            <col className="w-[12%]" />
+            <col className="w-[5%] print:hidden" />
           </colgroup>
 
           <thead>

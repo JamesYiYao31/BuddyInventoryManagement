@@ -408,7 +408,7 @@ export default function RequestsTab({ requests, refreshRequests, userRole }: Req
               <button onClick={() => { setShowRequestModal(false); resetRequestForm() }} className="p-2 rounded-full hover:bg-muted text-muted-foreground transition-all"><X className="size-7" /></button>
             </div>
             <div className="overflow-y-auto flex-1">
-            <div className="grid grid-cols-1 gap-12 p-4 md:grid-cols-3 sm:p-12">
+            <div className="grid grid-cols-1 gap-12 p-4 md:grid-cols-[2fr_1.5fr_2fr] sm:p-12">
               <div className="space-y-8 sm:border-r sm:border-border sm:pr-12">
                 <p className="text-xs font-black text-primary uppercase tracking-widest">1. Item Details</p>
                 <div className="space-y-2">
