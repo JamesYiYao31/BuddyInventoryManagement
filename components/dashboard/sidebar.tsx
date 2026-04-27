@@ -53,7 +53,6 @@ export function DashboardSidebar({ activePage, setActivePage, isMobileOpen, onMo
       <aside className={`fixed left-0 top-0 z-40 flex h-screen flex-col border-r border-border bg-card transition-all duration-300 w-64 lg:w-16 xl:w-64 lg:translate-x-0 ${isMobileOpen ? "translate-x-0" : "-translate-x-full"}`}>
       <div className="flex h-16 items-center justify-center border-b border-border xl:justify-start xl:px-6">
         <Image src="/buddy-logo.png" alt="Buddy Logo" width={40} height={40} className="h-10 w-auto object-contain" priority />
-        <span className="ml-3 hidden text-sm font-black tracking-wide text-foreground xl:block">Buddy</span>
       </div>
       <nav className="flex-1 space-y-1 p-4 overflow-y-auto">
         {navItems.map((item) => (
