@@ -408,8 +408,8 @@ export default function RequestsTab({ requests, refreshRequests, userRole }: Req
               <button onClick={() => { setShowRequestModal(false); resetRequestForm() }} className="p-2 rounded-full hover:bg-muted text-muted-foreground transition-all"><X className="size-7" /></button>
             </div>
             <div className="overflow-y-auto flex-1">
-            <div className="grid grid-cols-1 gap-12 p-4 md:grid-cols-[2fr_1.5fr_2fr] sm:p-12">
-              <div className="space-y-8 sm:border-r sm:border-border sm:pr-12">
+            <div className="grid grid-cols-1 gap-12 p-4 md:grid-cols-[2fr_1.5fr] xl:grid-cols-[2fr_1.5fr_2fr] sm:p-12">
+              <div className="space-y-8 md:border-r md:border-border md:pr-12">
                 <p className="text-xs font-black text-primary uppercase tracking-widest">1. Item Details</p>
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-1">Catalog Number</label>
@@ -454,22 +454,24 @@ export default function RequestsTab({ requests, refreshRequests, userRole }: Req
                   <input value={vendor} onChange={e => setVendor(e.target.value)} placeholder="Manufacturer" className="w-full h-14 border border-input bg-background rounded-2xl px-6 text-base font-medium" />
                 </div>
               </div>
-              <div className="space-y-8 sm:border-r sm:border-border sm:pr-12">
-                <p className="text-xs font-black text-primary uppercase tracking-widest">2. Order Metrics</p>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2"><label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-1">Order Qty</label><input type="number" min={1} value={orderQty} onChange={e => setOrderQty(Number(e.target.value))} className="w-full h-14 border border-input bg-background rounded-2xl px-6 text-xl font-bold" /></div>
-                  <div className="space-y-2"><label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-1">Unit Price ($)</label><input type="number" value={unitPrice} onChange={e => setUnitPrice(Number(e.target.value))} className="w-full h-14 border border-input bg-background rounded-2xl px-6 text-base font-bold" /></div>
-                </div>
-                {userRole === "manager" && (
-                  <div className="p-6 bg-primary/5 rounded-3xl border border-primary/20 flex justify-between items-center mt-4">
-                    <span className="text-xs font-bold uppercase text-primary tracking-widest">Estimated Total</span>
-                    <span className="text-4xl font-black text-primary">${(orderQty * unitPrice).toFixed(2)}</span>
+              <div className="flex flex-col gap-4 xl:contents">
+                <div className="space-y-8 xl:border-r xl:border-border xl:pr-12">
+                  <p className="text-xs font-black text-primary uppercase tracking-widest">2. Order Metrics</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2"><label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-1">Order Qty</label><input type="number" min={1} value={orderQty} onChange={e => setOrderQty(Number(e.target.value))} className="w-full h-14 border border-input bg-background rounded-2xl px-6 text-xl font-bold" /></div>
+                    <div className="space-y-2"><label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-1">Unit Price ($)</label><input type="number" value={unitPrice} onChange={e => setUnitPrice(Number(e.target.value))} className="w-full h-14 border border-input bg-background rounded-2xl px-6 text-base font-bold" /></div>
                   </div>
-                )}
-              </div>
-              <div className="space-y-8">
-                <p className="text-xs font-black text-primary uppercase tracking-widest">3. Additional Info</p>
-                <div className="space-y-2"><label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-1">Notes for Manager</label><textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Urgent..." className="w-full h-48 border border-input bg-background rounded-3xl p-6 text-base resize-none outline-none focus:ring-4 focus:ring-primary/10" /></div>
+                  {userRole === "manager" && (
+                    <div className="p-6 bg-primary/5 rounded-3xl border border-primary/20 flex justify-between items-center mt-4">
+                      <span className="text-xs font-bold uppercase text-primary tracking-widest">Estimated Total</span>
+                      <span className="text-4xl font-black text-primary">${(orderQty * unitPrice).toFixed(2)}</span>
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-8">
+                  <p className="text-xs font-black text-primary uppercase tracking-widest">3. Additional Info</p>
+                  <div className="space-y-2"><label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-1">Notes for Manager</label><textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Urgent..." className="w-full h-48 border border-input bg-background rounded-3xl p-6 text-base resize-none outline-none focus:ring-4 focus:ring-primary/10" /></div>
+                </div>
               </div>
             </div>
             </div>

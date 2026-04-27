@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { useRouter } from "next/navigation" 
-import { Search, CalendarClock, CalendarDays, CheckCircle2, User, Scan, Minus, PackagePlus, FlaskConical, AlertTriangle, Activity, Skull, DollarSign, ShieldCheck, ChevronRight } from "lucide-react"
+import { Search, CalendarClock, CalendarDays, CheckCircle2, User, Scan, Minus, PackagePlus, FlaskConical, AlertTriangle, Activity, Skull, DollarSign, ShieldCheck, ChevronRight, ChevronLeft } from "lucide-react"
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts"
 import { supabase } from "@/lib/supabase"
 
@@ -234,6 +234,7 @@ export default function DashboardPage() {
   const [pendingValidationCount, setPendingValidationCount] = useState(0)
   const [profileFullName, setProfileFullName] = useState("")
   const [loading, setLoading] = useState(true)
+  const [rightPanelOpen, setRightPanelOpen] = useState(false)
 
   // Filter State
   const [searchQuery, setSearchQuery] = useState("")
@@ -750,8 +751,17 @@ export default function DashboardPage() {
                       {activePage === "activitylog" && <ActivityLogTab logs={filteredLogs} currentUserName={currentUserName} currentUserRole={userRole} labSettings={labSettings} filterUser={logUserFilter} filterAction={actionFilter} filterDateStart={logDateStart} filterDateEnd={logDateEnd} labName={labName} />}
                     </div>
                     
-                    <aside className="hidden w-72 shrink-0 space-y-8 print:hidden lg:block">
-                      <div className="rounded-2xl border border-border bg-card p-6 space-y-8 sticky top-0 shadow-sm">
+                    <div className="relative hidden print:hidden lg:block xl:block">
+                      <button
+                        type="button"
+                        onClick={() => setRightPanelOpen(prev => !prev)}
+                        className="absolute -left-3 top-6 z-10 hidden size-7 items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-sm hover:text-foreground lg:flex xl:hidden"
+                        aria-label={rightPanelOpen ? "Collapse right panel" : "Expand right panel"}
+                      >
+                        {rightPanelOpen ? <ChevronRight className="size-4" /> : <ChevronLeft className="size-4" />}
+                      </button>
+                      <aside className={`shrink-0 space-y-8 transition-all duration-300 xl:w-72 xl:overflow-visible ${rightPanelOpen ? "lg:w-64" : "lg:w-0 lg:overflow-hidden"}`}>
+                      <div className="sticky top-0 rounded-2xl border border-border bg-card p-6 space-y-8 shadow-sm">
                         <div className="space-y-3">
                           <p className="text-[10px] font-bold uppercase text-muted-foreground tracking-widest">Global Search</p>
                           <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Type lot or item..." className="w-full h-11 px-4 text-sm bg-background border border-input rounded-xl focus:ring-2 focus:ring-primary/20 outline-none transition-all" />
@@ -837,7 +847,8 @@ export default function DashboardPage() {
                           </>
                         )}
                       </div>
-                    </aside>
+                      </aside>
+                    </div>
                   </div>
                 )}
               </>
