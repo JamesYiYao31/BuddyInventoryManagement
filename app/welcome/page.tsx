@@ -333,7 +333,7 @@ function WelcomeContent() {
               </select>
             </div>
 
-            <div className="space-y-2">
+            <div className="rounded-xl border border-border bg-muted/40 p-4 space-y-3">
               <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">
                 Expiring Soon Days
               </label>
@@ -344,9 +344,12 @@ function WelcomeContent() {
                 onChange={(e) => setExpiringSoonDays(e.target.value)}
                 className="w-full h-12 border border-input bg-background rounded-xl px-4 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20"
               />
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Lots expiring within this many days will be flagged as expiring soon and shown in yellow on your dashboard.
+              </p>
             </div>
 
-            <div className="space-y-2">
+            <div className="rounded-xl border border-border bg-muted/40 p-4 space-y-3">
               <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Urgent Days</label>
               <input
                 type="number"
@@ -355,9 +358,12 @@ function WelcomeContent() {
                 onChange={(e) => setUrgentDays(e.target.value)}
                 className="w-full h-12 border border-input bg-background rounded-xl px-4 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20"
               />
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Lots expiring within this many days will be flagged as urgent and shown in red. This should be a smaller number than Expiring Soon Days.
+              </p>
             </div>
 
-            <div className="space-y-2">
+            <div className="rounded-xl border border-border bg-muted/40 p-4 space-y-3">
               <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">
                 Low Stock Threshold
               </label>
@@ -368,20 +374,25 @@ function WelcomeContent() {
                 onChange={(e) => setLowStockThreshold(e.target.value)}
                 className="w-full h-12 border border-input bg-background rounded-xl px-4 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20"
               />
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Lots with this many units or fewer will be flagged as low stock. Set to 0 to disable low stock warnings.
+              </p>
             </div>
 
-            <label className="flex items-center gap-3 rounded-xl border border-border bg-background px-4 py-3">
-              <input
-                type="checkbox"
-                checked={requiresCoaApproval}
-                onChange={(e) => setRequiresCoaApproval(e.target.checked)}
-                className="size-4 accent-primary"
-              />
-              <span className="text-sm font-medium text-foreground">Require COA Approval</span>
-            </label>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              When enabled, technicians must wait for manager approval after uploading a Certificate of Analysis (COA) before a lot can be used on the bench. When disabled, COA uploads are auto-approved.
-            </p>
+            <div className="rounded-xl border border-border bg-muted/40 p-4 space-y-3">
+              <label className="flex items-center gap-3 rounded-xl border border-border bg-background px-4 py-3">
+                <input
+                  type="checkbox"
+                  checked={requiresCoaApproval}
+                  onChange={(e) => setRequiresCoaApproval(e.target.checked)}
+                  className="size-4 accent-primary"
+                />
+                <span className="text-sm font-medium text-foreground">Require COA Approval</span>
+              </label>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                When enabled, technicians must wait for manager approval after uploading a Certificate of Analysis (COA) before a lot can be used on the bench. When disabled, COA uploads are auto-approved.
+              </p>
+            </div>
 
             <button
               type="button"
