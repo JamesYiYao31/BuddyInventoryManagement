@@ -440,6 +440,19 @@ function DashboardPageContent() {
         setUserRole(uiRole)
         setIsSuperAdmin(sa)
 
+        // Onboarding check — managers only
+        if (profile?.role === "manager" && profile?.lab_id) {
+          const { data: settings } = await supabase
+            .from("lab_settings")
+            .select("onboarding_complete")
+            .eq("lab_id", profile.lab_id)
+            .maybeSingle()
+          if (!settings?.onboarding_complete) {
+            router.replace("/welcome")
+            return
+          }
+        }
+
         await refreshData()
         setLoading(false)
       }
