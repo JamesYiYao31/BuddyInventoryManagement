@@ -136,7 +136,6 @@ function WelcomeContent() {
   }
 
   const handleFinishSetup = async () => {
-    if (!labId) return
     setSaving(true)
     setErrorMessage(null)
 
@@ -160,9 +159,30 @@ function WelcomeContent() {
       return
     }
 
-    await supabase.from("lab_settings").upsert(
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+    if (!session?.user?.id) {
+      setErrorMessage("Your session has expired. Please sign in again.")
+      setSaving(false)
+      return
+    }
+
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("lab_id")
+      .eq("id", session.user.id)
+      .single()
+
+    if (profileError || !profile?.lab_id) {
+      setErrorMessage("Could not resolve your lab. Please try again.")
+      setSaving(false)
+      return
+    }
+
+    const { error: upsertError } = await supabase.from("lab_settings").upsert(
       {
-        lab_id: labId,
+        lab_id: profile.lab_id,
         lab_timezone: timezone,
         expiring_soon_days: expSoon,
         urgent_days: urg,
@@ -172,6 +192,12 @@ function WelcomeContent() {
       },
       { onConflict: "lab_id" }
     )
+
+    if (upsertError) {
+      setErrorMessage(upsertError.message || "Could not save setup. Please try again.")
+      setSaving(false)
+      return
+    }
 
     setSaving(false)
     router.replace("/dashboard")
