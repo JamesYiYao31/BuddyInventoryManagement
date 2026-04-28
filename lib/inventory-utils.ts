@@ -38,6 +38,7 @@ export interface LotEntry {
 export interface InventoryGroup {
   itemId: string
   name: string
+  vendor?: string | null
   lots: LotEntry[]
 }
 
@@ -803,7 +804,12 @@ export const fetchInventoryFromSupabase = async (): Promise<InventoryGroup[]> =>
     }
 
     if (!groups[name]) {
-      groups[name] = { itemId: row.item_id, name, lots: [] }
+      groups[name] = {
+        itemId: row.item_id,
+        name,
+        vendor: row.items?.vendor ?? null,
+        lots: [],
+      }
     }
     groups[name].lots.push(lot)
   })
