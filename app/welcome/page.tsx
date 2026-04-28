@@ -187,7 +187,7 @@ function WelcomeContent() {
         expiring_soon_days: expSoon,
         urgent_days: urg,
         low_stock_threshold: low,
-        requires_coa_approval: requiresCoaApproval,
+        require_coa_approval: requiresCoaApproval,
         onboarding_complete: true,
       },
       { onConflict: "lab_id" }
