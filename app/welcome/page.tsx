@@ -1,9 +1,10 @@
 "use client"
 
-import { Suspense, useEffect, useState } from "react"
+import { Suspense, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { FlaskConical, Loader2, Copy, Check } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { TIMEZONES } from "@/lib/timezones"
 
 type WelcomeSettings = {
   lab_timezone: string
@@ -12,16 +13,6 @@ type WelcomeSettings = {
   low_stock_threshold: number
   requires_coa_approval: boolean
 }
-
-const TIMEZONE_OPTIONS = [
-  { value: "America/New_York", label: "Eastern Time (New York)" },
-  { value: "America/Chicago", label: "Central Time (Chicago)" },
-  { value: "America/Denver", label: "Mountain Time (Denver)" },
-  { value: "America/Los_Angeles", label: "Pacific Time (Los Angeles)" },
-  { value: "America/Phoenix", label: "Arizona Time (Phoenix)" },
-  { value: "America/Anchorage", label: "Alaska Time (Anchorage)" },
-  { value: "Pacific/Honolulu", label: "Hawaii Time (Honolulu)" },
-]
 
 function WelcomeContent() {
   const router = useRouter()
@@ -42,6 +33,10 @@ function WelcomeContent() {
   const [urgentDays, setUrgentDays] = useState("7")
   const [lowStockThreshold, setLowStockThreshold] = useState("5")
   const [requiresCoaApproval, setRequiresCoaApproval] = useState(false)
+  const timezoneOptions = useMemo(() => {
+    if (TIMEZONES.some((t) => t.value === timezone)) return TIMEZONES
+    return [...TIMEZONES, { value: timezone, label: timezone }]
+  }, [timezone])
 
   useEffect(() => {
     let cancelled = false
@@ -304,7 +299,7 @@ function WelcomeContent() {
                 onChange={(e) => setTimezone(e.target.value)}
                 className="w-full h-12 border border-input bg-background rounded-xl px-4 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20"
               >
-                {TIMEZONE_OPTIONS.map((tz) => (
+                {timezoneOptions.map((tz) => (
                   <option key={tz.value} value={tz.value}>
                     {tz.label}
                   </option>
@@ -358,6 +353,9 @@ function WelcomeContent() {
               />
               <span className="text-sm font-medium text-foreground">Require COA Approval</span>
             </label>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              When enabled, technicians must wait for manager approval after uploading a Certificate of Analysis (COA) before a lot can be used on the bench. When disabled, COA uploads are auto-approved.
+            </p>
 
             <button
               type="button"

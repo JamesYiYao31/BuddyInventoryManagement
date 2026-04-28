@@ -295,7 +295,7 @@ export const LAB_SETTINGS_DEFAULTS: LabSettings = {
   lowStockThreshold: 5,
   expiringSoonDays: 30,
   urgentDays: 7,
-  labTimezone: "America/Chicago",
+  labTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
   techDashboardWidget: "donut",
   techsCanEditThresholds: true,
   labName: "My Lab",

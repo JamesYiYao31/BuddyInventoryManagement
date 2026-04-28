@@ -4,10 +4,11 @@ import { useState, useEffect, useCallback } from "react"
 import { Settings, Save, Loader2, ShieldAlert, Package, Clock, AlertTriangle, LayoutDashboard, Users, ShieldCheck, User as UserIcon, Shield } from "lucide-react"
 import {
   LabSettings, TechDashboardWidget, fetchLabSettings, updateLabSettings,
-  LabProfile, fetchLabProfiles, updateUserRole,
+  LabProfile, fetchLabProfiles, updateUserRole, resolveCurrentUserLabId,
 } from "@/lib/inventory-utils"
 import { supabase } from "@/lib/supabase"
 import { useToast } from "@/hooks/use-toast"
+import { TIMEZONES } from "@/lib/timezones"
 
 interface LabSettingsTabProps {
   labSettings: LabSettings
@@ -21,6 +22,8 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
   const [form, setForm] = useState<LabSettings>({ ...labSettings })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [timezoneSaving, setTimezoneSaving] = useState(false)
+  const [timezoneSaved, setTimezoneSaved] = useState(false)
 
   // ── TEAM MANAGEMENT STATE ──
   const [profiles, setProfiles] = useState<LabProfile[]>([])
@@ -120,6 +123,33 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
     }
   }
 
+  const handleTimezoneChange = async (nextTimezone: string) => {
+    setForm((prev) => ({ ...prev, labTimezone: nextTimezone }))
+    setTimezoneSaving(true)
+    setTimezoneSaved(false)
+
+    const labId = await resolveCurrentUserLabId()
+    if (!labId) {
+      setTimezoneSaving(false)
+      return
+    }
+
+    await supabase
+      .from("lab_settings")
+      .upsert(
+        {
+          lab_id: labId,
+          lab_timezone: nextTimezone,
+        },
+        { onConflict: "lab_id" }
+      )
+
+    setTimezoneSaving(false)
+    setTimezoneSaved(true)
+    setTimeout(() => setTimezoneSaved(false), 2000)
+    await refreshData()
+  }
+
   if (userRole !== "manager") {
     return (
       <div className="flex flex-col items-center justify-center p-20 text-center space-y-4">
@@ -148,6 +178,35 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 xl:grid-cols-4">
+          {/* ── Lab Timezone ── */}
+          <div className="rounded-2xl border border-border bg-card p-8 space-y-6 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-primary/10"><Clock className="size-5 text-primary" /></div>
+              <div>
+                <p className="text-sm font-bold text-foreground">Lab Timezone</p>
+                <p className="text-xs text-muted-foreground">All expiry dates and timestamps are displayed in this timezone.</p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest ml-1">Timezone</label>
+              <select
+                value={form.labTimezone}
+                onChange={e => void handleTimezoneChange(e.target.value)}
+                className="w-full h-14 border border-input bg-background rounded-2xl px-6 text-base font-medium focus:ring-4 focus:ring-primary/10 focus:border-primary outline-none transition-all"
+              >
+                {TIMEZONES.map((tz) => (
+                  <option key={tz.value} value={tz.value}>{tz.label}</option>
+                ))}
+                {!TIMEZONES.some((tz) => tz.value === form.labTimezone) && (
+                  <option value={form.labTimezone}>{form.labTimezone}</option>
+                )}
+              </select>
+              <div className="h-4">
+                {timezoneSaving && <p className="text-xs text-muted-foreground ml-1">Saving...</p>}
+                {!timezoneSaving && timezoneSaved && <p className="text-xs text-green-600 ml-1">Saved</p>}
+              </div>
+            </div>
+          </div>
 
           {/* ── Low Stock Threshold ── */}
           <div className="rounded-2xl border border-border bg-card p-8 space-y-6 shadow-sm">

@@ -146,6 +146,13 @@ function RegisterLabContent() {
       }
 
       const labId = newLab.id as string
+      const detectedTz = Intl.DateTimeFormat().resolvedOptions().timeZone
+      try {
+        await supabase.from("lab_settings").insert({
+          lab_id: labId,
+          lab_timezone: detectedTz,
+        })
+      } catch {}
 
       const { error: inviteErr } = await supabase
         .from("lab_invites")
