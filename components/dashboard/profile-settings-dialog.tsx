@@ -78,7 +78,7 @@ export function ProfileSettingsDialog({
       document.removeEventListener("keydown", handleEnter)
       window.removeEventListener("popstate", handlePopState)
     }
-  }, [open, onOpenChange, handleSaveName, handleUpdatePassword])
+  }, [open, onOpenChange])
 
   const nameDirty = displayName.trim() !== (initialName || "").trim()
 

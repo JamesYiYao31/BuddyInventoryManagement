@@ -92,7 +92,7 @@ export default function RequestsTab({ requests, refreshRequests, userRole }: Req
       document.removeEventListener("keydown", handleEnter)
       window.removeEventListener("popstate", handlePopState)
     }
-  }, [showReceiveModal, receiveToInventory])
+  }, [showReceiveModal])
 
   const resetRequestForm = () => {
     setCatalogInput("")

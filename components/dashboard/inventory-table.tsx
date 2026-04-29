@@ -393,7 +393,7 @@ export default function InventoryTab({
       document.removeEventListener("keydown", handleEnter)
       window.removeEventListener("popstate", handlePopState)
     }
-  }, [showItemModal, resetThresholdForm, saveItem])
+  }, [showItemModal, resetThresholdForm])
 
   useEffect(() => {
     if (!showInventoryDeleteModal) return
@@ -416,7 +416,7 @@ export default function InventoryTab({
       document.removeEventListener("keydown", handleEnter)
       window.removeEventListener("popstate", handlePopState)
     }
-  }, [showInventoryDeleteModal, handleConfirmInventoryDelete])
+  }, [showInventoryDeleteModal])
 
   useEffect(() => {
     if (!showReorderModal) return
@@ -445,7 +445,7 @@ export default function InventoryTab({
       document.removeEventListener("keydown", handleEnter)
       window.removeEventListener("popstate", handlePopState)
     }
-  }, [showReorderModal, submitReorder])
+  }, [showReorderModal])
 
   const openDeleteModal = (lot: any) => {
     if (userRole !== "manager") return alert("Unauthorized: Only managers can delete inventory.")

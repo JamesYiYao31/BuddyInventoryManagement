@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense, useMemo, useState } from "react"
+import { Suspense, useCallback, useEffect, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from "react"
 import { Loader2, Key } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { useRouter, useSearchParams } from "next/navigation"
@@ -24,7 +24,7 @@ function LoginContent() {
 
   const router = useRouter()
 
-  const handleSignIn = async () => {
+  const handleSignIn = useCallback(async () => {
     setIsLoading(true)
     setError(null)
     setRegisterSuccessBanner(null)
@@ -51,7 +51,7 @@ function LoginContent() {
       }
     }
     setIsLoading(false)
-  }
+  }, [email, password, router])
 
   const handleRegister = async () => {
     setIsLoading(true)
@@ -143,6 +143,30 @@ function LoginContent() {
     setTechKey("")
     setIsLoading(false)
   }
+
+  const handleSignInEnterKeyDown = useCallback(
+    (e: ReactKeyboardEvent<HTMLInputElement>) => {
+      if (e.key !== "Enter") return
+      if (isRegistering || isLoading) return
+      e.preventDefault()
+      void handleSignIn()
+    },
+    [isRegistering, isLoading, handleSignIn],
+  )
+
+  useEffect(() => {
+    const handleEnter = (e: KeyboardEvent) => {
+      if (e.key !== "Enter") return
+      if (isRegistering || isLoading) return
+      e.preventDefault()
+      void handleSignIn()
+    }
+
+    document.addEventListener("keydown", handleEnter)
+    return () => {
+      document.removeEventListener("keydown", handleEnter)
+    }
+  }, [isRegistering, isLoading, handleSignIn])
 
   return (
     <div className="relative flex min-h-screen flex-col bg-background font-sans antialiased overflow-hidden">
@@ -246,6 +270,7 @@ function LoginContent() {
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
+                    onKeyDown={handleSignInEnterKeyDown}
                     className="h-16 w-full rounded-2xl border border-input bg-background px-6 text-lg focus:ring-4 focus:ring-primary/10 outline-none transition-all"
                     placeholder="name@facility.org"
                     autoComplete="email"
@@ -258,6 +283,7 @@ function LoginContent() {
                     type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
+                    onKeyDown={handleSignInEnterKeyDown}
                     className="h-16 w-full rounded-2xl border border-input bg-background px-6 text-lg focus:ring-4 focus:ring-primary/10 outline-none transition-all"
                     placeholder="••••••••"
                     autoComplete={isRegistering ? "new-password" : "current-password"}

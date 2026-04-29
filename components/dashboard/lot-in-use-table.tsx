@@ -125,7 +125,7 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
       document.removeEventListener("keydown", handleEnter)
       window.removeEventListener("popstate", handlePopState)
     }
-  }, [showManualModal, handleManualSubmit])
+  }, [showManualModal])
 
   useEffect(() => {
     if (!showScanModal) return
@@ -148,7 +148,7 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
       document.removeEventListener("keydown", handleEnter)
       window.removeEventListener("popstate", handlePopState)
     }
-  }, [showScanModal, barcodeInput, handleScan])
+  }, [showScanModal, barcodeInput])
 
   useEffect(() => {
     if (!showUsageModal) return
@@ -171,7 +171,7 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
       document.removeEventListener("keydown", handleEnter)
       window.removeEventListener("popstate", handlePopState)
     }
-  }, [showUsageModal, handleConfirmDeduction])
+  }, [showUsageModal])
 
   useEffect(() => {
     if (!showDeleteModal) return
@@ -194,7 +194,7 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
       document.removeEventListener("keydown", handleEnter)
       window.removeEventListener("popstate", handlePopState)
     }
-  }, [showDeleteModal, handleConfirmDelete])
+  }, [showDeleteModal])
 
   useEffect(() => {
     if (!showOpenModal) return
@@ -217,7 +217,7 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
       document.removeEventListener("keydown", handleEnter)
       window.removeEventListener("popstate", handlePopState)
     }
-  }, [showOpenModal, handleConfirmOpen])
+  }, [showOpenModal])
 
   useEffect(() => {
     if (!showFefoWarningModal) return

@@ -338,7 +338,7 @@ export default function ValidationTab({ userRole, refreshData }: ValidationTabPr
       document.removeEventListener("keydown", handleEnter)
       window.removeEventListener("popstate", handlePopState)
     }
-  }, [showRejectModal, handleRejectSubmit])
+  }, [showRejectModal])
 
   const filteredArchivedLots = useMemo(() => {
     const q = debouncedHistorySearch
