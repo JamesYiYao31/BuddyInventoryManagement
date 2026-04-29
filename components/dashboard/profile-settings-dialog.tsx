@@ -58,9 +58,27 @@ export function ProfileSettingsDialog({
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") onOpenChange(false)
     }
+    const handleEnter = (e: KeyboardEvent) => {
+      if (e.key !== "Enter") return
+      const activeId = (document.activeElement as HTMLElement | null)?.id || ""
+      e.preventDefault()
+      if (activeId === "profile-new-password" || activeId === "profile-confirm-password") {
+        void handleUpdatePassword()
+        return
+      }
+      void handleSaveName()
+    }
+    window.history.pushState(null, "", window.location.href)
+    const handlePopState = () => onOpenChange(false)
     document.addEventListener("keydown", handleEsc)
-    return () => document.removeEventListener("keydown", handleEsc)
-  }, [open, onOpenChange])
+    document.addEventListener("keydown", handleEnter)
+    window.addEventListener("popstate", handlePopState)
+    return () => {
+      document.removeEventListener("keydown", handleEsc)
+      document.removeEventListener("keydown", handleEnter)
+      window.removeEventListener("popstate", handlePopState)
+    }
+  }, [open, onOpenChange, handleSaveName, handleUpdatePassword])
 
   const nameDirty = displayName.trim() !== (initialName || "").trim()
 

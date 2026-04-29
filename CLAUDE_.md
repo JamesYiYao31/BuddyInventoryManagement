@@ -74,24 +74,42 @@ adjacent domain.
 - Idle auto-logout (45min timeout, 2min warning dialog) ✅
 - Buddy logo only in sidebar (text removed) ✅
 
-### Phase 3 — Onboarding & Support (Active Work)
-- [ ] Self-serve onboarding flow
-      → Welcome screen after first login
-      → Guide manager to set Manager Key and Tech Key
-      → Prompt to configure lab settings
-- [ ] Self-serve lab registration flow
-      → New labs can sign up without manual provisioning
-- [ ] Add "Contact Support" link
-      → Email or chat widget in sidebar/settings
-- [ ] Change Time Zone UI
-      → Improve timezone selector in lab settings
+### Phase 3 — Onboarding & Support ✅
+- [x] Self-serve onboarding flow
+      → 3-step welcome wizard at /welcome
+      → Step 1: Welcome screen with lab name pill
+      → Step 2: Technician Key display with copy button
+      → Step 3: Configure lab settings (timezone, thresholds, COA toggle)
+      → All fields have styled info boxes with helper text explanations
+      → Dashboard onboarding gate: managers redirected to /welcome if onboarding_complete = false
+      → onboarding_complete flag on lab_settings (default false, set true on Finish Setup)
+- [x] Feedback & Support
+      → Header button renamed to "Feedback & Support"
+      → Links to existing /dashboard/feedback page
+      → Will be upgraded in Phase 4 with type selector
+- [x] Timezone UI
+      → Auto-detect browser timezone on lab registration
+      → Global timezone list in lib/timezones.ts (covers all major world regions)
+      → Timezone selector in welcome wizard Step 3
+      → Timezone card added as first card in lab settings tab
+      → LAB_SETTINGS_DEFAULTS falls back to Intl.DateTimeFormat timezone
+- [ ] Self-serve lab registration (open signup)
+      → DEFERRED — invite-only model kept for first 10 customers
+      → Super admin generates invite link manually
+      → Revisit after 10 customers onboarded
 
-### Phase 4 — Feedback & Integration
-- [ ] Wire up feedback/bug report form
-      → Feedback table already exists in Supabase ✅
-      → Connect the UI form
-      → Zapier: Supabase → Google Sheets (log all feedback)
-         or Supabase → Gmail (email on new submission)
+### Phase 4 — Feedback & Integration (Active Work)
+- [ ] Upgrade /dashboard/feedback into unified Feedback & Support page
+      → Add type selector: Bug Report / Support Request / Feedback
+      → Wire form to Supabase feedback table
+      → Add type column to feedback table:
+         ALTER TABLE public.feedback
+         ADD COLUMN IF NOT EXISTS type text
+           CHECK (type IN ('bug', 'support', 'feedback'))
+           DEFAULT 'feedback';
+      → Zapier: route by type
+         bug/support → Gmail notification
+         feedback → Google Sheets log
 
 ### Phase 5 — Security Hardening
 - [ ] Encryption review
@@ -99,6 +117,17 @@ adjacent domain.
       → Decide if encryption at rest is needed (depends on PHI scope)
       → Passwords already handled by Supabase Auth ✅
 - [ ] Wire up remaining analytics features
+
+### Future — Post 10 Customers
+- [ ] Open self-serve lab registration (no invite required)
+- [ ] yourbuddyapp.com website with landing page
+      → Brand domain: looking for buddyhealth.com alternatives
+      → Current placeholder: yourbuddyapp.com
+      → Buddy is a platform brand — future products beyond Lab
+- [ ] Dynamsoft Barcode Reader migration
+      → Replace ZXing in barcode-camera-scanner.tsx
+      → One line change in parseSmartBarcode() handles Dynamsoft output
+      → See Barcode Scanning section for full migration notes
 
 ---
 
@@ -493,3 +522,20 @@ removed on component unmount.
   explicit, auditable patterns over clever shortcuts
 - **Python-to-TypeScript bridges:** When helpful, draw analogies to
   Python patterns James already knows
+
+## Modal UX Conventions (apply to all modals)
+
+### Enter Key Submission
+- Every modal with a primary action (Save, Submit, Confirm) must support Enter key submission
+- Use a `useEffect` with a `keydown` listener firing the primary handler on `event.key === 'Enter'`
+- Guard: skip if `document.activeElement?.tagName === 'TEXTAREA'` (multi-line fields)
+- Guard: only fire when the modal's open state is true
+- Clean up listener on modal close and component unmount
+- ESC key close behavior must always be preserved alongside this
+
+### Android Back Button (Mobile)
+- When any modal opens, push a dummy history entry:
+  `window.history.pushState(null, '', window.location.href)`
+- Listen for `popstate` and close the modal instead of allowing browser navigation
+- Full cleanup of popstate listener on modal close and component unmount
+- Prevents back button from navigating to login page or previous route while modal is open

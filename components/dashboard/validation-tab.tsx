@@ -127,6 +127,7 @@ export default function ValidationTab({ userRole, refreshData }: ValidationTabPr
   const [showRejectModal, setShowRejectModal] = useState<ValidationQueueEntry | null>(null)
   const [rejectReason, setRejectReason] = useState("")
   const [rejectSaving, setRejectSaving] = useState(false)
+  const isTextareaFocused = () => document.activeElement?.tagName === "TEXTAREA"
 
   const loadQueue = useCallback(async () => {
     setLoading(true)
@@ -318,9 +319,26 @@ export default function ValidationTab({ userRole, refreshData }: ValidationTabPr
         setRejectReason("")
       }
     }
+    const handleEnter = (e: KeyboardEvent) => {
+      if (e.key === "Enter" && !isTextareaFocused()) {
+        e.preventDefault()
+        void handleRejectSubmit()
+      }
+    }
+    window.history.pushState(null, "", window.location.href)
+    const handlePopState = () => {
+      setShowRejectModal(null)
+      setRejectReason("")
+    }
     document.addEventListener("keydown", handleEsc)
-    return () => document.removeEventListener("keydown", handleEsc)
-  }, [showRejectModal])
+    document.addEventListener("keydown", handleEnter)
+    window.addEventListener("popstate", handlePopState)
+    return () => {
+      document.removeEventListener("keydown", handleEsc)
+      document.removeEventListener("keydown", handleEnter)
+      window.removeEventListener("popstate", handlePopState)
+    }
+  }, [showRejectModal, handleRejectSubmit])
 
   const filteredArchivedLots = useMemo(() => {
     const q = debouncedHistorySearch

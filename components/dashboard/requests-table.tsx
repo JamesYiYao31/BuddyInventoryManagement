@@ -34,6 +34,7 @@ export default function RequestsTab({ requests, refreshRequests, userRole }: Req
   const [receiveLot, setReceiveLot] = useState("")
   const [receiveExpiry, setReceiveExpiry] = useState("")
   const [receiveQty, setReceiveQty] = useState(1)
+  const isTextareaFocused = () => document.activeElement?.tagName === "TEXTAREA"
 
   useEffect(() => {
     if (!showRequestModal) return
@@ -43,8 +44,25 @@ export default function RequestsTab({ requests, refreshRequests, userRole }: Req
         resetRequestForm()
       }
     }
+    const handleEnter = (e: KeyboardEvent) => {
+      if (e.key === "Enter" && !isTextareaFocused()) {
+        e.preventDefault()
+        void submitRequest()
+      }
+    }
+    window.history.pushState(null, "", window.location.href)
+    const handlePopState = () => {
+      setShowRequestModal(false)
+      resetRequestForm()
+    }
     document.addEventListener("keydown", handleEsc)
-    return () => document.removeEventListener("keydown", handleEsc)
+    document.addEventListener("keydown", handleEnter)
+    window.addEventListener("popstate", handlePopState)
+    return () => {
+      document.removeEventListener("keydown", handleEsc)
+      document.removeEventListener("keydown", handleEnter)
+      window.removeEventListener("popstate", handlePopState)
+    }
   }, [showRequestModal])
 
   useEffect(() => {
@@ -55,9 +73,26 @@ export default function RequestsTab({ requests, refreshRequests, userRole }: Req
         setReceiveQty(1)
       }
     }
+    const handleEnter = (e: KeyboardEvent) => {
+      if (e.key === "Enter" && !isTextareaFocused()) {
+        e.preventDefault()
+        void receiveToInventory()
+      }
+    }
+    window.history.pushState(null, "", window.location.href)
+    const handlePopState = () => {
+      setShowReceiveModal(null)
+      setReceiveQty(1)
+    }
     document.addEventListener("keydown", handleEsc)
-    return () => document.removeEventListener("keydown", handleEsc)
-  }, [showReceiveModal])
+    document.addEventListener("keydown", handleEnter)
+    window.addEventListener("popstate", handlePopState)
+    return () => {
+      document.removeEventListener("keydown", handleEsc)
+      document.removeEventListener("keydown", handleEnter)
+      window.removeEventListener("popstate", handlePopState)
+    }
+  }, [showReceiveModal, receiveToInventory])
 
   const resetRequestForm = () => {
     setCatalogInput("")

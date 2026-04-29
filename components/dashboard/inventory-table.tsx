@@ -339,6 +339,7 @@ export default function InventoryTab({
   const [expandValidationFile, setExpandValidationFile] = useState<File | null>(null)
   const [expandValidationSaving, setExpandValidationSaving] = useState(false)
   const [existingValidationByLotId, setExistingValidationByLotId] = useState<Record<string, { id: string; file_url?: string | null; file_name?: string | null } | null>>({})
+  const isTextareaFocused = () => document.activeElement?.tagName === "TEXTAREA"
 
   useEffect(() => {
     if (!showBarcodeModal) return
@@ -348,8 +349,17 @@ export default function InventoryTab({
         resetBarcodeState()
       }
     }
+    window.history.pushState(null, "", window.location.href)
+    const handlePopState = () => {
+      setShowBarcodeModal(false)
+      resetBarcodeState()
+    }
     document.addEventListener("keydown", handleEsc)
-    return () => document.removeEventListener("keydown", handleEsc)
+    window.addEventListener("popstate", handlePopState)
+    return () => {
+      document.removeEventListener("keydown", handleEsc)
+      window.removeEventListener("popstate", handlePopState)
+    }
   }, [showBarcodeModal])
 
   useEffect(() => {
@@ -362,18 +372,51 @@ export default function InventoryTab({
         resetThresholdForm()
       }
     }
+    const handleEnter = (e: KeyboardEvent) => {
+      if (e.key === "Enter" && !isTextareaFocused()) {
+        e.preventDefault()
+        void saveItem()
+      }
+    }
+    window.history.pushState(null, "", window.location.href)
+    const handlePopState = () => {
+      setShowItemModal(false)
+      setScanBadge(null)
+      setPendingVendorSku("")
+      resetThresholdForm()
+    }
     document.addEventListener("keydown", handleEsc)
-    return () => document.removeEventListener("keydown", handleEsc)
-  }, [showItemModal, resetThresholdForm])
+    document.addEventListener("keydown", handleEnter)
+    window.addEventListener("popstate", handlePopState)
+    return () => {
+      document.removeEventListener("keydown", handleEsc)
+      document.removeEventListener("keydown", handleEnter)
+      window.removeEventListener("popstate", handlePopState)
+    }
+  }, [showItemModal, resetThresholdForm, saveItem])
 
   useEffect(() => {
     if (!showInventoryDeleteModal) return
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") setShowInventoryDeleteModal(null)
     }
+    const handleEnter = (e: KeyboardEvent) => {
+      if (e.key === "Enter" && !isTextareaFocused()) {
+        e.preventDefault()
+        void handleConfirmInventoryDelete()
+      }
+    }
+    window.history.pushState(null, "", window.location.href)
+    const handlePopState = () => setShowInventoryDeleteModal(null)
     document.addEventListener("keydown", handleEsc)
-    return () => document.removeEventListener("keydown", handleEsc)
-  }, [showInventoryDeleteModal])
+    document.addEventListener("keydown", handleEnter)
+    window.addEventListener("popstate", handlePopState)
+    return () => {
+      document.removeEventListener("keydown", handleEsc)
+      document.removeEventListener("keydown", handleEnter)
+      window.removeEventListener("popstate", handlePopState)
+    }
+  }, [showInventoryDeleteModal, handleConfirmInventoryDelete])
 
   useEffect(() => {
     if (!showReorderModal) return
@@ -383,9 +426,26 @@ export default function InventoryTab({
         setReorderLot(null)
       }
     }
+    const handleEnter = (e: KeyboardEvent) => {
+      if (e.key === "Enter" && !isTextareaFocused()) {
+        e.preventDefault()
+        void submitReorder()
+      }
+    }
+    window.history.pushState(null, "", window.location.href)
+    const handlePopState = () => {
+      setShowReorderModal(false)
+      setReorderLot(null)
+    }
     document.addEventListener("keydown", handleEsc)
-    return () => document.removeEventListener("keydown", handleEsc)
-  }, [showReorderModal])
+    document.addEventListener("keydown", handleEnter)
+    window.addEventListener("popstate", handlePopState)
+    return () => {
+      document.removeEventListener("keydown", handleEsc)
+      document.removeEventListener("keydown", handleEnter)
+      window.removeEventListener("popstate", handlePopState)
+    }
+  }, [showReorderModal, submitReorder])
 
   const openDeleteModal = (lot: any) => {
     if (userRole !== "manager") return alert("Unauthorized: Only managers can delete inventory.")

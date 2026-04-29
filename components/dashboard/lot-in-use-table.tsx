@@ -92,6 +92,7 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
   const [scanInputMode, setScanInputMode] = useState<"usb" | "camera">("usb")
   const [scanCameraError, setScanCameraError] = useState("")
   const barcodeRef = useRef<HTMLInputElement>(null)
+  const isTextareaFocused = () => document.activeElement?.tagName === "TEXTAREA"
 
   useEffect(() => {
     if (showScanModal && barcodeRef.current) setTimeout(() => barcodeRef.current?.focus(), 100)
@@ -108,45 +109,115 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") setShowManualModal(false)
     }
+    const handleEnter = (e: KeyboardEvent) => {
+      if (e.key === "Enter" && !isTextareaFocused()) {
+        e.preventDefault()
+        handleManualSubmit()
+      }
+    }
+    window.history.pushState(null, "", window.location.href)
+    const handlePopState = () => setShowManualModal(false)
     document.addEventListener("keydown", handleEsc)
-    return () => document.removeEventListener("keydown", handleEsc)
-  }, [showManualModal])
+    document.addEventListener("keydown", handleEnter)
+    window.addEventListener("popstate", handlePopState)
+    return () => {
+      document.removeEventListener("keydown", handleEsc)
+      document.removeEventListener("keydown", handleEnter)
+      window.removeEventListener("popstate", handlePopState)
+    }
+  }, [showManualModal, handleManualSubmit])
 
   useEffect(() => {
     if (!showScanModal) return
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") setShowScanModal(false)
     }
+    const handleEnter = (e: KeyboardEvent) => {
+      if (e.key === "Enter" && !isTextareaFocused()) {
+        e.preventDefault()
+        void handleScan(barcodeInput)
+      }
+    }
+    window.history.pushState(null, "", window.location.href)
+    const handlePopState = () => setShowScanModal(false)
     document.addEventListener("keydown", handleEsc)
-    return () => document.removeEventListener("keydown", handleEsc)
-  }, [showScanModal])
+    document.addEventListener("keydown", handleEnter)
+    window.addEventListener("popstate", handlePopState)
+    return () => {
+      document.removeEventListener("keydown", handleEsc)
+      document.removeEventListener("keydown", handleEnter)
+      window.removeEventListener("popstate", handlePopState)
+    }
+  }, [showScanModal, barcodeInput, handleScan])
 
   useEffect(() => {
     if (!showUsageModal) return
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") setShowUsageModal(null)
     }
+    const handleEnter = (e: KeyboardEvent) => {
+      if (e.key === "Enter" && !isTextareaFocused()) {
+        e.preventDefault()
+        void handleConfirmDeduction()
+      }
+    }
+    window.history.pushState(null, "", window.location.href)
+    const handlePopState = () => setShowUsageModal(null)
     document.addEventListener("keydown", handleEsc)
-    return () => document.removeEventListener("keydown", handleEsc)
-  }, [showUsageModal])
+    document.addEventListener("keydown", handleEnter)
+    window.addEventListener("popstate", handlePopState)
+    return () => {
+      document.removeEventListener("keydown", handleEsc)
+      document.removeEventListener("keydown", handleEnter)
+      window.removeEventListener("popstate", handlePopState)
+    }
+  }, [showUsageModal, handleConfirmDeduction])
 
   useEffect(() => {
     if (!showDeleteModal) return
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") setShowDeleteModal(null)
     }
+    const handleEnter = (e: KeyboardEvent) => {
+      if (e.key === "Enter" && !isTextareaFocused()) {
+        e.preventDefault()
+        void handleConfirmDelete()
+      }
+    }
+    window.history.pushState(null, "", window.location.href)
+    const handlePopState = () => setShowDeleteModal(null)
     document.addEventListener("keydown", handleEsc)
-    return () => document.removeEventListener("keydown", handleEsc)
-  }, [showDeleteModal])
+    document.addEventListener("keydown", handleEnter)
+    window.addEventListener("popstate", handlePopState)
+    return () => {
+      document.removeEventListener("keydown", handleEsc)
+      document.removeEventListener("keydown", handleEnter)
+      window.removeEventListener("popstate", handlePopState)
+    }
+  }, [showDeleteModal, handleConfirmDelete])
 
   useEffect(() => {
     if (!showOpenModal) return
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") setShowOpenModal(null)
     }
+    const handleEnter = (e: KeyboardEvent) => {
+      if (e.key === "Enter" && !isTextareaFocused()) {
+        e.preventDefault()
+        void handleConfirmOpen()
+      }
+    }
+    window.history.pushState(null, "", window.location.href)
+    const handlePopState = () => setShowOpenModal(null)
     document.addEventListener("keydown", handleEsc)
-    return () => document.removeEventListener("keydown", handleEsc)
-  }, [showOpenModal])
+    document.addEventListener("keydown", handleEnter)
+    window.addEventListener("popstate", handlePopState)
+    return () => {
+      document.removeEventListener("keydown", handleEsc)
+      document.removeEventListener("keydown", handleEnter)
+      window.removeEventListener("popstate", handlePopState)
+    }
+  }, [showOpenModal, handleConfirmOpen])
 
   useEffect(() => {
     if (!showFefoWarningModal) return
@@ -156,8 +227,17 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
         setFefoWarningData(null)
       }
     }
+    window.history.pushState(null, "", window.location.href)
+    const handlePopState = () => {
+      setShowFefoWarningModal(false)
+      setFefoWarningData(null)
+    }
     document.addEventListener("keydown", handleEsc)
-    return () => document.removeEventListener("keydown", handleEsc)
+    window.addEventListener("popstate", handlePopState)
+    return () => {
+      document.removeEventListener("keydown", handleEsc)
+      window.removeEventListener("popstate", handlePopState)
+    }
   }, [showFefoWarningModal])
 
   useEffect(() => {
@@ -165,8 +245,14 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") setShowUsageReportModal(false)
     }
+    window.history.pushState(null, "", window.location.href)
+    const handlePopState = () => setShowUsageReportModal(false)
     document.addEventListener("keydown", handleEsc)
-    return () => document.removeEventListener("keydown", handleEsc)
+    window.addEventListener("popstate", handlePopState)
+    return () => {
+      document.removeEventListener("keydown", handleEsc)
+      window.removeEventListener("popstate", handlePopState)
+    }
   }, [showUsageReportModal])
 
   const handlePrint = () => window.print()
