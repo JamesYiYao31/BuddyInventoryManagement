@@ -1,6 +1,7 @@
 import { google } from 'googleapis'
 import { NextResponse } from 'next/server'
 import { Resend } from 'resend'
+import { createClient } from '@supabase/supabase-js'
 
 type FeedbackType = 'bug' | 'support' | 'feedback'
 
@@ -21,6 +22,12 @@ type WebhookPayload = {
 
 const resend = new Resend(process.env.RESEND_API_KEY)
 
+type SubmitterInfo = {
+  fullName: string
+  email: string
+  labName: string
+}
+
 const escapeHtml = (value: string): string =>
   value
     .replaceAll('&', '&amp;')
@@ -32,6 +39,21 @@ const escapeHtml = (value: string): string =>
 const formatDate = (isoDate: string): string => {
   const date = new Date(isoDate)
   return Number.isNaN(date.getTime()) ? isoDate : date.toISOString()
+}
+
+const formatReadableDate = (isoDate: string): string => {
+  const date = new Date(isoDate)
+  if (Number.isNaN(date.getTime())) return isoDate
+  const datePart = new Intl.DateTimeFormat('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  }).format(date)
+  const timePart = new Intl.DateTimeFormat('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date)
+  return `${datePart} at ${timePart}`
 }
 
 const getRequiredEnv = (key: string): string => {
@@ -55,7 +77,36 @@ const validateRecord = (record: WebhookPayload['record']): FeedbackRecord => {
   return record
 }
 
-const sendBugOrSupportEmail = async (record: FeedbackRecord) => {
+const getSupabaseAdminClient = () => {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL
+  if (!supabaseUrl) {
+    throw new Error('Missing required env var: NEXT_PUBLIC_SUPABASE_URL')
+  }
+  const serviceRoleKey = getRequiredEnv('SUPABASE_SERVICE_ROLE_KEY')
+  return createClient(supabaseUrl, serviceRoleKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  })
+}
+
+const fetchSubmitterInfo = async (record: FeedbackRecord): Promise<SubmitterInfo> => {
+  const admin = getSupabaseAdminClient()
+
+  const [{ data: profile }, { data: lab }] = await Promise.all([
+    admin.from('profiles').select('full_name, email').eq('id', record.user_id).maybeSingle(),
+    admin.from('labs').select('name').eq('id', record.lab_id).maybeSingle(),
+  ])
+
+  return {
+    fullName: profile?.full_name || 'Unknown User',
+    email: profile?.email || 'Unknown Email',
+    labName: lab?.name || 'Unknown Lab',
+  }
+}
+
+const sendBugOrSupportEmail = async (record: FeedbackRecord, submitter: SubmitterInfo) => {
   const typeLabel = record.type === 'bug' ? 'Bug Report' : 'Support Request'
   const subject = `[Buddy Lab] New ${typeLabel}: ${record.title}`
   const html = `
@@ -64,9 +115,10 @@ const sendBugOrSupportEmail = async (record: FeedbackRecord) => {
       <p><strong>Type:</strong> ${escapeHtml(typeLabel)}</p>
       <p><strong>Title:</strong> ${escapeHtml(record.title)}</p>
       <p><strong>Description:</strong><br/>${escapeHtml(record.description).replaceAll('\n', '<br/>')}</p>
-      <p><strong>Lab ID:</strong> ${escapeHtml(record.lab_id)}</p>
-      <p><strong>User ID:</strong> ${escapeHtml(record.user_id)}</p>
-      <p><strong>Date:</strong> ${escapeHtml(formatDate(record.created_at))}</p>
+      <p><strong>Lab Name:</strong> ${escapeHtml(submitter.labName)}</p>
+      <p><strong>Submitted By:</strong> ${escapeHtml(submitter.fullName)}</p>
+      <p><strong>Email:</strong> ${escapeHtml(submitter.email)}</p>
+      <p><strong>Date:</strong> ${escapeHtml(formatReadableDate(record.created_at))}</p>
     </div>
   `
 
@@ -80,8 +132,15 @@ const sendBugOrSupportEmail = async (record: FeedbackRecord) => {
 
 const appendFeedbackToSheet = async (record: FeedbackRecord) => {
   const serviceAccountEmail = getRequiredEnv('GOOGLE_SERVICE_ACCOUNT_EMAIL')
-  const privateKey = getRequiredEnv('GOOGLE_PRIVATE_KEY').replace(/\\n/g, '\n')
+  const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n')
+  if (!privateKey) {
+    throw new Error('Missing required env var: GOOGLE_PRIVATE_KEY')
+  }
   const sheetId = getRequiredEnv('GOOGLE_SHEET_ID')
+  const range = 'Log!A:F'
+  const values = [
+    [formatDate(record.created_at), record.type, record.title, record.description, record.lab_id, record.status],
+  ]
 
   const auth = new google.auth.JWT({
     email: serviceAccountEmail,
@@ -90,14 +149,25 @@ const appendFeedbackToSheet = async (record: FeedbackRecord) => {
   })
 
   const sheets = google.sheets({ version: 'v4', auth })
-  await sheets.spreadsheets.values.append({
-    spreadsheetId: sheetId,
-    range: 'Log!A:F',
-    valueInputOption: 'RAW',
-    requestBody: {
-      values: [[formatDate(record.created_at), 'feedback', record.title, record.description, record.lab_id, record.status]],
-    },
-  })
+  try {
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: sheetId,
+      range,
+      valueInputOption: 'RAW',
+      requestBody: {
+        values,
+      },
+    })
+  } catch (error) {
+    console.error('Failed to append feedback row to Google Sheets', {
+      message: error instanceof Error ? error.message : String(error),
+      range,
+      values,
+      sheetId,
+      recordId: record.id,
+    })
+    throw error
+  }
 }
 
 export async function POST(request: Request) {
@@ -114,13 +184,16 @@ export async function POST(request: Request) {
 
     if (record.type === 'bug' || record.type === 'support') {
       getRequiredEnv('RESEND_API_KEY')
-      await sendBugOrSupportEmail(record)
+      const submitterInfo = await fetchSubmitterInfo(record)
+      await sendBugOrSupportEmail(record, submitterInfo)
     } else {
       await appendFeedbackToSheet(record)
     }
 
     return NextResponse.json({ ok: true }, { status: 200 })
-  } catch {
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    console.error('feedback-notify route failed', { message })
+    return NextResponse.json({ error: 'Internal server error', details: message }, { status: 500 })
   }
 }
