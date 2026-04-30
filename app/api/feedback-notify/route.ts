@@ -132,7 +132,9 @@ const sendBugOrSupportEmail = async (record: FeedbackRecord, submitter: Submitte
 
 const appendFeedbackToSheet = async (record: FeedbackRecord) => {
   const serviceAccountEmail = getRequiredEnv('GOOGLE_SERVICE_ACCOUNT_EMAIL')
-  const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n')
+  const privateKey = (process.env.GOOGLE_PRIVATE_KEY || '')
+    .replace(/\\n/g, '\n')
+    .replace(/^"|"$/g, '')
   if (!privateKey) {
     throw new Error('Missing required env var: GOOGLE_PRIVATE_KEY')
   }
