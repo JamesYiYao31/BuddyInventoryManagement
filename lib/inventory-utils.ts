@@ -1,4 +1,4 @@
-import { supabase } from "./supabase"
+import { supabase, signOutLocalOnRefreshFailure } from "./supabase"
 import { getEarliestExpiry } from "./expiry-utils.ts"
 
 export { getEarliestExpiry }
@@ -907,7 +907,13 @@ export interface LabProfile {
 export const resolveCurrentUserLabId = async (): Promise<string | null> => {
   const {
     data: { session },
+    error: sessionError,
   } = await supabase.auth.getSession()
+
+  if (sessionError) {
+    await signOutLocalOnRefreshFailure(sessionError)
+    return null
+  }
 
   if (!session?.user?.id) return null
 
