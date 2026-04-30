@@ -106,8 +106,14 @@ const fetchSubmitterInfo = async (record: FeedbackRecord): Promise<SubmitterInfo
   }
 }
 
-const sendBugOrSupportEmail = async (record: FeedbackRecord, submitter: SubmitterInfo) => {
-  const typeLabel = record.type === 'bug' ? 'Bug Report' : 'Support Request'
+const getTypeLabel = (type: FeedbackType): string => {
+  if (type === 'bug') return 'Bug Report'
+  if (type === 'support') return 'Support Request'
+  return 'Feedback'
+}
+
+const sendFeedbackEmail = async (record: FeedbackRecord, submitter: SubmitterInfo) => {
+  const typeLabel = getTypeLabel(record.type)
   const subject = `[Buddy Lab] New ${typeLabel}: ${record.title}`
   const html = `
     <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.5;">
@@ -130,7 +136,7 @@ const sendBugOrSupportEmail = async (record: FeedbackRecord, submitter: Submitte
   })
 }
 
-const appendFeedbackToSheet = async (record: FeedbackRecord) => {
+const appendFeedbackToSheet = async (record: FeedbackRecord, submitter: SubmitterInfo) => {
   const serviceAccountEmail = getRequiredEnv('GOOGLE_SERVICE_ACCOUNT_EMAIL')
   const privateKey = (process.env.GOOGLE_PRIVATE_KEY || '')
     .replace(/\\n/g, '\n')
@@ -139,9 +145,17 @@ const appendFeedbackToSheet = async (record: FeedbackRecord) => {
     throw new Error('Missing required env var: GOOGLE_PRIVATE_KEY')
   }
   const sheetId = getRequiredEnv('GOOGLE_SHEET_ID')
-  const range = 'Log!A:F'
+  const range = 'Log!A:G'
   const values = [
-    [formatDate(record.created_at), record.type, record.title, record.description, record.lab_id, record.status],
+    [
+      formatReadableDate(record.created_at),
+      record.type,
+      record.title,
+      record.description,
+      submitter.labName,
+      submitter.fullName,
+      record.status,
+    ],
   ]
 
   const auth = new google.auth.JWT({
@@ -184,13 +198,10 @@ export async function POST(request: Request) {
     const payload = (await request.json()) as WebhookPayload
     const record = validateRecord(payload.record)
 
-    if (record.type === 'bug' || record.type === 'support') {
-      getRequiredEnv('RESEND_API_KEY')
-      const submitterInfo = await fetchSubmitterInfo(record)
-      await sendBugOrSupportEmail(record, submitterInfo)
-    } else {
-      await appendFeedbackToSheet(record)
-    }
+    getRequiredEnv('RESEND_API_KEY')
+    const submitterInfo = await fetchSubmitterInfo(record)
+    await sendFeedbackEmail(record, submitterInfo)
+    await appendFeedbackToSheet(record, submitterInfo)
 
     return NextResponse.json({ ok: true }, { status: 200 })
   } catch (error) {
