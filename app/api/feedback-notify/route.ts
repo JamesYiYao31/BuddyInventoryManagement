@@ -114,7 +114,7 @@ const getTypeLabel = (type: FeedbackType): string => {
 
 const sendFeedbackEmail = async (record: FeedbackRecord, submitter: SubmitterInfo) => {
   const typeLabel = getTypeLabel(record.type)
-  const subject = `[Buddy Lab] New ${typeLabel}: ${record.title}`
+  const subject = `[Buddy Inventory Management] New ${typeLabel}: ${record.title}`
   const html = `
     <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.5;">
       <h2 style="margin-bottom: 12px;">New ${typeLabel}</h2>
