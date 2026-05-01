@@ -94,14 +94,15 @@ const getSupabaseAdminClient = () => {
 const fetchSubmitterInfo = async (record: FeedbackRecord): Promise<SubmitterInfo> => {
   const admin = getSupabaseAdminClient()
 
-  const [{ data: profile }, { data: lab }] = await Promise.all([
-    admin.from('profiles').select('full_name, email').eq('id', record.user_id).maybeSingle(),
+  const [{ data: profile }, { data: lab }, { data: authUser }] = await Promise.all([
+    admin.from('profiles').select('full_name').eq('id', record.user_id).maybeSingle(),
     admin.from('labs').select('name').eq('id', record.lab_id).maybeSingle(),
+    admin.auth.admin.getUserById(record.user_id),
   ])
 
   return {
     fullName: profile?.full_name || 'Unknown User',
-    email: profile?.email || 'Unknown Email',
+    email: authUser?.user?.email || 'Unknown Email',
     labName: lab?.name || 'Unknown Lab',
   }
 }
