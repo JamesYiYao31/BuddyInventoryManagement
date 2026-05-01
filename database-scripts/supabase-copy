@@ -1,0 +1,165 @@
+-- 1. CLEAR OLD TABLES (Start fresh!)
+drop table if exists activity_logs cascade;
+
+drop table if exists requests cascade;
+
+drop table if exists active_lots cascade;
+
+drop table if exists inventory_lots cascade;
+
+drop table if exists items cascade;
+
+drop table if exists lab_settings cascade;
+
+drop table if exists profiles cascade;
+
+-- Added to fix the error!
+drop table if exists feedback cascade;
+
+-- Added to ensure a clean wipe!
+-- 2. CREATE LAB SETTINGS (Unified)
+create table public.lab_settings (
+  id integer primary key default 1,
+  urgent_days integer default 7,
+  expiring_soon_days integer default 30,
+  low_stock_threshold integer default 5,
+  lab_timezone text default 'America/Chicago'
+);
+
+-- Insert a default settings row
+insert into
+  public.lab_settings (
+    id,
+    urgent_days,
+    expiring_soon_days,
+    low_stock_threshold
+  )
+values
+  (1, 7, 30, 5);
+
+-- 3. CREATE ITEMS CATALOG
+create table public.items (
+  id uuid default gen_random_uuid () primary key,
+  name text not null,
+  vendor text,
+  catalog_number text,
+  vendor_sku text,
+  default_price numeric(10, 2)
+);
+
+-- 4. CREATE INVENTORY LOTS
+create table public.inventory_lots (
+  id uuid default gen_random_uuid () primary key,
+  item_id uuid references public.items (id) on delete cascade,
+  lot_number text not null,
+  expiry_date date,
+  received_date date default CURRENT_DATE,
+  storage_location text,
+  quantity_type text default 'units_and_count',
+  units numeric default 1,
+  unit_label text,
+  count numeric default 1,
+  count_label text,
+  notes text,
+  status text default 'In Storage'
+);
+
+-- 5. CREATE ACTIVE LOTS
+create table public.active_lots (
+  id uuid default gen_random_uuid () primary key,
+  item_id uuid references public.items (id) on delete cascade,
+  lot_number text not null,
+  opened_date date default CURRENT_DATE,
+  working_expiry_date date,
+  actual_expiry_date date,
+  quantity_left text not null,
+  status text default 'Active'
+);
+
+-- 6. CREATE REORDER REQUESTS
+create table public.requests (
+  id uuid default gen_random_uuid () primary key,
+  item_id uuid references public.items (id),
+  catalog_number text,
+  item_name text,
+  vendor text,
+  order_qty numeric not null,
+  unit_price numeric(10, 2),
+  total_price numeric(10, 2),
+  status text default 'Pending',
+  notes text,
+  date_requested date default CURRENT_DATE
+);
+
+-- 7. CREATE ACTIVITY LOGS
+create table public.activity_logs (
+  id uuid default gen_random_uuid () primary key,
+  created_at timestamp with time zone default timezone ('utc'::text, now()) not null,
+  user_name text not null,
+  user_initials text not null,
+  action_type text not null,
+  item_name text not null,
+  lot_number text,
+  details text
+);
+
+-- 8. CREATE PROFILES TABLE (Must be created before the trigger)
+create table public.profiles (
+  id UUID references auth.users (id) primary key,
+  email TEXT,
+  full_name TEXT,
+  role TEXT default 'technician'
+);
+
+alter table public.profiles DISABLE row LEVEL SECURITY;
+
+-- 9. USER PROFILE TRIGGER
+create or replace function public.handle_new_user () RETURNS trigger as $$
+BEGIN
+  INSERT INTO public.profiles (id, email, role, full_name)
+  VALUES (
+    new.id, 
+    new.email, 
+    COALESCE(new.raw_user_meta_data->>'role', 'technician'), 
+    COALESCE(new.raw_user_meta_data->>'full_name', 'Unknown Tech') 
+  );
+  RETURN new;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 10. CREATE FEEDBACK TABLE
+create table public.feedback (
+  id uuid default gen_random_uuid () primary key,
+  created_at timestamp with time zone default timezone ('utc'::text, now()) not null,
+  user_id uuid references auth.users not null,
+  type text not null,
+  title text not null,
+  description text not null,
+  status text default 'Open'
+);
+
+-- Turn on Security for Feedback
+alter table public.feedback enable row level security;
+
+create policy "Users can insert own feedback" on public.feedback for insert
+with
+  check (auth.uid () = user_id);
+
+create policy "Users can view own feedback" on public.feedback for
+select
+  using (auth.uid () = user_id);
+
+alter table public.lab_settings
+add column tech_dashboard_widget text not null default 'donut';
+
+-- optional: keep values aligned with the app
+alter table public.lab_settings
+add constraint lab_settings_tech_dashboard_widget_check check (
+  tech_dashboard_widget in ('donut', 'waste', 'expenses', 'none')
+);
+
+drop trigger if exists on_auth_user_created on auth.users;
+
+create trigger on_auth_user_created
+after insert on auth.users for each row
+execute function public.handle_new_user ();
