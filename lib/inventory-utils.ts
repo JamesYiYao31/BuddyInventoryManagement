@@ -974,7 +974,7 @@ export const fetchLabProfiles = async (): Promise<LabProfile[]> => {
 
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, full_name, email, role")
+    .select("id, full_name, role")
     .eq("lab_id", labId)
     .order("full_name", { ascending: true })
 
@@ -993,7 +993,7 @@ export const fetchLabProfiles = async (): Promise<LabProfile[]> => {
     .map((p: any) => ({
       id: p.id,
       fullName: p.full_name || "",
-      email: p.email || "",
+      email: "",
       role: (p.role === "manager" ? "manager" : "technician") as "manager" | "technician",
       isOwner: Boolean(ownerId && p.id === ownerId),
     }))

@@ -357,7 +357,9 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
               <div className="p-2.5 rounded-xl bg-primary/10"><Users className="size-5 text-primary" /></div>
               <div>
                 <p className="text-sm font-bold text-foreground">Team Management</p>
-                <p className="text-xs text-muted-foreground">Assign Manager or Technician roles for every registered user in this lab.</p>
+                <p className="text-xs text-muted-foreground">
+                  Assign Manager or Technician roles for every registered user in this lab. Email addresses are not stored on profiles; they are managed securely via authentication.
+                </p>
               </div>
             </div>
             <button
@@ -370,9 +372,8 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
           </div>
 
           <div className="rounded-2xl border border-border overflow-hidden">
-            <div className="grid grid-cols-[2fr_2fr_1.3fr] px-6 py-3 bg-muted/30 border-b border-border text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+            <div className="grid grid-cols-[2fr_1.3fr] px-6 py-3 bg-muted/30 border-b border-border text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
               <span>Display Name</span>
-              <span>Email</span>
               <span>Role</span>
             </div>
 
@@ -386,14 +387,14 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
               </div>
             ) : (
               profiles.map(p => (
-                <div key={p.id} className="grid grid-cols-[2fr_2fr_1.3fr] items-center px-6 py-4 border-t border-border/50 text-sm hover:bg-muted/20 transition-colors">
+                <div key={p.id} className="grid grid-cols-[2fr_1.3fr] items-center px-6 py-4 border-t border-border/50 text-sm hover:bg-muted/20 transition-colors">
                   <div className="flex items-center gap-3 min-w-0">
                     <div className={`size-8 rounded-xl flex items-center justify-center text-[11px] font-black shrink-0 ${
                       p.role === "manager"
                         ? "bg-primary text-primary-foreground"
                         : "bg-muted text-muted-foreground border border-border"
                     }`}>
-                      {(p.fullName || p.email || "?").substring(0, 2).toUpperCase()}
+                      {(p.fullName || "?").substring(0, 2).toUpperCase()}
                     </div>
                     <div className="flex items-center gap-2 min-w-0">
                       <span className="font-bold text-foreground truncate">
@@ -406,8 +407,6 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
                       )}
                     </div>
                   </div>
-
-                  <span className="font-mono text-xs text-muted-foreground truncate">{p.email || "—"}</span>
 
                   <div className="flex items-center gap-2">
                     <select
