@@ -1,22 +1,22 @@
-# Buddy Lab — Claude Context File
+# Buddy Inventory Management — Claude Context File
 
 ## Who I Am
 
 You are a senior full-stack developer and mentor helping James build
-Buddy Lab — a B2B SaaS lab inventory management system. James has an
-intermediate Python background but is actively growing his JavaScript,
-TypeScript, SQL, and web dev skills. Always explain your reasoning,
-not just the solution. Help him understand the "why" behind every
-decision, especially around multi-tenancy, auth, and database design.
+Buddy Inventory Management — a B2B SaaS lab inventory management system.
+James has an intermediate Python background but is actively growing his
+JavaScript, TypeScript, SQL, and web dev skills. Always explain your
+reasoning, not just the solution. Help him understand the "why" behind
+every decision, especially around multi-tenancy, auth, and database design.
 
 ---
 
 ## The Product
 
-Buddy Lab is a lab inventory management tool for cell therapy and
-research labs. It is part of a broader brand called Buddy, which will
-expand into additional products in the future — so keep components
-modular and reusable.
+Buddy Inventory Management is a lab inventory management tool for cell
+therapy and research labs. It is part of a broader brand called Buddy,
+which will expand into additional products in the future — so keep
+components modular and reusable.
 
 **Target market:** Small US-based cell therapy and research labs.
 **Positioning:** Between expensive enterprise tools (Benchling,
@@ -24,7 +24,7 @@ LabArchives) and lightweight free options (Quartzy).
 **Pricing model:** Per-lab flat-rate subscription (not per-seat).
 **Compliance context:** Labs may handle sensitive materials. Accuracy,
 traceability, and reliability are critical — this is a healthcare-
-adjacent domain.
+adjacent domain. No PHI is stored — intentional product decision.
 
 ---
 
@@ -36,6 +36,9 @@ adjacent domain.
 - **UI Generation:** v0
 - **Editor:** Cursor with Claude Code
 - **Deployment:** Vercel (buddy-lab-tracker.vercel.app)
+- **Email:** Resend (onboarding@resend.dev sender)
+- **Rate Limiting:** Upstash Redis (@upstash/ratelimit, US-East-1)
+- **Feedback Logging:** Google Sheets via service account
 
 ---
 
@@ -86,7 +89,6 @@ adjacent domain.
 - [x] Feedback & Support
       → Header button renamed to "Feedback & Support"
       → Links to existing /dashboard/feedback page
-      → Will be upgraded in Phase 4 with type selector
 - [x] Timezone UI
       → Auto-detect browser timezone on lab registration
       → Global timezone list in lib/timezones.ts (covers all major world regions)
@@ -98,25 +100,62 @@ adjacent domain.
       → Super admin generates invite link manually
       → Revisit after 10 customers onboarded
 
-### Phase 4 — Feedback & Integration (Active Work)
-- [ ] Upgrade /dashboard/feedback into unified Feedback & Support page
-      → Add type selector: Bug Report / Support Request / Feedback
-      → Wire form to Supabase feedback table
-      → Add type column to feedback table:
-         ALTER TABLE public.feedback
-         ADD COLUMN IF NOT EXISTS type text
-           CHECK (type IN ('bug', 'support', 'feedback'))
-           DEFAULT 'feedback';
-      → Zapier: route by type
-         bug/support → Gmail notification
-         feedback → Google Sheets log
+### Phase 4 — Feedback & Integration ✅
+- [x] Unified Feedback & Support page (/dashboard/feedback)
+      → Three styled toggle buttons: ⚠️ Bug Report, 🙋 Support Request, 💬 Feedback
+      → Default selection: Bug Report
+      → Fields: type, title, description
+      → Enter key submits (guards textarea + loading state)
+      → Success banner + form reset on submit
+      → Session expiry handled gracefully
+- [x] API Route: /api/feedback-notify
+      → Secured with x-webhook-secret header (401 if missing/wrong)
+      → Fetches full_name from profiles, email from auth.users (admin client)
+      → Fetches lab name from labs table
+      → All types do both: Resend email + Google Sheets append
+      → Email subject: [Buddy Inventory Management] New {Type}: {title}
+      → Google Sheets row: Date | Type | Title | Description | Lab Name | Submitted By | Status
+- [x] Infrastructure
+      → Resend account (free tier)
+      → Google Cloud service account for Sheets
+      → Supabase webhook on feedback INSERT
+      → Google Sheets "Buddy Lab Feedback Log" (Log + Summary tabs)
 
-### Phase 5 — Security Hardening
-- [ ] Encryption review
-      → Emails currently plain text in profiles
-      → Decide if encryption at rest is needed (depends on PHI scope)
-      → Passwords already handled by Supabase Auth ✅
-- [ ] Wire up remaining analytics features
+### Phase 5 — Security Hardening ✅
+- [x] JWT Custom Claims Hook
+      → custom_access_token_hook injects lab_id and user_role into every JWT on login
+      → Enabled in Supabase: Authentication → Hooks → Customize Access Token
+      → Grants given to supabase_auth_admin for profiles table access
+- [x] get_my_lab_id() rewritten
+      → Now reads from auth.jwt() instead of querying profiles table
+      → Eliminates circular RLS dependency permanently
+      → No longer needs SECURITY DEFINER
+- [x] RLS enabled on ALL tables (12/12)
+      → profiles: 4 policies (select/update/insert/delete)
+      → Super admin checks use auth.jwt() ->> 'user_role' = 'super_admin'
+      → Lab scoping uses get_my_lab_id() which reads from JWT
+      → No circular dependency anywhere
+- [x] Legacy inventory table dropped
+      → Replaced by items + inventory_lots + active_lots
+- [x] email column removed from profiles table
+      → Email stored securely in auth.users only
+      → feedback-notify API route uses admin.auth.admin.getUserById() for email
+      → profiles now contains: id, lab_id, full_name, role only
+- [x] Vercel security headers (vercel.json in project root)
+      → X-Content-Type-Options: nosniff
+      → X-Frame-Options: DENY
+      → X-XSS-Protection: 1; mode=block
+      → Referrer-Policy: strict-origin-when-cross-origin
+      → Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
+      → Permissions-Policy: camera=(self), microphone=(), geolocation=()
+      → Content-Security-Policy: allows self, Supabase, Resend only
+- [x] API Rate Limiting
+      → Upstash Redis (US-East-1) + @upstash/ratelimit
+      → Sliding window: 10 requests per hour per IP
+      → Applied to /api/feedback-notify
+      → Returns 429 with RateLimit headers when exceeded
+- [x] Vercel Preview Deployment Protection enabled
+- [x] 2FA enabled on both Supabase and Vercel accounts
 
 ### Future — Post 10 Customers
 - [ ] Open self-serve lab registration (no invite required)
@@ -128,6 +167,8 @@ adjacent domain.
       → Replace ZXing in barcode-camera-scanner.tsx
       → One line change in parseSmartBarcode() handles Dynamsoft output
       → See Barcode Scanning section for full migration notes
+- [ ] Failed login attempt monitoring (Sentry or Datadog)
+- [ ] Formal penetration testing before enterprise customers
 
 ---
 
@@ -146,11 +187,72 @@ only ever see their own lab's data.
 
 ### Key Technical Rules (Never Break These)
 - Always scope queries to `lab_id` via `resolveCurrentUserLabId()`
-- `profiles` table RLS must stay DISABLED
 - Super admin always has `lab_id = null`
 - Bootstrap upsert fallback must NOT be re-added
 - `owner_id` on labs set via DB trigger `on_manager_profile_created`
 - Invite marked as used BEFORE `signUp()` runs
+- RLS is enabled on ALL tables including profiles — never disable it
+- get_my_lab_id() reads from JWT (auth.jwt()), never from profiles table
+- Super admin checks use auth.jwt() ->> 'user_role', never a profiles subquery
+
+### JWT Claims Architecture
+Every JWT token contains custom claims injected at login:
+- `lab_id` — the lab this user belongs to (null for super_admin)
+- `user_role` — 'manager' | 'technician' | 'super_admin'
+
+These are set by `custom_access_token_hook` (Postgres function).
+RLS policies read these claims directly — no database lookups needed.
+
+If a user's role or lab changes, they must log out and back in
+for the new JWT claims to take effect.
+
+---
+
+## Security Architecture
+
+### Current Security Score: 9/10
+The app is production-grade for a healthcare-adjacent B2B SaaS
+with no PHI. Remaining gap (1/10) would require enterprise tooling.
+
+### Security Layers
+| Layer | Implementation |
+|-------|---------------|
+| Passwords | Supabase Auth bcrypt |
+| Database isolation | RLS on all 12 tables |
+| Data scoping | JWT-based get_my_lab_id() |
+| Profile security | RLS enabled, email removed |
+| Transport | HTTPS enforced via HSTS |
+| Browser attacks | 6 security headers via vercel.json |
+| API abuse | Upstash rate limiting (10 req/hr/IP) |
+| Preview URLs | Vercel Authentication enabled |
+| Account security | 2FA on Supabase + Vercel |
+| Webhook | x-webhook-secret header validation |
+
+### RLS Policy Pattern
+All tables follow this pattern:
+```sql
+USING (
+  (EXISTS (SELECT 1 FROM profiles p
+    WHERE p.id = auth.uid()
+    AND p.role = 'super_admin'::text))
+  OR (lab_id = get_my_lab_id())
+)
+```
+Super admin policies use `auth.jwt() ->> 'user_role'` on profiles
+to avoid any self-referencing queries.
+
+### Environment Variables (Never expose these client-side)
+- SUPABASE_SERVICE_ROLE_KEY
+- SUPABASE_WEBHOOK_SECRET
+- RESEND_API_KEY
+- GOOGLE_SERVICE_ACCOUNT_EMAIL
+- GOOGLE_PRIVATE_KEY
+- GOOGLE_SHEET_ID
+- UPSTASH_REDIS_REST_URL
+- UPSTASH_REDIS_REST_TOKEN
+
+Only `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+should have the NEXT_PUBLIC_ prefix.
 
 ---
 
@@ -280,10 +382,19 @@ status, notes, date_requested
 
 ### profiles
 ```
-id, lab_id, email, full_name,
+id, lab_id, full_name,
 role ('super_admin' | 'manager' | 'technician')
 ```
-- RLS is DISABLED on profiles — never re-enable it
+- email column intentionally removed — stored in auth.users only
+- RLS is ENABLED with 4 policies
+- Super admin has lab_id = NULL
+- Never query email from profiles — use admin.auth.admin.getUserById()
+
+### feedback
+```
+id, user_id, lab_id, type ('bug' | 'support' | 'feedback'),
+title, description, created_at
+```
 
 ### Storage bucket: coa-documents (private)
 - Path: `{lab_id}/{lot_id}/{timestamp}_{filename}`
@@ -495,6 +606,7 @@ removed on component unmount.
 - Camera must stop completely when modal closes
 - ESC key closes all modals (useEffect with cleanup return)
 - `router.replace()` not `router.push()` for tab URL updates
+- Never query email from profiles — always use auth.users via admin client
 
 ---
 
@@ -508,6 +620,11 @@ removed on component unmount.
   (render-time guard, not just sidebar hide)
 - No console.log statements in production code
 - No hardcoded lab_ids or user_ids anywhere
+- Never add email column back to profiles — use auth.users
+- Never disable RLS on any table including profiles
+- Never rewrite get_my_lab_id() to query profiles — must use auth.jwt()
+- Never expose service role key or other secrets with NEXT_PUBLIC_ prefix
+- Rate limiting must stay on all API routes — use Upstash pattern
 
 ---
 
@@ -522,6 +639,8 @@ removed on component unmount.
   explicit, auditable patterns over clever shortcuts
 - **Python-to-TypeScript bridges:** When helpful, draw analogies to
   Python patterns James already knows
+
+---
 
 ## Modal UX Conventions (apply to all modals)
 
