@@ -1,7 +1,15 @@
+import { Ratelimit } from '@upstash/ratelimit'
+import { Redis } from '@upstash/redis'
+import { NextRequest, NextResponse } from 'next/server'
 import { google } from 'googleapis'
-import { NextResponse } from 'next/server'
 import { Resend } from 'resend'
 import { createClient } from '@supabase/supabase-js'
+
+const ratelimit = new Ratelimit({
+  redis: Redis.fromEnv(),
+  limiter: Ratelimit.slidingWindow(10, '1 h'),
+  analytics: true,
+})
 
 type FeedbackType = 'bug' | 'support' | 'feedback'
 
@@ -187,7 +195,23 @@ const appendFeedbackToSheet = async (record: FeedbackRecord, submitter: Submitte
   }
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
+  // Rate limiting — 10 requests per hour per IP
+  const ip = request.headers.get('x-forwarded-for') ?? 'anonymous'
+  const { success, limit, reset, remaining } = await ratelimit.limit(ip)
+
+  if (!success) {
+    return new Response(JSON.stringify({ error: 'Too many requests' }), {
+      status: 429,
+      headers: {
+        'X-RateLimit-Limit': limit.toString(),
+        'X-RateLimit-Remaining': remaining.toString(),
+        'X-RateLimit-Reset': reset.toString(),
+        'Content-Type': 'application/json',
+      },
+    })
+  }
+
   try {
     const requestSecret = request.headers.get('x-webhook-secret')
     const expectedSecret = process.env.SUPABASE_WEBHOOK_SECRET
