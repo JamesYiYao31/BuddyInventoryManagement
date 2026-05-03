@@ -43,6 +43,8 @@ function LoginContent() {
 
         if (profile?.role === "super_admin") {
           router.push("/super-admin")
+        } else if (profile?.role === "org_admin") {
+          router.push("/org-admin")
         } else {
           router.push("/dashboard")
         }

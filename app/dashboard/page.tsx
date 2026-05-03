@@ -357,22 +357,29 @@ function DashboardPageContent() {
 
       // Fetch Requests and map snake_case to camelCase
       const labId = await resolveCurrentUserLabId()
-      const { data: reqData, error: reqError } = await supabase
-        .from('requests')
-        .select('*')
-        .eq('lab_id', labId ?? '')
-        .order('date_requested', { ascending: false })
-
-      // Count pending validation lots
-      if (labId) {
-        const { count: valCount } = await supabase
-          .from("inventory_lots")
-          .select("id", { count: "exact", head: true })
-          .eq("lab_id", labId)
-          .in("validation_status", ["pending_coa", "pending_validation", "pending_approval"])
-        setPendingValidationCount(valCount ?? 0)
+      if (!labId) {
+        setPendingValidationCount(0)
+        setInventory(invData)
+        setActivityLogs(logData)
+        setLotsInUse(activeData)
+        setRequests([])
+        setStats(calculateDashboardStats(invData, activeData, [], settings))
+        return
       }
-      
+
+      const { data: reqData, error: reqError } = await supabase
+        .from("requests")
+        .select("*")
+        .eq("lab_id", labId)
+        .order("date_requested", { ascending: false })
+
+      const { count: valCount } = await supabase
+        .from("inventory_lots")
+        .select("id", { count: "exact", head: true })
+        .eq("lab_id", labId)
+        .in("validation_status", ["pending_coa", "pending_validation", "pending_approval"])
+      setPendingValidationCount(valCount ?? 0)
+
       if (reqError) throw reqError
 
       const mappedRequests: ReorderRequest[] = reqData?.map((r: any) => ({
@@ -418,6 +425,16 @@ function DashboardPageContent() {
 
         if (profile?.full_name) {
           setProfileFullName(profile.full_name)
+        }
+
+        if (profile?.role === "super_admin") {
+          router.replace("/super-admin")
+          return
+        }
+
+        if (profile?.role === "org_admin") {
+          router.replace("/org-admin")
+          return
         }
 
         // Super admins have no lab_id and should bypass archived-lab enforcement.
@@ -479,6 +496,15 @@ function DashboardPageContent() {
       if (!profile) {
         await supabase.auth.signOut()
         router.push("/login")
+        return
+      }
+
+      if (profile.role === "super_admin") {
+        router.replace("/super-admin")
+        return
+      }
+      if (profile.role === "org_admin") {
+        router.replace("/org-admin")
         return
       }
 

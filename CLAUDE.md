@@ -123,13 +123,14 @@ adjacent domain. No PHI is stored — intentional product decision.
 
 ### Phase 5 — Security Hardening ✅
 - [x] JWT Custom Claims Hook
-      → custom_access_token_hook injects lab_id and user_role into every JWT on login
+      → custom_access_token_hook injects lab_id, org_id, and user_role into every JWT on login
       → Enabled in Supabase: Authentication → Hooks → Customize Access Token
       → Grants given to supabase_auth_admin for profiles table access
+      → SET search_path = public + fully qualified table references required
 - [x] get_my_lab_id() rewritten
       → Now reads from auth.jwt() instead of querying profiles table
+      → Uses NULLIF to handle empty string claims: NULLIF(auth.jwt() ->> 'lab_id', '')::uuid
       → Eliminates circular RLS dependency permanently
-      → No longer needs SECURITY DEFINER
 - [x] RLS enabled on ALL tables (12/12)
       → profiles: 4 policies (select/update/insert/delete)
       → Super admin checks use auth.jwt() ->> 'user_role' = 'super_admin'
@@ -140,7 +141,7 @@ adjacent domain. No PHI is stored — intentional product decision.
 - [x] email column removed from profiles table
       → Email stored securely in auth.users only
       → feedback-notify API route uses admin.auth.admin.getUserById() for email
-      → profiles now contains: id, lab_id, full_name, role only
+      → profiles now contains: id, lab_id, org_id, full_name, role only
 - [x] Vercel security headers (vercel.json in project root)
       → X-Content-Type-Options: nosniff
       → X-Frame-Options: DENY
@@ -157,18 +158,86 @@ adjacent domain. No PHI is stored — intentional product decision.
 - [x] Vercel Preview Deployment Protection enabled
 - [x] 2FA enabled on both Supabase and Vercel accounts
 
+### Phase 6 — Organization Layer (In Progress)
+- [x] Organizations table created with RLS
+- [x] org_id added to labs, profiles, lab_invites
+- [x] org_admin role added to profiles role constraint
+- [x] JWT hook updated to inject org_id alongside lab_id and user_role
+- [x] get_my_org_id() helper function created (JWT-based)
+- [x] get_my_lab_id() updated with NULLIF for empty string safety
+- [x] RLS policies for org layer (JWT-only, no circular dependencies)
+- [x] labs policies rewritten to use JWT claims only (no profiles subquery)
+- [x] Super admin org provisioning UI (Single Lab / Organization toggle)
+- [x] Super admin redirects away from dashboard to /super-admin
+- [ ] Org admin signup flow via invite link
+- [ ] Org admin dashboard (labs list, member view)
+- [ ] Manager invite generation by org admin (per lab, one active per lab)
+- [ ] Revoke invite flow
+- [ ] Promote/demote within org labs
+- [ ] Stripe + billing (org-level, 3-month trial, 7-day grace period)
+- [ ] Website (yourbuddyapp.com)
+
 ### Future — Post 10 Customers
 - [ ] Open self-serve lab registration (no invite required)
-- [ ] yourbuddyapp.com website with landing page
-      → Brand domain: looking for buddyhealth.com alternatives
-      → Current placeholder: yourbuddyapp.com
-      → Buddy is a platform brand — future products beyond Lab
 - [ ] Dynamsoft Barcode Reader migration
       → Replace ZXing in barcode-camera-scanner.tsx
       → One line change in parseSmartBarcode() handles Dynamsoft output
       → See Barcode Scanning section for full migration notes
 - [ ] Failed login attempt monitoring (Sentry or Datadog)
 - [ ] Formal penetration testing before enterprise customers
+
+---
+
+## Customer Types
+
+Two customer types coexist in the same database:
+
+**Single Lab** — existing model, unchanged
+```
+You (super_admin)
+  └── Oakwood Lab (lab)
+        ├── Manager
+        └── Technicians
+```
+
+**Organization** — new model (Phase 6)
+```
+You (super_admin)
+  └── City Blood Bank (organization)
+        ├── Org Admin (oversees all labs, manages invites)
+        ├── Research Lab → Manager → Technicians
+        ├── Clinical Lab → Manager → Technicians
+        └── QC Lab       → Manager → Technicians
+```
+
+Nullable `org_id` is the key — NULL means single-lab customer,
+UUID means belongs to an organization. Single-lab customers are
+completely unaffected by the org layer.
+
+### Role Matrix
+| Role | lab_id | org_id | Can access |
+|------|--------|--------|-----------|
+| super_admin | NULL | NULL | /super-admin only |
+| org_admin | NULL | uuid | Org admin dashboard |
+| manager | uuid | nullable | /dashboard |
+| technician | uuid | nullable | /dashboard |
+
+### Org Admin Capabilities
+| Action | Org Admin |
+|--------|-----------|
+| See list of their labs | ✅ |
+| See members per lab | ✅ |
+| Generate manager invite (per lab) | ✅ |
+| Revoke pending invites | ✅ |
+| Promote/demote manager ↔ technician | ✅ |
+| Remove members from lab | ❌ (manager only) |
+| Create new labs | ❌ (super admin only) |
+| Access inventory data | ❌ |
+| Configure lab settings | ❌ |
+
+### Provisioning Flow
+**Single lab:** You create lab → send manager invite link → manager signs up
+**Organization:** You create org + labs → send org admin invite → org admin signs up → org admin generates manager invites per lab → managers sign up
 
 ---
 
@@ -187,24 +256,40 @@ only ever see their own lab's data.
 
 ### Key Technical Rules (Never Break These)
 - Always scope queries to `lab_id` via `resolveCurrentUserLabId()`
-- Super admin always has `lab_id = null`
+- Super admin always has `lab_id = null` and `org_id = null`
+- Org admin always has `lab_id = null` and `org_id = <uuid>`
 - Bootstrap upsert fallback must NOT be re-added
 - `owner_id` on labs set via DB trigger `on_manager_profile_created`
 - Invite marked as used BEFORE `signUp()` runs
 - RLS is enabled on ALL tables including profiles — never disable it
 - get_my_lab_id() reads from JWT (auth.jwt()), never from profiles table
+- get_my_org_id() reads from JWT (auth.jwt()), never from profiles table
 - Super admin checks use auth.jwt() ->> 'user_role', never a profiles subquery
+- Labs RLS policies must never query profiles table — use JWT claims only
 
 ### JWT Claims Architecture
-Every JWT token contains custom claims injected at login:
-- `lab_id` — the lab this user belongs to (null for super_admin)
-- `user_role` — 'manager' | 'technician' | 'super_admin'
+Every JWT token contains three custom claims injected at login:
+- `lab_id` — the lab this user belongs to (null for super_admin and org_admin)
+- `org_id` — the org this user belongs to (null for super_admin and single-lab users)
+- `user_role` — 'manager' | 'technician' | 'org_admin' | 'super_admin'
 
 These are set by `custom_access_token_hook` (Postgres function).
 RLS policies read these claims directly — no database lookups needed.
 
+Helper functions:
+- `get_my_lab_id()` → `SELECT NULLIF(auth.jwt() ->> 'lab_id', '')::uuid`
+- `get_my_org_id()` → `SELECT NULLIF(auth.jwt() ->> 'org_id', '')::uuid`
+
 If a user's role or lab changes, they must log out and back in
 for the new JWT claims to take effect.
+
+**Critical:** When recreating custom_access_token_hook with CREATE OR REPLACE,
+you must re-run the grants:
+```sql
+GRANT EXECUTE ON FUNCTION public.custom_access_token_hook TO supabase_auth_admin;
+GRANT USAGE ON SCHEMA public TO supabase_auth_admin;
+REVOKE EXECUTE ON FUNCTION public.custom_access_token_hook FROM authenticated, anon, public;
+```
 
 ---
 
@@ -219,7 +304,7 @@ with no PHI. Remaining gap (1/10) would require enterprise tooling.
 |-------|---------------|
 | Passwords | Supabase Auth bcrypt |
 | Database isolation | RLS on all 12 tables |
-| Data scoping | JWT-based get_my_lab_id() |
+| Data scoping | JWT-based get_my_lab_id() + get_my_org_id() |
 | Profile security | RLS enabled, email removed |
 | Transport | HTTPS enforced via HSTS |
 | Browser attacks | 6 security headers via vercel.json |
@@ -229,17 +314,22 @@ with no PHI. Remaining gap (1/10) would require enterprise tooling.
 | Webhook | x-webhook-secret header validation |
 
 ### RLS Policy Pattern
-All tables follow this pattern:
+Lab-scoped tables use:
 ```sql
 USING (
-  (EXISTS (SELECT 1 FROM profiles p
-    WHERE p.id = auth.uid()
-    AND p.role = 'super_admin'::text))
+  (auth.jwt() ->> 'user_role' = 'super_admin')
   OR (lab_id = get_my_lab_id())
 )
 ```
-Super admin policies use `auth.jwt() ->> 'user_role'` on profiles
-to avoid any self-referencing queries.
+
+Labs table uses JWT-only (no profiles subquery — avoids circular dependency):
+```sql
+USING (
+  (auth.jwt() ->> 'user_role' = 'super_admin')
+  OR (id = get_my_lab_id())
+  OR (auth.jwt() ->> 'user_role' = 'org_admin' AND org_id = get_my_org_id())
+)
+```
 
 ### Environment Variables (Never expose these client-side)
 - SUPABASE_SERVICE_ROLE_KEY
@@ -312,6 +402,26 @@ archived = manager clicked "Move to History"
 
 ## Database Schema Reference
 
+### organizations (new — Phase 6)
+```
+id, name,
+plan (text, default 'trial'),
+trial_ends_at (timestamptz, default now() + 90 days),
+created_at,
+created_by (uuid → auth.users)
+```
+- RLS enabled — super admin full access, org admin sees own org only
+- plan values: 'trial' | 'starter' | 'pro' | 'enterprise' (Stripe later)
+
+### labs
+```
+id, name, tech_key, is_archived, archived_at, created_at, owner_id,
+org_id (uuid, nullable → organizations)
+```
+- org_id NULL = single-lab customer
+- org_id uuid = belongs to an organization
+- ON DELETE RESTRICT on org_id (can't delete org with active labs)
+
 ### inventory_lots
 ```
 id, lab_id, item_id, lot_number, expiry_date, received_date,
@@ -382,13 +492,28 @@ status, notes, date_requested
 
 ### profiles
 ```
-id, lab_id, full_name,
-role ('super_admin' | 'manager' | 'technician')
+id, lab_id, org_id, full_name,
+role ('super_admin' | 'org_admin' | 'manager' | 'technician')
 ```
 - email column intentionally removed — stored in auth.users only
-- RLS is ENABLED with 4 policies
-- Super admin has lab_id = NULL
+- RLS is ENABLED with policies
+- Super admin has lab_id = NULL, org_id = NULL
+- Org admin has lab_id = NULL, org_id = <uuid>
 - Never query email from profiles — use admin.auth.admin.getUserById()
+
+### lab_invites
+```
+id, token, lab_name, used, created_at, used_at,
+lab_id (uuid, nullable → labs),
+org_id (uuid, nullable → organizations),
+role (text, default 'manager', CHECK IN ('manager', 'org_admin')),
+created_by (uuid → auth.users),
+revoked_at (timestamptz, nullable),
+revoked_by (uuid, nullable → auth.users)
+```
+- Unique index: one active invite per lab (where used=false AND revoked_at IS NULL)
+- org admin invites have lab_id = NULL, org_id = <uuid>
+- manager invites have lab_id = <uuid>, org_id = nullable
 
 ### feedback
 ```
@@ -623,8 +748,13 @@ removed on component unmount.
 - Never add email column back to profiles — use auth.users
 - Never disable RLS on any table including profiles
 - Never rewrite get_my_lab_id() to query profiles — must use auth.jwt()
+- Never rewrite get_my_org_id() to query profiles — must use auth.jwt()
 - Never expose service role key or other secrets with NEXT_PUBLIC_ prefix
 - Rate limiting must stay on all API routes — use Upstash pattern
+- Never write labs RLS policies that query profiles table — use JWT claims only
+- get_my_lab_id() and get_my_org_id() must use NULLIF to handle empty string claims
+- Super admins must not access /dashboard — redirect to /super-admin only
+- Org admins have no lab_id — they must never be scoped to inventory queries
 
 ---
 
@@ -658,3 +788,21 @@ removed on component unmount.
 - Listen for `popstate` and close the modal instead of allowing browser navigation
 - Full cleanup of popstate listener on modal close and component unmount
 - Prevents back button from navigating to login page or previous route while modal is open
+
+### Phase 6 — Organization Layer (In Progress)
+- [x] Organizations table created with RLS
+- [x] org_id added to labs, profiles, lab_invites
+- [x] org_admin role added to profiles role constraint
+- [x] JWT hook updated to inject org_id alongside lab_id and user_role
+- [x] get_my_org_id() helper function created (JWT-based)
+- [x] get_my_lab_id() updated with NULLIF for empty string safety
+- [x] RLS policies for org layer (JWT-only, no circular dependencies)
+- [x] labs policies rewritten to use JWT claims only (no profiles subquery)
+- [x] Super admin org provisioning UI (Single Lab / Organization toggle)
+- [x] Super admin redirects away from dashboard to /super-admin
+- [x] handle_new_user trigger fixed (org_admin role + email column removed)
+- [x] Org admin signup flow via /register-lab?token=X
+- [x] /org-admin dashboard (labs grid, member list, invite gen, revoke, promote/demote)
+- [x] Login + dashboard redirects for org_admin role
+- [ ] Stripe + billing (org-level, 3-month trial, 7-day grace period)
+- [ ] Website (yourbuddyapp.com)
