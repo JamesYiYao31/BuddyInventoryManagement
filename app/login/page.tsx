@@ -3,12 +3,17 @@
 import { Suspense, useCallback, useEffect, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from "react"
 import { Loader2, Key } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { persistNewActiveSession, voluntarySignOut } from "@/lib/active-session"
 import { useRouter, useSearchParams } from "next/navigation"
 import Image from "next/image"
 
 function LoginContent() {
   const searchParams = useSearchParams()
   const urlError = useMemo(() => searchParams.get("error")?.trim() || null, [searchParams])
+  const sessionReplacedReason = useMemo(
+    () => searchParams.get("reason") === "session_replaced",
+    [searchParams]
+  )
 
   const [isRegistering, setIsRegistering] = useState(false)
 
@@ -35,6 +40,7 @@ function LoginContent() {
     } else {
       const userId = signInData.user?.id
       if (userId) {
+        await persistNewActiveSession(userId)
         const { data: profile } = await supabase
           .from("profiles")
           .select("role")
@@ -129,13 +135,13 @@ function LoginContent() {
 
       if (profileErr) {
         setError(profileErr.message || "Could not finish setting up your profile. Please contact support.")
-        await supabase.auth.signOut()
+        await voluntarySignOut(newUserId)
         setIsLoading(false)
         return
       }
     }
 
-    await supabase.auth.signOut()
+    await voluntarySignOut(newUserId)
 
     setRegisterSuccessBanner("Your account was created successfully. Please sign in with your email and password.")
     setIsRegistering(false)
@@ -226,6 +232,15 @@ function LoginContent() {
                 {registerSuccessBanner && !isRegistering ? (
                   <div className="p-4 bg-green-500/10 border border-green-500/20 text-green-700 dark:text-green-400 font-bold rounded-2xl text-center text-sm">
                     {registerSuccessBanner}
+                  </div>
+                ) : null}
+
+                {sessionReplacedReason && !isRegistering ? (
+                  <div
+                    role="status"
+                    className="p-4 bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-100 font-semibold rounded-2xl text-center text-sm"
+                  >
+                    You were signed out because your account was logged in from another device.
                   </div>
                 ) : null}
 

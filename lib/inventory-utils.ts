@@ -40,6 +40,10 @@ export interface InventoryGroup {
   name: string
   vendor?: string | null
   lots: LotEntry[]
+  /** From `items` row; null → use lab_settings in UI/stats. */
+  expiring_soon_days?: number | null
+  urgent_days?: number | null
+  low_stock_threshold?: number | null
 }
 
 /** Optional per-item overrides; null/undefined uses lab_settings. */
@@ -775,7 +779,7 @@ export const fetchInventoryFromSupabase = async (): Promise<InventoryGroup[]> =>
 
   const { data, error } = await supabase
     .from("inventory_lots")
-    .select(`*, items(name, vendor)`)
+    .select(`*, items(name, vendor, expiring_soon_days, urgent_days, low_stock_threshold)`)
     .eq("lab_id", labId)
 
   if (error) {
@@ -809,6 +813,9 @@ export const fetchInventoryFromSupabase = async (): Promise<InventoryGroup[]> =>
         name,
         vendor: row.items?.vendor ?? null,
         lots: [],
+        expiring_soon_days: row.items?.expiring_soon_days ?? null,
+        urgent_days: row.items?.urgent_days ?? null,
+        low_stock_threshold: row.items?.low_stock_threshold ?? null,
       }
     }
     groups[name].lots.push(lot)
@@ -1391,7 +1398,10 @@ export const deleteRequestInSupabase = async (requestId: string) => {
 
 export interface DashboardStats {
   expiredCount: number
+  /** Storage lots with 0..urgent_days until expiry (per-item thresholds). */
   urgentCount: number
+  /** Storage lots with (urgent_days, expiring_soon_days] until expiry; disjoint from urgent. */
+  expiringSoonCount: number
   lowStockCount: number
   pendingRequests: number
   totalMonthlySpend: number
@@ -1412,14 +1422,33 @@ export const calculateDashboardStats = (
     (l) => daysUntilExpiry(getEarliestExpiry(l.workingExpiryDate, l.actualExpiryDate), tz) < 0
   ).length
 
-  const urgentInventory = inventory.flatMap((g) => g.lots).filter((l) => {
-    const days = daysUntilExpiry(l.expiry, tz)
-    return days >= 0 && days <= settings.expiringSoonDays
-  }).length
+  let urgentLotCount = 0
+  let expiringSoonLotCount = 0
+  for (const g of inventory) {
+    const urgentDays = g.urgent_days ?? settings.urgentDays
+    const expiringSoonDays = g.expiring_soon_days ?? settings.expiringSoonDays
+    for (const l of g.lots) {
+      const days = daysUntilExpiry(l.expiry, tz)
+      if (days < 0) continue
+      if (days <= urgentDays) urgentLotCount++
+      else if (days <= expiringSoonDays) expiringSoonLotCount++
+    }
+  }
+
+  const benchUrgentDays = settings.urgentDays
+  const benchExpiringSoonDays = settings.expiringSoonDays
+  for (const l of activeLots) {
+    const eff = getEarliestExpiry(l.workingExpiryDate, l.actualExpiryDate)
+    const days = daysUntilExpiry(eff, tz)
+    if (days < 0) continue
+    if (days <= benchUrgentDays) urgentLotCount++
+    else if (days <= benchExpiringSoonDays) expiringSoonLotCount++
+  }
 
   const lowStock = inventory.filter((g) => {
+    const thresh = g.low_stock_threshold ?? settings.lowStockThreshold
     const totalCount = g.lots.reduce((acc, lot) => acc + (lot.totalUnits || 0), 0)
-    return totalCount <= settings.lowStockThreshold
+    return totalCount <= thresh
   }).length
 
   const pending = requests.filter((r) => r.status === "Pending").length
@@ -1435,7 +1464,8 @@ export const calculateDashboardStats = (
 
   return {
     expiredCount: expiredInventory + expiredBench,
-    urgentCount: urgentInventory,
+    urgentCount: urgentLotCount,
+    expiringSoonCount: expiringSoonLotCount,
     lowStockCount: lowStock,
     pendingRequests: pending,
     totalMonthlySpend: monthlySpend,

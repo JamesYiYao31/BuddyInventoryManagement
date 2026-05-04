@@ -7,12 +7,13 @@ import Link from "next/link"
 import {
   Bell, Search, XCircle, Timer, PackageSearch, Package, FlaskConical,
   ChevronRight, ChevronDown, UserCog, LogOut, Sun, Moon, Monitor, Palette, Check, Menu,
+  MessageSquareDiff,
 } from "lucide-react"
 import {
   DashboardStats, InventoryGroup, LotInUseEntry, LabSettings, SidebarPage,
   daysUntilExpiry, getEarliestExpiry
 } from "@/lib/inventory-utils"
-import { supabase } from "@/lib/supabase"
+import { voluntarySignOut } from "@/lib/active-session"
 import { useToast } from "@/hooks/use-toast"
 import {
   DropdownMenu,
@@ -94,7 +95,7 @@ export function DashboardHeader({
   const handleSignOut = async () => {
     if (signingOut) return
     setSigningOut(true)
-    const { error } = await supabase.auth.signOut()
+    const { error } = await voluntarySignOut(user?.id)
     if (error) {
       setSigningOut(false)
       toast({
@@ -286,7 +287,7 @@ export function DashboardHeader({
           rel="noopener noreferrer"
           className="ml-4 inline-flex items-center gap-2 bg-muted border border-border p-1.5 lg:p-2 lg:px-4 lg:py-1.5 rounded-lg shadow-sm hover:bg-muted/80 text-xs font-bold transition-colors text-muted-foreground hover:text-foreground"
         >
-          <span>🐞</span>
+          <MessageSquareDiff className="size-4 shrink-0 text-muted-foreground" aria-hidden />
           <span className="hidden sm:inline">Feedback & Support</span>
         </Link>
       </div>

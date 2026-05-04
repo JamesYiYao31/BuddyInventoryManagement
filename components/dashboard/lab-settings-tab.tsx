@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { Settings, Save, Loader2, ShieldAlert, Package, Clock, AlertTriangle, LayoutDashboard, Users, ShieldCheck, User as UserIcon, Shield } from "lucide-react"
+import { Settings, Save, Loader2, ShieldAlert, Package, Clock, AlertTriangle, LayoutDashboard, Users, ShieldCheck, User as UserIcon, Shield, KeyRound, Pencil } from "lucide-react"
 import {
   LabSettings, TechDashboardWidget, fetchLabSettings, updateLabSettings,
   LabProfile, fetchLabProfiles, updateUserRole, resolveCurrentUserLabId,
@@ -24,6 +24,13 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
   const [saving, setSaving] = useState(false)
   const [timezoneSaving, setTimezoneSaving] = useState(false)
   const [timezoneSaved, setTimezoneSaved] = useState(false)
+  const [labId, setLabId] = useState<string | null>(null)
+  const [currentTechKey, setCurrentTechKey] = useState("")
+  const [techKeyInput, setTechKeyInput] = useState("")
+  const [techKeyEditing, setTechKeyEditing] = useState(false)
+  const [techKeySaving, setTechKeySaving] = useState(false)
+  const [techKeyError, setTechKeyError] = useState<string | null>(null)
+  const [techKeySaved, setTechKeySaved] = useState(false)
 
   // ── TEAM MANAGEMENT STATE ──
   const [profiles, setProfiles] = useState<LabProfile[]>([])
@@ -42,6 +49,14 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
       setLoading(true)
       const fresh = await fetchLabSettings()
       setForm(fresh)
+      const scopedLabId = await resolveCurrentUserLabId()
+      setLabId(scopedLabId)
+      if (scopedLabId) {
+        const { data: lab } = await supabase.from("labs").select("tech_key").eq("id", scopedLabId).maybeSingle()
+        const nextTechKey = lab?.tech_key || ""
+        setCurrentTechKey(nextTechKey)
+        setTechKeyInput(nextTechKey)
+      }
       setLoading(false)
     }
     load()
@@ -150,6 +165,58 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
     await refreshData()
   }
 
+  const validateTechKey = (value: string): string | null => {
+    if (/\s/.test(value)) {
+      return "Key cannot contain spaces"
+    }
+    if (value.length < 6) {
+      return "Key must be at least 6 characters"
+    }
+    return null
+  }
+
+  const handleSaveTechKey = async () => {
+    const resolvedLabId = await resolveCurrentUserLabId()
+    if (!resolvedLabId) {
+      setTechKeyError("Could not resolve your lab. Please refresh and try again.")
+      return
+    }
+
+    const scopedTechKey = techKeyInput
+    const validationError = validateTechKey(scopedTechKey)
+    if (validationError) {
+      setTechKeyError(validationError)
+      return
+    }
+
+    setTechKeySaving(true)
+    setTechKeyError(null)
+    setTechKeySaved(false)
+
+    const { error } = await supabase
+      .from("labs")
+      .update({ tech_key: scopedTechKey })
+      .eq("id", resolvedLabId)
+
+    setTechKeySaving(false)
+
+    if (error) {
+      if (error.code === "23505") {
+        setTechKeyError("This key is already taken — try another")
+        return
+      }
+      setTechKeyError(error.message || "Could not save tech key.")
+      return
+    }
+
+    setCurrentTechKey(scopedTechKey)
+    setTechKeyInput(scopedTechKey)
+    setTechKeyEditing(false)
+    setTechKeySaved(true)
+    toast({ title: "Tech key saved", description: "Your technician key has been updated." })
+    setTimeout(() => setTechKeySaved(false), 2000)
+  }
+
   if (userRole !== "manager") {
     return (
       <div className="flex flex-col items-center justify-center p-20 text-center space-y-4">
@@ -178,6 +245,88 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 xl:grid-cols-4">
+          {/* ── Tech Key ── */}
+          <div className="rounded-2xl border border-border bg-card p-8 space-y-6 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-primary/10"><KeyRound className="size-5 text-primary" /></div>
+              <div>
+                <p className="text-sm font-bold text-foreground">Tech Key</p>
+                <p className="text-xs text-muted-foreground">Technicians use this key to join your lab.</p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest ml-1">Technician Key</label>
+              {techKeyEditing ? (
+                <div className="space-y-2">
+                  <input
+                    type="text"
+                    value={techKeyInput}
+                    onChange={(e) => {
+                      setTechKeyInput(e.target.value)
+                      setTechKeyError(null)
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !techKeySaving) {
+                        e.preventDefault()
+                        void handleSaveTechKey()
+                      }
+                    }}
+                    className="w-full h-14 border border-input bg-background rounded-2xl px-6 text-base font-medium focus:ring-4 focus:ring-primary/10 focus:border-primary outline-none transition-all"
+                    placeholder="Enter technician key"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                  />
+                  {techKeyError ? <p className="text-xs text-destructive ml-1">{techKeyError}</p> : null}
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={techKeySaving}
+                      onClick={() => void handleSaveTechKey()}
+                      className="h-10 rounded-xl bg-primary px-4 text-xs font-bold text-primary-foreground inline-flex items-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
+                    >
+                      {techKeySaving ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      disabled={techKeySaving}
+                      onClick={() => {
+                        setTechKeyInput(currentTechKey)
+                        setTechKeyError(null)
+                        setTechKeyEditing(false)
+                      }}
+                      className="h-10 rounded-xl border border-input px-4 text-xs font-bold text-foreground hover:bg-muted disabled:opacity-50 disabled:pointer-events-none"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="w-full h-14 border border-input bg-muted rounded-2xl px-6 text-base font-semibold inline-flex items-center">
+                    {currentTechKey || "Unavailable"}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTechKeyInput(currentTechKey)
+                      setTechKeyError(null)
+                      setTechKeyEditing(true)
+                    }}
+                    className="h-10 rounded-xl border border-input bg-background px-4 text-xs font-bold hover:bg-muted inline-flex items-center gap-2"
+                  >
+                    <Pencil className="size-3.5" />
+                    Edit
+                  </button>
+                </div>
+              )}
+              <div className="h-4">
+                {!techKeyError && techKeySaved ? <p className="text-xs text-green-600 ml-1">Saved</p> : null}
+              </div>
+            </div>
+          </div>
+
           {/* ── Lab Timezone ── */}
           <div className="rounded-2xl border border-border bg-card p-8 space-y-6 shadow-sm">
             <div className="flex items-center gap-3">

@@ -174,22 +174,24 @@ export default function InventoryTab({
     const days = daysUntilExpiry(lot.expiry, labSettings.labTimezone)
 
     if (days < 0 && lot.expiry) {
-      badges.push({ label: "Expired", color: "bg-zinc-500/10 text-zinc-600 dark:text-zinc-400" })
-      return badges
-    }
-
-    if (lot.expiry && days >= 0 && days <= expiringSoonDays) {
-      const isUrgent = days <= urgentDays
-      badges.push({
-        label: isUrgent ? "Urgent" : "Expiring Soon",
-        color: isUrgent
-          ? "bg-red-500/10 text-red-700 dark:text-red-400"
-          : "bg-red-500/10 text-red-600 dark:text-red-400",
-      })
+      badges.push({ label: "Expired", color: "bg-red-500/10 text-red-600 dark:text-red-400" })
+    } else if (lot.expiry) {
+      if (days >= 0 && days <= urgentDays) {
+        badges.push({
+          label: "Urgent",
+          color: "bg-amber-500/10 text-amber-800 dark:text-amber-400",
+        })
+      }
+      if (days > urgentDays && days <= expiringSoonDays) {
+        badges.push({
+          label: "Expiring Soon",
+          color: "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400",
+        })
+      }
     }
 
     if ((lot.totalUnits ?? 0) <= lowStockThreshold) {
-      badges.push({ label: "Low Stock", color: "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400" })
+      badges.push({ label: "Low Stock", color: "bg-primary/10 text-primary" })
     }
 
     if (badges.length === 0) {
@@ -198,6 +200,8 @@ export default function InventoryTab({
 
     return badges
   }
+
+  const STATUS_ALERT_LABELS = new Set(["Expired", "Urgent", "Expiring Soon", "Low Stock"])
 
   const VALIDATION_BADGE_MAP: Record<string, { label: string; color: string }> = {
     "pending_coa": { label: "Pending COA", color: "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400" },
@@ -881,7 +885,7 @@ export default function InventoryTab({
 
                 {groupLots.map((lot: LotEntry) => {
                   const badges = getStatusBadges(lot)
-                  const hasWarning = badges.some(b => b.label === "Low Stock" || b.label === "Expiring Soon")
+                  const hasWarning = badges.some(b => STATUS_ALERT_LABELS.has(b.label))
                   const itemConfig = itemById.get(lot.itemId)
                   const requiresCoaForLot = Boolean(itemConfig?.requires_coa)
                   const requiresValidationForLot = Boolean(itemConfig?.requires_lot_validation)
@@ -893,9 +897,9 @@ export default function InventoryTab({
                           <p className="text-sm font-mono font-bold text-primary">Lot {lot.lot}</p>
                           <p className="mt-0.5 text-xs text-muted-foreground">Exp: {lot.expiry || "—"}</p>
                         </div>
-                        <div className="flex flex-col items-end gap-1">
-                          {badges.map(b => (
-                            <span key={b.label} className={`inline-flex px-2.5 py-1 rounded-full text-[10px] font-bold ${b.color}`}>{b.label}</span>
+                        <div className="flex flex-row flex-wrap items-end justify-end gap-1 max-w-[55%]">
+                          {badges.map((b, bi) => (
+                            <span key={`${lot.lotId}-s-${b.label}-${bi}`} className={`inline-flex px-2.5 py-1 rounded-full text-[10px] font-bold ${b.color}`}>{b.label}</span>
                           ))}
                           {lot.validation_status && (
                             <>
@@ -953,11 +957,17 @@ export default function InventoryTab({
           visibleInventoryLots.map((lot: LotEntry, idx: number, arr: LotEntry[]) => {
             const isFirst = idx === 0 || arr[idx - 1].itemName !== lot.itemName
             const badges = getStatusBadges(lot)
-            const hasWarning = badges.some(b => b.label === "Low Stock" || b.label === "Expiring Soon")
+            const hasWarning = badges.some(b => STATUS_ALERT_LABELS.has(b.label))
             const itemConfig = itemById.get(lot.itemId)
             const requiresCoaForLot = Boolean(itemConfig?.requires_coa)
             const requiresValidationForLot = Boolean(itemConfig?.requires_lot_validation)
             const isExpanded = expandedLotId === lot.lotId
+            const thresholdUrgentVal = itemConfig?.urgent_days ?? labSettings.urgentDays
+            const thresholdExpiringSoonVal = itemConfig?.expiring_soon_days ?? labSettings.expiringSoonDays
+            const thresholdLowStockVal = itemConfig?.low_stock_threshold ?? labSettings.lowStockThreshold
+            const urgentUsesLabDefault = itemConfig?.urgent_days == null
+            const expiringSoonUsesLabDefault = itemConfig?.expiring_soon_days == null
+            const lowStockUsesLabDefault = itemConfig?.low_stock_threshold == null
 
             return (
               <div key={lot.lotId} className={`${isFirst && idx !== 0 ? "border-t-border border-t-2" : ""}`}>
@@ -973,9 +983,9 @@ export default function InventoryTab({
                   <span className="px-4 font-medium text-foreground/90">{lot.expiry}</span>
                   <span className="px-4 text-center font-semibold text-foreground tabular-nums">{lot.totalUnits}</span>
 
-                  <div className="flex flex-col gap-1.5 items-start px-4">
-                    {badges.map(b => (
-                      <span key={b.label} className={`inline-flex px-3 py-1 rounded-full text-[10px] font-bold ${b.color}`}>{b.label}</span>
+                  <div className="flex flex-row flex-wrap gap-1.5 items-start px-4">
+                    {badges.map((b, bi) => (
+                      <span key={`${lot.lotId}-t-${b.label}-${bi}`} className={`inline-flex px-3 py-1 rounded-full text-[10px] font-bold ${b.color}`}>{b.label}</span>
                     ))}
                     {lot.validation_status && (
                       <>
@@ -1136,6 +1146,15 @@ export default function InventoryTab({
                         />
                       </div>
                     )}
+
+                    <p className="text-xs text-muted-foreground border-t border-border/40 pt-4 leading-relaxed">
+                      Thresholds: Urgent{" < "}
+                      {thresholdUrgentVal} days{urgentUsesLabDefault ? " (lab default)" : ""}
+                      {" · Expiring Soon < "}
+                      {thresholdExpiringSoonVal} days{expiringSoonUsesLabDefault ? " (lab default)" : ""}
+                      {" · Low Stock ≤ "}
+                      {thresholdLowStockVal} units{lowStockUsesLabDefault ? " (lab default)" : ""}
+                    </p>
                   </div>
                 )}
                 </div>

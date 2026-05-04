@@ -22,6 +22,9 @@ export function isRefreshTokenAuthFailure(err: unknown): boolean {
 /** Clears local auth storage so the client stops retrying a dead session. */
 export async function signOutLocalOnRefreshFailure(err: unknown | null | undefined): Promise<boolean> {
   if (!err || !isRefreshTokenAuthFailure(err)) return false
+  if (typeof window !== "undefined") {
+    localStorage.removeItem("buddy_session_token")
+  }
   await supabase.auth.signOut({ scope: 'local' })
   return true
 }

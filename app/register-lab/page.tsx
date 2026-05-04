@@ -4,7 +4,10 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { Loader2, FlaskConical } from "lucide-react"
+import { PasswordStrengthChecklist } from "@/components/password-strength-checklist"
+import { isPasswordStrengthSatisfied } from "@/lib/password-strength"
 import { supabase } from "@/lib/supabase"
+import { voluntarySignOut } from "@/lib/active-session"
 
 type InviteRow = {
   id: string
@@ -150,6 +153,11 @@ function RegisterLabContent() {
       return
     }
 
+    if (!isPasswordStrengthSatisfied(pass)) {
+      setGeneralError("Please meet all password requirements.")
+      return
+    }
+
     setSubmitting(true)
 
     try {
@@ -211,7 +219,7 @@ function RegisterLabContent() {
           .eq("id", userId)
 
         if (profileErr) {
-          await supabase.auth.signOut()
+          await voluntarySignOut(userId)
           setGeneralError(
             profileErr.message ||
               "Could not finish setting up your profile. Please contact support if this persists."
@@ -220,7 +228,7 @@ function RegisterLabContent() {
           return
         }
 
-        await supabase.auth.signOut()
+        await voluntarySignOut(userId)
         setSuccessRedirect("org-admin")
         setSuccess(true)
         setSuccessWarning(null)
@@ -330,7 +338,7 @@ function RegisterLabContent() {
         const { error: profileErr } = await supabase.from("profiles").update(profileUpdate).eq("id", userId)
 
         if (profileErr) {
-          await supabase.auth.signOut()
+          await voluntarySignOut(userId)
           setGeneralError(
             profileErr.message ||
               "Could not finish setting up your profile. Please contact support if this persists."
@@ -339,7 +347,7 @@ function RegisterLabContent() {
           return
         }
 
-        await supabase.auth.signOut()
+        await voluntarySignOut(userId)
         setSuccessRedirect("dashboard")
         setSuccess(true)
         setSuccessWarning(null)
@@ -461,7 +469,7 @@ function RegisterLabContent() {
 
       if (profileErr) {
         await deleteLabById(labId)
-        await supabase.auth.signOut()
+        await voluntarySignOut(userId)
         setGeneralError(
           profileErr.message ||
             "Could not finish setting up your profile. Please contact support if this persists."
@@ -470,7 +478,7 @@ function RegisterLabContent() {
         return
       }
 
-      await supabase.auth.signOut()
+      await voluntarySignOut(userId)
       setSuccessRedirect("dashboard")
       setSuccess(true)
       setSuccessWarning(null)
@@ -656,6 +664,7 @@ function RegisterLabContent() {
               autoComplete="new-password"
               className="w-full h-12 border border-input bg-background rounded-xl px-4 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20"
             />
+            <PasswordStrengthChecklist password={managerPassword} show={managerPassword.length > 0} />
           </div>
 
           <div className="space-y-2">
@@ -701,7 +710,7 @@ function RegisterLabContent() {
 
           <button
             type="button"
-            disabled={submitting}
+            disabled={submitting || !isPasswordStrengthSatisfied(managerPassword)}
             onClick={() => void handleRegister()}
             className="w-full h-12 rounded-xl bg-primary text-primary-foreground font-bold text-sm shadow-sm hover:opacity-90 disabled:opacity-50 disabled:pointer-events-none inline-flex items-center justify-center gap-2"
           >

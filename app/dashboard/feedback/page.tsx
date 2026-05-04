@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { MessageSquareDiff } from "lucide-react";
 import { supabase, signOutLocalOnRefreshFailure } from '@/lib/supabase';
 import { resolveCurrentUserLabId } from '@/lib/inventory-utils';
 
@@ -104,22 +105,7 @@ export default function FeedbackSupportPage() {
       <div className="bg-white dark:bg-gray-900 shadow-sm border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden">
         <div className="bg-gray-50 dark:bg-gray-800/50 px-6 py-6 border-b border-gray-200 dark:border-gray-800">
           <h2 className="text-xl font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="text-blue-600 dark:text-blue-400 shrink-0"
-            >
-              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-              <polyline points="3.29 7 12 12 20.71 7" />
-              <line x1="12" y1="22" x2="12" y2="12" />
-            </svg>
+            <MessageSquareDiff className="size-6 text-primary shrink-0" aria-hidden />
             Feedback &amp; Support
           </h2>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">

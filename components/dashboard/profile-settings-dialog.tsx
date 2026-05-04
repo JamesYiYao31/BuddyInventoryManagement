@@ -20,8 +20,6 @@ interface ProfileSettingsDialogProps {
   onProfileUpdated?: () => void | Promise<void>
 }
 
-const MIN_PASSWORD_LENGTH = 8
-
 export function ProfileSettingsDialog({
   open,
   onOpenChange,
@@ -40,16 +38,16 @@ export function ProfileSettingsDialog({
   const [displayName, setDisplayName] = useState(initialName)
   const [savingName, setSavingName] = useState(false)
 
-  const [newPassword, setNewPassword] = useState("")
-  const [confirmPassword, setConfirmPassword] = useState("")
-  const [updatingPassword, setUpdatingPassword] = useState(false)
+  const [resetSending, setResetSending] = useState(false)
+  const [resetEmailSuccess, setResetEmailSuccess] = useState<string | null>(null)
+  const [resetEmailError, setResetEmailError] = useState<string | null>(null)
 
   // Reset the form whenever the dialog is re-opened so stale drafts don't leak in.
   useEffect(() => {
     if (open) {
       setDisplayName(initialName)
-      setNewPassword("")
-      setConfirmPassword("")
+      setResetEmailSuccess(null)
+      setResetEmailError(null)
     }
   }, [open, initialName])
 
@@ -62,11 +60,7 @@ export function ProfileSettingsDialog({
       if (e.key !== "Enter") return
       const activeId = (document.activeElement as HTMLElement | null)?.id || ""
       e.preventDefault()
-      if (activeId === "profile-new-password" || activeId === "profile-confirm-password") {
-        void handleUpdatePassword()
-        return
-      }
-      void handleSaveName()
+      if (activeId === "profile-display-name") void handleSaveName()
     }
     window.history.pushState(null, "", window.location.href)
     const handlePopState = () => onOpenChange(false)
@@ -127,44 +121,31 @@ export function ProfileSettingsDialog({
     }
   }
 
-  const handleUpdatePassword = async () => {
-    if (newPassword.length < MIN_PASSWORD_LENGTH) {
-      toast({
-        variant: "destructive",
-        title: "Password too short",
-        description: `Use at least ${MIN_PASSWORD_LENGTH} characters.`,
-      })
-      return
-    }
-    if (newPassword !== confirmPassword) {
-      toast({
-        variant: "destructive",
-        title: "Passwords do not match",
-        description: "Re-enter the same password in both fields.",
-      })
+  const handleSendPasswordReset = async () => {
+    const userEmail = email.trim()
+    if (!userEmail) {
+      setResetEmailError("No email is associated with this session.")
+      setResetEmailSuccess(null)
       return
     }
 
-    setUpdatingPassword(true)
+    setResetSending(true)
+    setResetEmailError(null)
+    setResetEmailSuccess(null)
+
     try {
-      const { error } = await supabase.auth.updateUser({ password: newPassword })
-      if (error) throw error
-
-      setNewPassword("")
-      setConfirmPassword("")
-      toast({
-        title: "Password updated",
-        description: "Your new password is now active.",
+      const { error } = await supabase.auth.resetPasswordForEmail(userEmail, {
+        redirectTo: `${window.location.origin}/reset-password`,
       })
-    } catch (err: any) {
-      console.error("[ProfileSettings] Password update failed:", err)
-      toast({
-        variant: "destructive",
-        title: "Could not update password",
-        description: err?.message || "Please try again.",
-      })
+      if (error) {
+        setResetEmailError(error.message)
+        return
+      }
+      setResetEmailSuccess("Check your email for a password reset link.")
+    } catch (err: unknown) {
+      setResetEmailError(err instanceof Error ? err.message : "Something went wrong.")
     } finally {
-      setUpdatingPassword(false)
+      setResetSending(false)
     }
   }
 
@@ -288,56 +269,30 @@ export function ProfileSettingsDialog({
               </h3>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <label
-                  htmlFor="profile-new-password"
-                  className="text-xs font-bold text-foreground"
-                >
-                  New Password
-                </label>
-                <input
-                  id="profile-new-password"
-                  type="password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="At least 8 characters"
-                  autoComplete="new-password"
-                  className="w-full h-11 px-4 text-sm font-medium bg-background border border-input rounded-xl outline-none focus:ring-2 focus:ring-primary/20 transition-all"
-                />
-              </div>
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              Password changes are sent via email for security.
+            </p>
 
-              <div className="space-y-2">
-                <label
-                  htmlFor="profile-confirm-password"
-                  className="text-xs font-bold text-foreground"
-                >
-                  Confirm Password
-                </label>
-                <input
-                  id="profile-confirm-password"
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="Re-enter new password"
-                  autoComplete="new-password"
-                  className="w-full h-11 px-4 text-sm font-medium bg-background border border-input rounded-xl outline-none focus:ring-2 focus:ring-primary/20 transition-all"
-                />
-              </div>
-            </div>
+            {resetEmailSuccess ? (
+              <p role="status" className="text-xs font-medium text-green-500">
+                {resetEmailSuccess}
+              </p>
+            ) : null}
+            {resetEmailError ? (
+              <p role="alert" className="text-xs font-medium text-red-400">
+                {resetEmailError}
+              </p>
+            ) : null}
 
             <div className="flex justify-end">
               <button
-                onClick={handleUpdatePassword}
-                disabled={updatingPassword || !newPassword || !confirmPassword}
+                type="button"
+                onClick={() => void handleSendPasswordReset()}
+                disabled={resetSending || !email.trim()}
                 className="inline-flex items-center gap-2 h-10 px-5 rounded-xl text-xs font-black uppercase tracking-widest bg-foreground text-background shadow-sm hover:bg-foreground/90 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               >
-                {updatingPassword ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <KeyRound className="size-4" />
-                )}
-                {updatingPassword ? "Updating..." : "Update Password"}
+                {resetSending ? <Loader2 className="size-4 animate-spin" /> : <KeyRound className="size-4" />}
+                {resetSending ? "Sending…" : "Send Password Reset Email"}
               </button>
             </div>
           </section>

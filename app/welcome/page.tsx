@@ -22,6 +22,8 @@ function WelcomeContent() {
   const [saving, setSaving] = useState(false)
   const [copied, setCopied] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [techKeyError, setTechKeyError] = useState<string | null>(null)
+  const [techKeySaving, setTechKeySaving] = useState(false)
 
   const [labId, setLabId] = useState("")
   const [fullName, setFullName] = useState("")
@@ -133,6 +135,48 @@ function WelcomeContent() {
     await navigator.clipboard.writeText(techKey)
     setCopied(true)
     setTimeout(() => setCopied(false), 1200)
+  }
+
+  const validateTechKey = (value: string): string | null => {
+    if (/\s/.test(value)) {
+      return "Key cannot contain spaces"
+    }
+    if (value.length < 6) {
+      return "Key must be at least 6 characters"
+    }
+    return null
+  }
+
+  const handleSaveTechKeyAndContinue = async () => {
+    setTechKeySaving(true)
+    setTechKeyError(null)
+    setErrorMessage(null)
+
+    const scopedTechKey = techKey
+    const validationError = validateTechKey(scopedTechKey)
+    if (validationError) {
+      setTechKeyError(validationError)
+      setTechKeySaving(false)
+      return
+    }
+
+    const { error: updateError } = await supabase
+      .from("labs")
+      .update({ tech_key: scopedTechKey })
+      .eq("id", labId)
+
+    if (updateError) {
+      if (updateError.code === "23505") {
+        setTechKeyError("This key is already taken — try another")
+      } else {
+        setTechKeyError(updateError.message || "Could not save tech key. Please try again.")
+      }
+      setTechKeySaving(false)
+      return
+    }
+
+    setTechKeySaving(false)
+    setStep(3)
   }
 
   const handleFinishSetup = async () => {
@@ -284,9 +328,25 @@ function WelcomeContent() {
                 Technician Key
               </label>
               <div className="flex items-center gap-2">
-                <div className="w-full h-12 border border-input bg-muted rounded-xl px-4 text-sm font-medium inline-flex items-center">
-                  {techKey || "Unavailable"}
-                </div>
+                <input
+                  type="text"
+                  value={techKey}
+                  onChange={(e) => {
+                    setTechKey(e.target.value)
+                    setTechKeyError(null)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !techKeySaving) {
+                      e.preventDefault()
+                      void handleSaveTechKeyAndContinue()
+                    }
+                  }}
+                  className="w-full h-12 border border-input bg-background rounded-xl px-4 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20"
+                  placeholder="Enter technician key"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                />
                 <button
                   type="button"
                   onClick={() => void handleCopyTechKey()}
@@ -297,6 +357,14 @@ function WelcomeContent() {
                   {copied ? "Copied" : "Copy"}
                 </button>
               </div>
+              <p className="text-sm text-muted-foreground">
+                We recommend changing this to something memorable for your team, like your lab name or a short code they can easily type.
+              </p>
+              {techKeyError ? (
+                <p className="text-xs text-destructive ml-1" role="alert">
+                  {techKeyError}
+                </p>
+              ) : null}
               <p className="text-xs text-muted-foreground">
                 Share this code with your team. Technicians use it to join your lab.
               </p>
@@ -304,9 +372,11 @@ function WelcomeContent() {
 
             <button
               type="button"
-              onClick={() => setStep(3)}
-              className="w-full h-12 rounded-xl bg-primary text-primary-foreground font-bold text-sm shadow-sm hover:opacity-90 inline-flex items-center justify-center"
+              disabled={techKeySaving}
+              onClick={() => void handleSaveTechKeyAndContinue()}
+              className="w-full h-12 rounded-xl bg-primary text-primary-foreground font-bold text-sm shadow-sm hover:opacity-90 disabled:opacity-50 disabled:pointer-events-none inline-flex items-center justify-center gap-2"
             >
+              {techKeySaving ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
               Got it →
             </button>
           </section>

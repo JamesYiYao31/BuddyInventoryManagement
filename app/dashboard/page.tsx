@@ -5,6 +5,11 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { Search, CalendarClock, CalendarDays, CheckCircle2, User, Scan, Minus, PackagePlus, FlaskConical, AlertTriangle, Activity, Skull, DollarSign, ShieldCheck, ChevronRight, ChevronLeft, Timer } from "lucide-react"
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts"
 import { supabase } from "@/lib/supabase"
+import {
+  sessionReplacedSignOut,
+  verifyActiveSessionForUser,
+  voluntarySignOut,
+} from "@/lib/active-session"
 
 // Utilities & Types
 import { 
@@ -303,12 +308,9 @@ function DashboardPageContent() {
     if (warningTimerRef.current) clearTimeout(warningTimerRef.current)
     if (warningCountdownRef.current) clearInterval(warningCountdownRef.current)
     setShowIdleWarning(false)
-    const { error } = await supabase.auth.signOut()
-    if (error) {
-      console.error("Idle Sign Out Error:", error)
-    }
+    await voluntarySignOut(user?.id)
     router.replace("/login")
-  }, [router])
+  }, [router, user?.id])
 
   const resetIdleTimers = useCallback(() => {
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
@@ -446,7 +448,7 @@ function DashboardPageContent() {
             .single()
 
           if (lab?.is_archived) {
-            await supabase.auth.signOut()
+            await voluntarySignOut(session.user.id)
             router.push(`/login?error=${encodeURIComponent("Your lab has been archived. Please contact support.")}`)
             setLoading(false)
             return
@@ -494,7 +496,7 @@ function DashboardPageContent() {
         .single()
 
       if (!profile) {
-        await supabase.auth.signOut()
+        await voluntarySignOut(session.user.id)
         router.push("/login")
         return
       }
@@ -516,7 +518,7 @@ function DashboardPageContent() {
           .single()
 
         if (lab?.is_archived) {
-          await supabase.auth.signOut()
+          await voluntarySignOut(session.user.id)
           router.push(
             `/login?error=${encodeURIComponent(
               "Your lab has been archived. Please contact support."
@@ -524,6 +526,12 @@ function DashboardPageContent() {
           )
           return
         }
+      }
+
+      const activeOk = await verifyActiveSessionForUser(session.user.id)
+      if (activeOk === "replaced") {
+        await sessionReplacedSignOut(router)
+        return
       }
     }, 30000) // Check every 30 seconds
 
@@ -717,7 +725,13 @@ function DashboardPageContent() {
                       <h1 className="text-3xl font-black text-foreground">Lab Overview</h1>
                     </div>
                     
-                    <AlertCards stats={stats} />
+                    <AlertCards
+                      stats={stats}
+                      labSettings={labSettings}
+                      inventory={inventory}
+                      lotsInUse={lotsInUse}
+                      onNavigate={handleNavigatePage}
+                    />
 
                     {pendingValidationCount > 0 && (
                       <button
@@ -819,18 +833,45 @@ function DashboardPageContent() {
                           </div>
 
                           {/* Section B: Quick Actions (both roles) */}
-                          <div className="grid grid-cols-1 gap-3 overflow-x-hidden sm:grid-cols-3 lg:flex lg:gap-4">
-                            <button onClick={() => handleNavigatePage("inventory")} className="group w-full lg:w-auto flex flex-col items-center gap-4 p-8 rounded-[2.5rem] border border-border bg-card hover:border-primary/40 hover:bg-primary/5 transition-all shadow-sm">
-                              <div className="p-4 rounded-2xl bg-primary/10 group-hover:scale-110 transition-transform"><Scan className="size-8 text-primary" /></div>
+                          <div className="grid grid-cols-1 gap-3 overflow-x-hidden sm:grid-cols-3 lg:flex lg:flex-wrap lg:gap-4">
+                            <button
+                              type="button"
+                              onClick={() => handleNavigatePage("inventory")}
+                              className="group w-full lg:min-w-[200px] lg:flex-1 flex flex-col items-center gap-2 p-8 rounded-[2.5rem] border border-border bg-card hover:border-primary/40 hover:bg-primary/5 transition-all shadow-sm"
+                            >
+                              <div className="p-4 rounded-2xl bg-primary/10 group-hover:scale-110 transition-transform">
+                                <Scan className="size-8 text-primary" />
+                              </div>
                               <span className="text-sm font-black uppercase tracking-widest text-foreground">Scan Reagent</span>
+                              <span className="text-xs text-muted-foreground text-center font-medium normal-case tracking-normal max-w-[240px]">
+                                Scan barcode to find items
+                              </span>
                             </button>
-                            <button onClick={() => handleNavigatePage("lotinuse")} className="group w-full lg:w-auto flex flex-col items-center gap-4 p-8 rounded-[2.5rem] border border-border bg-card hover:border-primary/40 hover:bg-primary/5 transition-all shadow-sm">
-                              <div className="p-4 rounded-2xl bg-indigo-500/10 group-hover:scale-110 transition-transform"><Minus className="size-8 text-indigo-500" /></div>
+                            <button
+                              type="button"
+                              onClick={() => handleNavigatePage("lotinuse")}
+                              className="group w-full lg:min-w-[200px] lg:flex-1 flex flex-col items-center gap-2 p-8 rounded-[2.5rem] border border-border bg-card hover:border-primary/40 hover:bg-primary/5 transition-all shadow-sm"
+                            >
+                              <div className="p-4 rounded-2xl bg-primary/10 group-hover:scale-110 transition-transform">
+                                <Minus className="size-8 text-primary" />
+                              </div>
                               <span className="text-sm font-black uppercase tracking-widest text-foreground">Log Usage</span>
+                              <span className="text-xs text-muted-foreground text-center font-medium normal-case tracking-normal max-w-[240px]">
+                                Record reagent consumption
+                              </span>
                             </button>
-                            <button onClick={() => handleNavigatePage("requests")} className="group w-full lg:w-auto flex flex-col items-center gap-4 p-8 rounded-[2.5rem] border border-border bg-card hover:border-primary/40 hover:bg-primary/5 transition-all shadow-sm">
-                              <div className="p-4 rounded-2xl bg-purple-500/10 group-hover:scale-110 transition-transform"><PackagePlus className="size-8 text-purple-500" /></div>
+                            <button
+                              type="button"
+                              onClick={() => handleNavigatePage("requests")}
+                              className="group w-full lg:min-w-[200px] lg:flex-1 flex flex-col items-center gap-2 p-8 rounded-[2.5rem] border border-border bg-card hover:border-primary/40 hover:bg-primary/5 transition-all shadow-sm"
+                            >
+                              <div className="p-4 rounded-2xl bg-primary/10 group-hover:scale-110 transition-transform">
+                                <PackagePlus className="size-8 text-primary" />
+                              </div>
                               <span className="text-sm font-black uppercase tracking-widest text-foreground">Request Restock</span>
+                              <span className="text-xs text-muted-foreground text-center font-medium normal-case tracking-normal max-w-[240px]">
+                                Submit a restock request
+                              </span>
                             </button>
                           </div>
 

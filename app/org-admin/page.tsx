@@ -13,6 +13,11 @@ import {
   X,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import {
+  sessionReplacedSignOut,
+  verifyActiveSessionForUser,
+  voluntarySignOut,
+} from "@/lib/active-session"
 
 type LabRow = {
   id: string
@@ -216,13 +221,63 @@ export default function OrgAdminPage() {
     setOrigin(window.location.origin)
   }, [])
 
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+
+      if (!session) {
+        router.replace("/login")
+        return
+      }
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role, org_id")
+        .eq("id", session.user.id)
+        .maybeSingle()
+
+      if (!profile) {
+        await voluntarySignOut(session.user.id)
+        router.replace("/login")
+        return
+      }
+
+      if (profile.role === "super_admin") {
+        router.replace("/super-admin")
+        return
+      }
+
+      if (profile.role === "manager" || profile.role === "technician") {
+        router.replace("/dashboard")
+        return
+      }
+
+      if (profile.role !== "org_admin" || !profile.org_id) {
+        router.replace("/dashboard")
+        return
+      }
+
+      const activeOk = await verifyActiveSessionForUser(session.user.id)
+      if (activeOk === "replaced") {
+        await sessionReplacedSignOut(router)
+      }
+    }, 30000)
+
+    return () => clearInterval(interval)
+  }, [router])
+
   const refresh = useCallback(async () => {
     if (!orgId) return
     await loadDashboard(orgId)
   }, [orgId, loadDashboard])
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut()
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+    await voluntarySignOut(session?.user?.id)
     router.replace("/login")
   }
 

@@ -36,7 +36,8 @@ adjacent domain. No PHI is stored — intentional product decision.
 - **UI Generation:** v0
 - **Editor:** Cursor with Claude Code
 - **Deployment:** Vercel (buddy-lab-tracker.vercel.app)
-- **Email:** Resend (onboarding@resend.dev sender)
+- **Email:** Resend (noreply@yourbuddyapp.com pending DNS, onboarding@resend.dev interim)
+- **Domain:** yourbuddyapp.com (Cloudflare DNS, pending Resend verification)
 - **Rate Limiting:** Upstash Redis (@upstash/ratelimit, US-East-1)
 - **Feedback Logging:** Google Sheets via service account
 
@@ -81,7 +82,8 @@ adjacent domain. No PHI is stored — intentional product decision.
 - [x] Self-serve onboarding flow
       → 3-step welcome wizard at /welcome
       → Step 1: Welcome screen with lab name pill
-      → Step 2: Technician Key display with copy button
+      → Step 2: Editable Technician Key (custom values, no spaces, min 6 chars)
+        with helper text encouraging customization
       → Step 3: Configure lab settings (timezone, thresholds, COA toggle)
       → All fields have styled info boxes with helper text explanations
       → Dashboard onboarding gate: managers redirected to /welcome if onboarding_complete = false
@@ -169,13 +171,75 @@ adjacent domain. No PHI is stored — intentional product decision.
 - [x] labs policies rewritten to use JWT claims only (no profiles subquery)
 - [x] Super admin org provisioning UI (Single Lab / Organization toggle)
 - [x] Super admin redirects away from dashboard to /super-admin
-- [ ] Org admin signup flow via invite link
-- [ ] Org admin dashboard (labs list, member view)
-- [ ] Manager invite generation by org admin (per lab, one active per lab)
-- [ ] Revoke invite flow
-- [ ] Promote/demote within org labs
+- [x] handle_new_user trigger fixed (org_admin role + email removed + org_id)
+- [x] Org admin signup flow via /register-lab?token=X
+- [x] /org-admin dashboard (labs grid, member list, invite gen, revoke, promote/demote)
+- [x] Login + dashboard redirects for org_admin role
+- [x] Manager invite generation by org admin (per lab, one active per lab)
+- [x] Revoke invite flow (revoked_at + revoked_by auditable)
+- [x] Promote/demote within org labs (confirmation modal, JWT re-login note)
+- [x] Labs UPDATE RLS policy added (was missing, caused silent save failures)
 - [ ] Stripe + billing (org-level, 3-month trial, 7-day grace period)
 - [ ] Website (yourbuddyapp.com)
+
+### Phase 7 — Security & UX Hardening (In Progress)
+- [x] Tech key — editable in onboarding Step 2 + lab settings card
+      → Custom values allowed (no spaces, min 6 chars, special chars OK)
+      → Case-sensitive matching (oakwood ≠ Oakwood)
+      → Unique constraint with 23505 error handling
+      → Helper text encouraging managers to customize
+      → Enter-to-save on both input fields
+- [x] One active session per user
+      → active_sessions table (user_id PK, session_token, created_at)
+      → RLS enabled (user_id = auth.uid())
+      → Login upserts session token, stores in localStorage
+      → 30-second poll checks token match on dashboard + org-admin
+      → Second login kicks first device with amber banner
+      → Voluntary sign out deletes row; replaced sign out preserves new session
+      → lib/active-session.ts centralizes all session logic
+- [x] Password strength enforcement
+      → Supabase: min 8 chars, lowercase + uppercase + digits + symbols
+      → lib/password-strength.ts shared utility
+      → components/password-strength-checklist.tsx shared UI
+      → Enforced on register-lab signup form
+- [x] Password reset via email
+      → Profile settings: "Send Password Reset Email" button (no inline fields)
+      → /reset-password standalone page with strength checklist
+      → supabase.auth.resetPasswordForEmail with redirectTo
+      → Redirect URLs configured: localhost, Vercel, yourbuddyapp.com
+- [x] Branded email templates
+      → Confirm signup and Reset password HTML templates in Supabase
+      → Buddy branding, dark theme, green CTA button
+      → Contact support messaging (not "ignore this email")
+- [x] SMTP via Resend
+      → smtp.resend.com:465, custom SMTP enabled in Supabase
+      → Dedicated API key for Supabase SMTP (separate from app key)
+      → Using Supabase built-in email temporarily until domain DNS verifies
+- [x] Domain setup — yourbuddyapp.com
+      → Purchased via Cloudflare
+      → Resend domain added, DNS records pending verification
+      → DKIM, SPF, DMARC records to add in Cloudflare
+- [x] Supabase security notifications enabled
+      → Password changed, email changed, MFA added/removed
+- [x] Feedback icon updated (bug emoji → MessageSquareDiff from lucide-react)
+- [x] Dashboard overview cards redesigned
+      → 4 cards: Expired Lots, Urgent < X Days, Expiring < X Days, Low Stock
+      → Pending Requests card removed
+      → Cards use dynamic threshold labels from labSettings
+      → Expandable with item details (max 5, "and X more")
+      → Urgent and Expiring Soon check both storage AND bench lots
+      → Click-to-navigate: storage → inventory, bench → lot in use
+      → Colors consolidated: red (expired), amber (urgent), yellow (expiring), green (low stock)
+- [x] Inventory badges — multiple badges per lot
+      → Lots show ALL applicable badges simultaneously
+      → Expired, Urgent, Expiring Soon, Low Stock evaluated independently
+      → Per-item threshold overrides with lab settings fallback
+- [x] Inventory expanded row shows active thresholds
+      → "Thresholds: Urgent < X days · Expiring Soon < X days · Low Stock ≤ X units"
+      → "(lab default)" label for values using fallback
+- [ ] Header bell notifications — align to per-item thresholds
+- [ ] Super admin full features (billing view, view lab/org details, role editing)
+- [ ] Clean up test data (orgs, labs, profiles)
 
 ### Future — Post 10 Customers
 - [ ] Open self-serve lab registration (no invite required)
@@ -302,8 +366,10 @@ with no PHI. Remaining gap (1/10) would require enterprise tooling.
 ### Security Layers
 | Layer | Implementation |
 |-------|---------------|
-| Passwords | Supabase Auth bcrypt |
-| Database isolation | RLS on all 12 tables |
+| Passwords | Supabase Auth bcrypt, min 8 chars, uppercase+lowercase+digits+symbols required |
+| Password reset | Email-based reset flow via /reset-password page |
+| Session enforcement | One active session per user (active_sessions table, 30s poll) |
+| Database isolation | RLS on all 13 tables (including active_sessions) |
 | Data scoping | JWT-based get_my_lab_id() + get_my_org_id() |
 | Profile security | RLS enabled, email removed |
 | Transport | HTTPS enforced via HSTS |
@@ -312,6 +378,8 @@ with no PHI. Remaining gap (1/10) would require enterprise tooling.
 | Preview URLs | Vercel Authentication enabled |
 | Account security | 2FA on Supabase + Vercel |
 | Webhook | x-webhook-secret header validation |
+| Email | Custom SMTP via Resend, branded templates |
+| Security alerts | Password/email change + MFA add/remove notifications enabled |
 
 ### RLS Policy Pattern
 Lab-scoped tables use:
@@ -521,6 +589,18 @@ id, user_id, lab_id, type ('bug' | 'support' | 'feedback'),
 title, description, created_at
 ```
 
+### active_sessions
+```
+user_id (uuid PK → auth.users ON DELETE CASCADE),
+session_token (uuid, not null),
+created_at (timestamptz, default now())
+```
+- RLS enabled — user_id = auth.uid()
+- One row per user (PK enforces), upsert on login
+- Second login overwrites token, first device gets kicked on next poll
+- Voluntary sign out deletes row; session-replaced sign out does NOT delete
+  (preserves the newer session)
+
 ### Storage bucket: coa-documents (private)
 - Path: `{lab_id}/{lot_id}/{timestamp}_{filename}`
 
@@ -717,6 +797,82 @@ removed on component unmount.
 
 ---
 
+## One Active Session Per User
+
+Each user account can only be logged in on one device at a time.
+Second login wins — first session gets kicked.
+
+### Architecture
+- `active_sessions` table: user_id (PK), session_token, created_at
+- Login: upsert token via ON CONFLICT (user_id) DO UPDATE
+- Token stored in localStorage as `buddy_session_token`
+- 30-second poll on dashboard + org-admin checks token match
+- Mismatch → `sessionReplacedSignOut()` → /login?reason=session_replaced
+
+### Sign Out Patterns (lib/active-session.ts)
+- `voluntarySignOut(userId)` — DELETE active_sessions row + clear
+  localStorage + supabase.auth.signOut()
+- `sessionReplacedSignOut(router)` — clear localStorage +
+  supabase.auth.signOut() + redirect (does NOT delete row —
+  preserves the newer session)
+- All sign out paths in the app use these centralized functions
+
+### Session Replaced Banner
+- /login reads ?reason=session_replaced query param
+- Amber warning banner: "You were signed out because your account
+  was logged in from another device."
+- Distinct from invalid credentials error styling
+
+---
+
+## Password Reset Flow
+
+Password changes are handled via email link, not inline fields.
+
+### Flow
+1. User clicks "Send Password Reset Email" in Profile Settings
+2. `supabase.auth.resetPasswordForEmail(email, { redirectTo })`
+3. Email arrives with branded Buddy template
+4. Link opens /reset-password page
+5. User enters new password + confirm with strength checklist
+6. `supabase.auth.updateUser({ password })` → redirect to /login
+
+### Password Strength Rules
+- Min 8 characters, lowercase, uppercase, digit, special character
+- Shared utility: lib/password-strength.ts
+- Shared UI: components/password-strength-checklist.tsx
+- Enforced on: /register-lab signup + /reset-password page
+- Green CheckCircle2 when met, red XCircle when not
+
+### Redirect URLs (Supabase → Authentication → URL Configuration)
+- http://localhost:3000/reset-password
+- https://buddy-lab-tracker.vercel.app/reset-password
+- https://yourbuddyapp.com/reset-password
+
+---
+
+## Dashboard Overview Cards
+
+Four expandable KPI cards on the dashboard home tab:
+
+### Cards
+1. **Expired Lots** (red) — past expiry, storage + bench
+2. **Urgent < X Days** (amber) — within urgent_days, storage + bench
+3. **Expiring < X Days** (yellow) — between urgent_days and
+   expiring_soon_days, storage + bench
+4. **Low Stock Items** (green) — total units ≤ threshold, storage only
+
+### Behavior
+- Click to expand/collapse (one at a time)
+- Expanded list shows max 5 items with "and X more"
+- Per-item thresholds with lab settings fallback
+- Urgent and Expiring Soon never overlap
+- Bench lots use lab-wide thresholds (no item link)
+- Click item row → navigate to inventory or lot in use tab
+- Card labels use dynamic values from labSettings
+
+---
+
 ## Coding Conventions
 
 - Prefer **server components** unless client interactivity is needed
@@ -788,21 +944,3 @@ removed on component unmount.
 - Listen for `popstate` and close the modal instead of allowing browser navigation
 - Full cleanup of popstate listener on modal close and component unmount
 - Prevents back button from navigating to login page or previous route while modal is open
-
-### Phase 6 — Organization Layer (In Progress)
-- [x] Organizations table created with RLS
-- [x] org_id added to labs, profiles, lab_invites
-- [x] org_admin role added to profiles role constraint
-- [x] JWT hook updated to inject org_id alongside lab_id and user_role
-- [x] get_my_org_id() helper function created (JWT-based)
-- [x] get_my_lab_id() updated with NULLIF for empty string safety
-- [x] RLS policies for org layer (JWT-only, no circular dependencies)
-- [x] labs policies rewritten to use JWT claims only (no profiles subquery)
-- [x] Super admin org provisioning UI (Single Lab / Organization toggle)
-- [x] Super admin redirects away from dashboard to /super-admin
-- [x] handle_new_user trigger fixed (org_admin role + email column removed)
-- [x] Org admin signup flow via /register-lab?token=X
-- [x] /org-admin dashboard (labs grid, member list, invite gen, revoke, promote/demote)
-- [x] Login + dashboard redirects for org_admin role
-- [ ] Stripe + billing (org-level, 3-month trial, 7-day grace period)
-- [ ] Website (yourbuddyapp.com)
