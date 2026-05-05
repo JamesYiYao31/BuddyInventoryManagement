@@ -36,7 +36,7 @@ export default function ActivityLogTab({
   const printUserName = (currentUserName || "Unknown User").toUpperCase()
 
   const hasUserFilter = !!(filterUser && filterUser !== "all")
-  const hasActionFilter = !!(filterAction && filterAction !== "all")
+  const hasActionFilter = !!filterAction
   const hasDateFilter = !!(filterDateStart || filterDateEnd)
   const hasAnyFilter = hasUserFilter || hasActionFilter || hasDateFilter
 

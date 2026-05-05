@@ -16,7 +16,7 @@ import {
   InventoryGroup, LabSettings, SidebarPage, daysUntilExpiry, 
   getEarliestExpiry, LotInUseEntry, ReorderRequest, ActivityLogEntry,
   fetchInventoryFromSupabase, fetchLogsFromSupabase, fetchActiveLotsFromSupabase,
-  calculateDashboardStats, DashboardStats, fetchLabSettings, getLotTotalCount,
+  fetchLabSettings, getLotTotalCount,
   getLabCurrentDateStr, ACTION_STYLES, resolveCurrentUserLabId, fetchLabName,
 } from "@/lib/inventory-utils"
 
@@ -223,6 +223,21 @@ const VALID_SIDEBAR_PAGES = new Set<SidebarPage>([
   "settings",
 ])
 
+const ALL_ACTION_TYPES = [
+  "Added", "Edited", "Opened", "Used", "Ordered",
+  "Submitted COA", "Submitted Lot Validation",
+  "Approved Lot", "Rejected Lot", "Archived Lot",
+  "Deleted from Storage", "Deleted from Bench",
+] as const
+
+const QUICK_PILL_ACTIONS: { label: string; actions: string[] }[] = [
+  { label: "All", actions: [] },
+  { label: "Added", actions: ["Added"] },
+  { label: "Opened", actions: ["Opened"] },
+  { label: "Deleted", actions: ["Deleted from Storage", "Deleted from Bench"] },
+  { label: "Used", actions: ["Used"] },
+]
+
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000
 const IDLE_WARNING_MS = 2 * 60 * 1000
 const IDLE_BEFORE_WARNING_MS = IDLE_TIMEOUT_MS - IDLE_WARNING_MS
@@ -242,8 +257,6 @@ function DashboardPageContent() {
   const [requests, setRequests] = useState<ReorderRequest[]>([])
   const [activityLogs, setActivityLogs] = useState<ActivityLogEntry[]>([])
   const [lotsInUse, setLotsInUse] = useState<LotInUseEntry[]>([]) 
-  const [stats, setStats] = useState<DashboardStats | null>(null)
-  
   const [labSettings, setLabSettings] = useState<LabSettings>({
     lowStockThreshold: 5,
     expiringSoonDays: 30,
@@ -268,7 +281,7 @@ function DashboardPageContent() {
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set()) 
   const [expiryFilter, setExpiryFilter] = useState("all") 
-  const [actionFilter, setActionFilter] = useState("all")
+  const [selectedActions, setSelectedActions] = useState<Set<string>>(new Set())
   const [logUserFilter, setLogUserFilter] = useState("all")
   const [logDateStart, setLogDateStart] = useState("")
   const [logDateEnd, setLogDateEnd] = useState("")
@@ -365,7 +378,6 @@ function DashboardPageContent() {
         setActivityLogs(logData)
         setLotsInUse(activeData)
         setRequests([])
-        setStats(calculateDashboardStats(invData, activeData, [], settings))
         return
       }
 
@@ -402,8 +414,6 @@ function DashboardPageContent() {
       setLotsInUse(activeData)
       setRequests(mappedRequests)
 
-      const calculated = calculateDashboardStats(invData, activeData, mappedRequests, settings)
-      setStats(calculated)
     } catch (err) {
       console.error("Dashboard Refresh Error:", err)
     }
@@ -610,7 +620,7 @@ function DashboardPageContent() {
     const query = searchQuery.toLowerCase()
     const matchSearch = (log.itemName || "").toLowerCase().includes(query) || (log.lotNumber || "").toLowerCase().includes(query) || (log.user || "").toLowerCase().includes(query)
     const matchItem = selectedItems.size === 0 || selectedItems.has(log.itemName)
-    const matchAction = actionFilter === "all" || log.actionType === actionFilter
+    const matchAction = selectedActions.size === 0 || selectedActions.has(log.actionType)
     const matchUser = logUserFilter === "all" || log.user === logUserFilter
 
     let matchDate = true
@@ -706,7 +716,7 @@ function DashboardPageContent() {
 
       <div className="flex w-full max-w-full flex-1 flex-col overflow-x-hidden lg:pl-16 xl:pl-64 print:pl-0 print:block">
         <div className="print:hidden">
-          <DashboardHeader user={user} role={userRole} stats={stats} inventory={inventory} activeLots={lotsInUse} labSettings={labSettings} labName={labName} onNavigate={handleNavigatePage} onProfileUpdated={refreshAuthUser} onMobileMenuOpen={() => setMobileMenuOpen(true)} />
+          <DashboardHeader user={user} role={userRole} inventory={inventory} activeLots={lotsInUse} labSettings={labSettings} alertsLoading={loading} labName={labName} onNavigate={handleNavigatePage} onProfileUpdated={refreshAuthUser} onMobileMenuOpen={() => setMobileMenuOpen(true)} />
         </div>
 
         <main className="flex-1 overflow-y-auto overflow-x-hidden p-8 print:overflow-visible print:p-0">
@@ -726,7 +736,6 @@ function DashboardPageContent() {
                     </div>
                     
                     <AlertCards
-                      stats={stats}
                       labSettings={labSettings}
                       inventory={inventory}
                       lotsInUse={lotsInUse}
@@ -939,7 +948,27 @@ function DashboardPageContent() {
                       {activePage === "inventory" && <InventoryTab inventory={inventory} sortedFlatInventory={sortedFlatInventory} labSettings={labSettings} refreshData={refreshData} userRole={userRole} requests={requests} />}
                       {activePage === "lotinuse" && <LotInUseTab activeLots={filteredLotsInUse} inventory={inventory} refreshData={refreshData} userRole={userRole} labSettings={labSettings} currentUserName={currentUserName} labName={labName} />}
                       {activePage === "requests" && <RequestsTab requests={filteredRequests} refreshRequests={refreshData} userRole={userRole} />}
-                      {activePage === "activitylog" && <ActivityLogTab logs={filteredLogs} currentUserName={currentUserName} currentUserRole={userRole} labSettings={labSettings} filterUser={logUserFilter} filterAction={actionFilter} filterDateStart={logDateStart} filterDateEnd={logDateEnd} labName={labName} />}
+                      {activePage === "activitylog" && (
+                        <div className="space-y-4">
+                          <div className="flex gap-2 overflow-x-auto pb-1 print:hidden">
+                            {QUICK_PILL_ACTIONS.map(pill => {
+                              const isActive = pill.actions.length === 0
+                                ? selectedActions.size === 0
+                                : pill.actions.length === selectedActions.size && pill.actions.every(a => selectedActions.has(a))
+                              return (
+                                <button
+                                  key={pill.label}
+                                  onClick={() => setSelectedActions(new Set(pill.actions))}
+                                  className={`shrink-0 px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${isActive ? "bg-primary text-primary-foreground border-primary" : "bg-card border-border text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+                                >
+                                  {pill.label}
+                                </button>
+                              )
+                            })}
+                          </div>
+                          <ActivityLogTab logs={filteredLogs} currentUserName={currentUserName} currentUserRole={userRole} labSettings={labSettings} filterUser={logUserFilter} filterAction={selectedActions.size > 0 ? Array.from(selectedActions).join(", ") : undefined} filterDateStart={logDateStart} filterDateEnd={logDateEnd} labName={labName} />
+                        </div>
+                      )}
                     </div>
                     
                     <div className="relative hidden print:hidden lg:block xl:block">
@@ -1005,6 +1034,40 @@ function DashboardPageContent() {
                             </div>
 
                             <div className="space-y-3 pt-6 border-t border-border">
+                              <div className="flex items-center justify-between">
+                                <p className="text-[10px] font-bold uppercase text-muted-foreground tracking-widest flex items-center gap-2"><Activity className="size-4" /> Filter by Action</p>
+                                {selectedActions.size > 0 && <button onClick={() => setSelectedActions(new Set())} className="text-[10px] text-primary font-bold hover:underline">RESET</button>}
+                              </div>
+                              <div className="space-y-1.5 max-h-52 overflow-y-auto pr-2 custom-scrollbar">
+                                <button
+                                  onClick={() => setSelectedActions(new Set())}
+                                  className={`flex items-center gap-3 w-full px-3 py-2 text-sm rounded-xl transition-all ${selectedActions.size === 0 ? "bg-primary/10 text-primary font-bold" : "hover:bg-muted text-muted-foreground"}`}
+                                >
+                                  <div className={`size-4 rounded-md border flex items-center justify-center ${selectedActions.size === 0 ? "bg-primary border-primary text-primary-foreground" : "border-border"}`}>
+                                    {selectedActions.size === 0 && <CheckCircle2 className="size-3" />}
+                                  </div>
+                                  <span className="truncate">All Actions</span>
+                                </button>
+                                {ALL_ACTION_TYPES.map(action => (
+                                  <button
+                                    key={action}
+                                    onClick={() => {
+                                      const next = new Set(selectedActions)
+                                      if (next.has(action)) next.delete(action); else next.add(action)
+                                      setSelectedActions(next)
+                                    }}
+                                    className={`flex items-center gap-3 w-full px-3 py-2 text-sm rounded-xl transition-all ${selectedActions.has(action) ? "bg-primary/10 text-primary font-bold" : "hover:bg-muted text-muted-foreground"}`}
+                                  >
+                                    <div className={`size-4 rounded-md border flex items-center justify-center ${selectedActions.has(action) ? "bg-primary border-primary text-primary-foreground" : "border-border"}`}>
+                                      {selectedActions.has(action) && <CheckCircle2 className="size-3" />}
+                                    </div>
+                                    <span className="truncate">{action}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="space-y-3 pt-6 border-t border-border">
                               <p className="text-[10px] font-bold uppercase text-muted-foreground tracking-widest flex items-center gap-2"><CalendarDays className="size-4" /> Date Range</p>
                               <div className="space-y-2">
                                 <div className="space-y-1">
@@ -1026,9 +1089,9 @@ function DashboardPageContent() {
                                   />
                                 </div>
                               </div>
-                              {(logUserFilter !== "all" || logDateStart || logDateEnd) && (
+                              {(logUserFilter !== "all" || logDateStart || logDateEnd || selectedActions.size > 0) && (
                                 <button
-                                  onClick={() => { setLogUserFilter("all"); setLogDateStart(""); setLogDateEnd("") }}
+                                  onClick={() => { setLogUserFilter("all"); setLogDateStart(""); setLogDateEnd(""); setSelectedActions(new Set()) }}
                                   className="w-full text-center px-4 py-2 text-xs font-bold text-primary rounded-xl hover:bg-primary/10 transition-all"
                                 >
                                   Reset Log Filters

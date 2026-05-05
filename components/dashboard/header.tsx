@@ -1,18 +1,18 @@
 "use client"
 
-import { useState, useRef, useEffect, useMemo } from "react"
+import { useState, useRef, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
 import Link from "next/link"
 import {
-  Bell, Search, XCircle, Timer, PackageSearch, Package, FlaskConical,
+  Bell, Search, Package, FlaskConical,
   ChevronRight, ChevronDown, UserCog, LogOut, Sun, Moon, Monitor, Palette, Check, Menu,
-  MessageSquareDiff,
+  MessageSquareDiff, ClipboardCheck, ShoppingCart, PackageSearch, PackageX, CheckCircle2,
 } from "lucide-react"
 import {
-  DashboardStats, InventoryGroup, LotInUseEntry, LabSettings, SidebarPage,
-  daysUntilExpiry, getEarliestExpiry
+  InventoryGroup, LotInUseEntry, LabSettings, SidebarPage,
 } from "@/lib/inventory-utils"
+import { useBellAlerts, type BellAlertCategory, type BellAlertRow } from "@/hooks/use-bell-alerts"
 import { voluntarySignOut } from "@/lib/active-session"
 import { useToast } from "@/hooks/use-toast"
 import {
@@ -32,10 +32,10 @@ interface DashboardHeaderProps {
   user?: any
   role?: "manager" | "technician"
   labName?: string
-  stats?: DashboardStats | null
   inventory?: InventoryGroup[]
   activeLots?: LotInUseEntry[]
   labSettings?: LabSettings
+  alertsLoading?: boolean
   onNavigate?: (page: SidebarPage) => void
   onProfileUpdated?: () => void | Promise<void>
   onMobileMenuOpen: () => void
@@ -48,26 +48,49 @@ interface SearchResult {
   source: "Storage" | "Bench"
 }
 
-type AlertCategory = "expired" | "expiring" | "lowstock"
+const MAX_BELL_ROWS = 20
 
-interface NotificationItem {
-  id: string
-  message: string
-  category: AlertCategory
-  targetTab: SidebarPage
+const BELL_CATEGORY_META: Record<
+  BellAlertCategory,
+  { icon: typeof ClipboardCheck; color: string; bg: string; label: string }
+> = {
+  pendingApprovals: {
+    icon: ClipboardCheck,
+    color: "text-amber-500",
+    bg: "bg-amber-500/10",
+    label: "Pending Approvals",
+  },
+  requestsPending: {
+    icon: ShoppingCart,
+    color: "text-amber-500",
+    bg: "bg-amber-500/10",
+    label: "Requests Awaiting Approval",
+  },
+  orderedNotReceived: {
+    icon: PackageSearch,
+    color: "text-blue-500",
+    bg: "bg-blue-500/10",
+    label: "Ordered, Not Yet Received",
+  },
+  benchExpiring: {
+    icon: FlaskConical,
+    color: "text-red-500",
+    bg: "bg-red-500/10",
+    label: "Bench Expiry",
+  },
+  outOfStock: {
+    icon: PackageX,
+    color: "text-red-500",
+    bg: "bg-red-500/10",
+    label: "Out of Stock",
+  },
 }
 
-const CATEGORY_META: Record<AlertCategory, { icon: typeof XCircle; color: string; bg: string }> = {
-  expired:  { icon: XCircle,       color: "text-red-500",    bg: "bg-red-500/10" },
-  expiring: { icon: Timer,         color: "text-orange-500", bg: "bg-orange-500/10" },
-  lowstock: { icon: PackageSearch,  color: "text-yellow-600", bg: "bg-yellow-500/10" },
-}
-
-const MAX_NOTIFICATIONS = 12
+type CategoryGroup = { cat: BellAlertCategory; rows: BellAlertRow[] }
 
 export function DashboardHeader({
-  user, role, labName, stats, inventory = [], activeLots =[],
-  labSettings, onNavigate, onProfileUpdated, onMobileMenuOpen,
+  user, role, labName, inventory = [], activeLots = [],
+  onNavigate, onProfileUpdated, onMobileMenuOpen,
 }: DashboardHeaderProps) {
   const router = useRouter()
   const { toast } = useToast()
@@ -108,8 +131,8 @@ export function DashboardHeader({
     router.replace("/login")
   }
 
-  const tz = labSettings?.labTimezone ?? "America/Chicago"
-  const lowThreshold = labSettings?.lowStockThreshold ?? 5
+  // ── BELL ALERTS ──
+  const bellAlerts = useBellAlerts(role)
 
   // ── SEARCH STATE ──
   const [searchQuery, setSearchQuery] = useState("")
@@ -118,7 +141,6 @@ export function DashboardHeader({
 
   // ── BELL STATE ──
   const [bellOpen, setBellOpen] = useState(false)
-  const [hasUnread, setHasUnread] = useState(false)
   const bellRef = useRef<HTMLDivElement>(null)
 
   // ── CLICK-OUTSIDE ──
@@ -135,89 +157,36 @@ export function DashboardHeader({
     return () => document.removeEventListener("mousedown", handler)
   },[])
 
-  // ── GENERATE SPECIFIC NOTIFICATIONS ──
-  const notifications: NotificationItem[] = useMemo(() => {
-    const items: NotificationItem[] =[]
+  // ── BELL NOTIFICATION GROUPS (capped at MAX_BELL_ROWS total) ──
+  const ORDERED_CATEGORIES: BellAlertCategory[] = [
+    "pendingApprovals",
+    "requestsPending",
+    "orderedNotReceived",
+    "benchExpiring",
+    "outOfStock",
+  ]
 
-    for (const group of inventory) {
-      let groupTotalUnits = 0
-
-      for (const lot of group.lots) {
-        groupTotalUnits += lot.totalUnits ?? 0
-        const days = daysUntilExpiry(lot.expiry, tz)
-
-        if (days < 0 && lot.expiry) {
-          items.push({
-            id: `exp-${lot.lotId}`,
-            message: `${group.name} (Lot ${lot.lot}) is Expired`,
-            category: "expired",
-            targetTab: "inventory",
-          })
-        } else if (days >= 0 && days <= 7 && lot.expiry) {
-          items.push({
-            id: `urg-${lot.lotId}`,
-            message: `${group.name} (Lot ${lot.lot}) expires in ${days}d`,
-            category: "expiring",
-            targetTab: "inventory",
-          })
-        }
-
-        if (items.length >= MAX_NOTIFICATIONS) break
-      }
-
-      if (items.length < MAX_NOTIFICATIONS && groupTotalUnits <= lowThreshold) {
-        items.push({
-          id: `low-${group.itemId}`,
-          message: `${group.name} is low stock (${groupTotalUnits} units)`,
-          category: "lowstock",
-          targetTab: "inventory",
-        })
-      }
-
-      if (items.length >= MAX_NOTIFICATIONS) break
+  const bellGroups: CategoryGroup[] = []
+  let bellRowsShown = 0
+  for (const cat of ORDERED_CATEGORIES) {
+    if (bellRowsShown >= MAX_BELL_ROWS) break
+    if (cat === "pendingApprovals" || cat === "requestsPending") {
+      if (role !== "manager") continue
     }
-
-    if (items.length < MAX_NOTIFICATIONS) {
-      for (const lot of activeLots) {
-        const eff = getEarliestExpiry(lot.workingExpiryDate, lot.actualExpiryDate)
-        const days = daysUntilExpiry(eff, tz)
-
-        if (days < 0) {
-          items.push({
-            id: `bench-exp-${lot.id}`,
-            message: `${lot.itemName} (Lot ${lot.lotNumber}) expired on bench`,
-            category: "expired",
-            targetTab: "lotinuse",
-          })
-        } else if (days >= 0 && days <= 7) {
-          items.push({
-            id: `bench-urg-${lot.id}`,
-            message: `${lot.itemName} (Lot ${lot.lotNumber}) bench expiry in ${days}d`,
-            category: "expiring",
-            targetTab: "lotinuse",
-          })
-        }
-
-        if (items.length >= MAX_NOTIFICATIONS) break
-      }
-    }
-
-    return items.slice(0, MAX_NOTIFICATIONS)
-  }, [inventory, activeLots, tz, lowThreshold])
-
-  // Mark unread whenever notifications change and there are new ones
-  useEffect(() => {
-    if (notifications.length > 0) setHasUnread(true)
-  }, [notifications])
-
-  const handleBellClick = () => {
-    setBellOpen(prev => !prev)
-    setHasUnread(false)
+    const rows = bellAlerts[cat]
+    if (rows.length === 0) continue
+    const visible = rows.slice(0, MAX_BELL_ROWS - bellRowsShown)
+    bellRowsShown += visible.length
+    bellGroups.push({ cat, rows: visible })
   }
+  const bellMoreCount = bellAlerts.totalCount - bellRowsShown
+  const bellBadgeText = bellAlerts.totalCount > 99 ? "99+" : String(bellAlerts.totalCount)
 
-  const handleNotificationClick = (n: NotificationItem) => {
+  const handleBellClick = () => setBellOpen((prev) => !prev)
+
+  const handleBellRowClick = (row: BellAlertRow) => {
     setBellOpen(false)
-    onNavigate?.(n.targetTab)
+    onNavigate?.(row.targetTab)
   }
 
   // ── SEARCH LOGIC ──
@@ -347,9 +316,9 @@ export function DashboardHeader({
             className="relative p-1.5 lg:p-2 text-muted-foreground hover:text-foreground transition-colors rounded-full hover:bg-muted"
           >
             <Bell className="size-5" />
-            {hasUnread && notifications.length > 0 && (
-              <span className="absolute right-1 top-1 flex size-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-black text-white ring-2 ring-background">
-                {notifications.length > 9 ? "9+" : notifications.length}
+            {bellAlerts.totalCount > 0 && !bellAlerts.isLoading && (
+              <span className="absolute right-1 top-1 flex min-w-4 h-4 px-0.5 items-center justify-center rounded-full bg-red-500 text-[9px] font-black text-white ring-2 ring-background">
+                {bellBadgeText}
               </span>
             )}
           </button>
@@ -358,35 +327,52 @@ export function DashboardHeader({
             <div className="absolute top-full mt-1 right-0 w-screen max-w-[calc(100vw-2rem)] sm:w-96 rounded-xl border border-border bg-card shadow-xl overflow-hidden animate-in fade-in slide-in-from-top-1 duration-150 z-50">
               <div className="px-4 py-3 border-b border-border bg-muted/30 flex items-center justify-between">
                 <p className="text-xs font-black uppercase tracking-widest text-muted-foreground">Lab Alerts</p>
-                {notifications.length > 0 && (
-                  <span className="text-[10px] font-bold text-muted-foreground">{notifications.length} item{notifications.length !== 1 ? "s" : ""}</span>
+                {bellAlerts.totalCount > 0 && (
+                  <span className="text-[10px] font-bold text-muted-foreground">
+                    {bellAlerts.totalCount} item{bellAlerts.totalCount !== 1 ? "s" : ""}
+                  </span>
                 )}
               </div>
-              {notifications.length > 0 ? (
+
+              {bellAlerts.totalCount > 0 ? (
                 <div className="max-h-[60vh] overflow-y-auto">
-                  {notifications.map(n => {
-                    const meta = CATEGORY_META[n.category]
+                  {bellGroups.map(({ cat, rows }, groupIdx) => {
+                    const meta = BELL_CATEGORY_META[cat]
                     const Icon = meta.icon
                     return (
-                      <button
-                        key={n.id}
-                        onClick={() => handleNotificationClick(n)}
-                        className="flex items-center gap-3 w-full text-left px-4 py-3 hover:bg-muted/60 transition-colors border-t border-border/40 first:border-t-0 group"
-                      >
-                        <div className={`p-1.5 rounded-lg shrink-0 ${meta.bg}`}>
-                          <Icon className={`size-3.5 ${meta.color}`} />
-                        </div>
-                        <p className="text-sm text-foreground flex-1 min-w-0 truncate">
-                          {n.message}
+                      <div key={cat}>
+                        {groupIdx > 0 && <div className="border-t border-border/60" />}
+                        <p className="px-4 pt-3 pb-1 text-[10px] font-black uppercase tracking-widest text-muted-foreground/70">
+                          {meta.label}
                         </p>
-                        <ChevronRight className="size-3.5 text-muted-foreground/40 shrink-0 group-hover:text-foreground transition-colors" />
-                      </button>
+                        {rows.map(row => (
+                          <button
+                            key={row.id}
+                            onClick={() => handleBellRowClick(row)}
+                            className="flex items-center gap-3 w-full text-left px-4 py-2.5 hover:bg-muted/60 transition-colors group"
+                          >
+                            <div className={`p-1.5 rounded-lg shrink-0 ${meta.bg}`}>
+                              <Icon className={`size-3.5 ${meta.color}`} />
+                            </div>
+                            <p className="text-sm text-foreground flex-1 min-w-0 whitespace-normal">
+                              {row.message}
+                            </p>
+                            <ChevronRight className="size-3.5 text-muted-foreground/40 shrink-0 group-hover:text-foreground transition-colors" />
+                          </button>
+                        ))}
+                      </div>
                     )
                   })}
+                  {bellMoreCount > 0 && (
+                    <p className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground border-t border-border/40">
+                      and {bellMoreCount} more alert{bellMoreCount !== 1 ? "s" : ""}
+                    </p>
+                  )}
                 </div>
               ) : (
-                <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-                  No active alerts. All clear.
+                <div className="px-4 py-8 flex flex-col items-center gap-2 text-muted-foreground">
+                  <CheckCircle2 className="size-5 text-muted-foreground/50" />
+                  <p className="text-sm">No alerts right now</p>
                 </div>
               )}
             </div>

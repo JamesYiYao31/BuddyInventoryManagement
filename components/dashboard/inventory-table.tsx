@@ -697,7 +697,7 @@ export default function InventoryTab({
     const hasItem = !!selectedItemId || !!newItemName.trim()
     if (!hasItem) return alert("You must select or create an item.")
     if (!lotForm.lot.trim()) return alert("Lot number is required.")
-    if (!lotForm.totalUnits || lotForm.totalUnits < 1) return alert("Total units received must be at least 1.")
+    if (lotForm.totalUnits < 1) return
 
     setSaving(true)
     let finalItemId = selectedItemId
@@ -838,7 +838,11 @@ export default function InventoryTab({
     })
   }
 
-  const canSave = (!!selectedItemId || !!newItemName.trim()) && !!lotForm.lot.trim()
+  const quantityError = showItemModal && lotForm.totalUnits < 1
+    ? "Quantity must be greater than 0"
+    : null
+
+  const canSave = (!!selectedItemId || !!newItemName.trim()) && !!lotForm.lot.trim() && !quantityError
 
   // ── RENDER ──
   return (
@@ -1447,7 +1451,7 @@ export default function InventoryTab({
                     </div>
                   </div>
                 )}
-
+                {/* Item & LotNumber */}
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-1">
                     Lot Number <span className="text-destructive">*</span>
@@ -1472,8 +1476,11 @@ export default function InventoryTab({
                   <div className="space-y-2"><label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-1">Vendor</label><input value={lotForm.vendor} onChange={e => setLotForm({ ...lotForm, vendor: e.target.value })} placeholder="Vendor name" className="w-full h-14 border border-input bg-background rounded-2xl px-6 text-base" /></div>
                   <div className="space-y-2"><label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-1">Storage Location</label><input value={lotForm.storage} onChange={e => setLotForm({ ...lotForm, storage: e.target.value })} placeholder="Storage location" className="w-full h-14 border border-input bg-background rounded-2xl px-6 text-base" /></div>
                   <div className="space-y-2">
-                    <label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-1">Total Units Received</label>
-                    <input type="number" min={1} value={lotForm.totalUnits} onChange={e => setLotForm({ ...lotForm, totalUnits: Number(e.target.value) })} className="w-full h-14 border border-input bg-background rounded-2xl px-6 text-base font-bold" />
+                    <label className="text-xs font-bold text-muted-foreground uppercase tracking-widest ml-1">Total Units Received <span className="text-destructive">*</span></label>
+                    <input type="number" min={1} value={lotForm.totalUnits} onChange={e => setLotForm({ ...lotForm, totalUnits: Number(e.target.value) })} className={`w-full h-14 border bg-background rounded-2xl px-6 text-base font-bold ${quantityError ? "border-destructive/50 focus:ring-destructive/20" : "border-input"}`} />
+                    {quantityError && (
+                      <p className="text-xs text-destructive ml-1">{quantityError}</p>
+                    )}
                   </div>
                 </div>
               </div>

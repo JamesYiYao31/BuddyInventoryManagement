@@ -1,25 +1,23 @@
 "use client"
 
-import { useMemo, useState, type ReactNode } from "react"
+import { useState, type ReactNode } from "react"
 import { Timer, PackageSearch, XCircle, ChevronRight, ChevronDown, CalendarClock } from "lucide-react"
 import {
-  DashboardStats,
   InventoryGroup,
   LabSettings,
   LotInUseEntry,
   SidebarPage,
-  daysUntilExpiry,
-  getEarliestExpiry,
 } from "@/lib/inventory-utils"
+import { useLabAlerts } from "@/hooks/use-lab-alerts"
 
 type AlertKind = "expired" | "urgent" | "expiringSoon" | "lowstock"
 
 interface AlertCardsProps {
-  stats: DashboardStats | null
   labSettings: LabSettings
   inventory: InventoryGroup[]
   lotsInUse: LotInUseEntry[]
   onNavigate: (page: SidebarPage) => void
+  isLoading?: boolean
 }
 
 function formatDisplayDate(isoDate: string): string {
@@ -30,147 +28,26 @@ function formatDisplayDate(isoDate: string): string {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
 }
 
-function thresholdsForGroup(g: InventoryGroup, lab: LabSettings) {
-  return {
-    urgentDays: g.urgent_days ?? lab.urgentDays,
-    expiringSoonDays: g.expiring_soon_days ?? lab.expiringSoonDays,
-    lowStockThreshold: g.low_stock_threshold ?? lab.lowStockThreshold,
-  }
-}
-
 export function AlertCards({
-  stats,
   labSettings,
   inventory,
   lotsInUse,
   onNavigate,
+  isLoading = false,
 }: AlertCardsProps) {
-  const tz = labSettings.labTimezone
   const [expanded, setExpanded] = useState<AlertKind | null>(null)
 
-  const expiredRows = useMemo(() => {
-    const storage: { key: string; itemName: string; lotNumber: string; expiry: string; target: SidebarPage }[] = []
-    for (const g of inventory) {
-      for (const l of g.lots) {
-        if (daysUntilExpiry(l.expiry, tz) < 0) {
-          storage.push({
-            key: `s-${l.lotId}`,
-            itemName: g.name,
-            lotNumber: l.lot,
-            expiry: l.expiry,
-            target: "inventory",
-          })
-        }
-      }
-    }
-    const bench: { key: string; itemName: string; lotNumber: string; expiry: string; target: SidebarPage }[] = []
-    for (const l of lotsInUse) {
-      const eff = getEarliestExpiry(l.workingExpiryDate, l.actualExpiryDate)
-      if (daysUntilExpiry(eff, tz) < 0) {
-        bench.push({
-          key: `b-${l.id}`,
-          itemName: l.itemName,
-          lotNumber: l.lotNumber,
-          expiry: eff,
-          target: "lotinuse",
-        })
-      }
-    }
-    return [...storage, ...bench]
-  }, [inventory, lotsInUse, tz])
-
-  const urgentRows = useMemo(() => {
-    const rows: { key: string; itemName: string; lotNumber: string; expiry: string; daysLeft: number; onBench: boolean }[] = []
-    for (const g of inventory) {
-      const { urgentDays } = thresholdsForGroup(g, labSettings)
-      for (const l of g.lots) {
-        const days = daysUntilExpiry(l.expiry, tz)
-        if (days >= 0 && days <= urgentDays) {
-          rows.push({
-            key: l.lotId,
-            itemName: g.name,
-            lotNumber: l.lot,
-            expiry: l.expiry,
-            daysLeft: days,
-            onBench: false,
-          })
-        }
-      }
-    }
-    const benchUrgentDays = labSettings.urgentDays
-    for (const l of lotsInUse) {
-      const eff = getEarliestExpiry(l.workingExpiryDate, l.actualExpiryDate)
-      const days = daysUntilExpiry(eff, tz)
-      if (days >= 0 && days <= benchUrgentDays) {
-        rows.push({
-          key: `b-${l.id}`,
-          itemName: l.itemName,
-          lotNumber: l.lotNumber,
-          expiry: eff,
-          daysLeft: days,
-          onBench: true,
-        })
-      }
-    }
-    rows.sort((a, b) => a.daysLeft - b.daysLeft)
-    return rows
-  }, [inventory, lotsInUse, tz, labSettings])
-
-  const expiringSoonRows = useMemo(() => {
-    const rows: { key: string; itemName: string; lotNumber: string; expiry: string; daysLeft: number; onBench: boolean }[] = []
-    for (const g of inventory) {
-      const { urgentDays, expiringSoonDays } = thresholdsForGroup(g, labSettings)
-      for (const l of g.lots) {
-        const days = daysUntilExpiry(l.expiry, tz)
-        if (days > urgentDays && days <= expiringSoonDays) {
-          rows.push({
-            key: l.lotId,
-            itemName: g.name,
-            lotNumber: l.lot,
-            expiry: l.expiry,
-            daysLeft: days,
-            onBench: false,
-          })
-        }
-      }
-    }
-    const benchUrgentDays = labSettings.urgentDays
-    const benchExpiringSoonDays = labSettings.expiringSoonDays
-    for (const l of lotsInUse) {
-      const eff = getEarliestExpiry(l.workingExpiryDate, l.actualExpiryDate)
-      const days = daysUntilExpiry(eff, tz)
-      if (days > benchUrgentDays && days <= benchExpiringSoonDays) {
-        rows.push({
-          key: `b-${l.id}`,
-          itemName: l.itemName,
-          lotNumber: l.lotNumber,
-          expiry: eff,
-          daysLeft: days,
-          onBench: true,
-        })
-      }
-    }
-    rows.sort((a, b) => a.daysLeft - b.daysLeft)
-    return rows
-  }, [inventory, lotsInUse, tz, labSettings])
-
-  const lowStockRows = useMemo(() => {
-    const rows: { key: string; itemName: string; count: number; threshold: number }[] = []
-    for (const g of inventory) {
-      const { lowStockThreshold } = thresholdsForGroup(g, labSettings)
-      const totalCount = g.lots.reduce((acc, lot) => acc + (lot.totalUnits || 0), 0)
-      if (totalCount <= lowStockThreshold) {
-        rows.push({
-          key: g.itemId,
-          itemName: g.name,
-          count: totalCount,
-          threshold: lowStockThreshold,
-        })
-      }
-    }
-    rows.sort((a, b) => a.count - b.count)
-    return rows
-  }, [inventory, labSettings])
+  const {
+    expiredLots: expiredRows,
+    urgentLots: urgentRows,
+    expiringSoonLots: expiringSoonRows,
+    lowStockItems: lowStockRows,
+  } = useLabAlerts({
+    inventory,
+    lotsInUse,
+    labSettings,
+    isLoading,
+  })
 
   const toggle = (kind: AlertKind) => {
     setExpanded((prev) => (prev === kind ? null : kind))
@@ -191,7 +68,7 @@ export function AlertCards({
     {
       kind: "expired",
       label: "EXPIRED LOTS",
-      value: stats?.expiredCount ?? 0,
+      value: expiredRows.length,
       icon: XCircle,
       colorClass: "text-red-500",
       borderClass: "border-red-500/20",
@@ -200,7 +77,7 @@ export function AlertCards({
     {
       kind: "urgent",
       label: urgentLabel,
-      value: stats?.urgentCount ?? 0,
+      value: urgentRows.length,
       icon: Timer,
       colorClass: "text-amber-500",
       borderClass: "border-amber-500/20",
@@ -209,7 +86,7 @@ export function AlertCards({
     {
       kind: "expiringSoon",
       label: expiringSoonLabel,
-      value: stats?.expiringSoonCount ?? 0,
+      value: expiringSoonRows.length,
       icon: CalendarClock,
       colorClass: "text-yellow-500",
       borderClass: "border-yellow-500/20",
@@ -218,7 +95,7 @@ export function AlertCards({
     {
       kind: "lowstock",
       label: "LOW STOCK ITEMS",
-      value: stats?.lowStockCount ?? 0,
+      value: lowStockRows.length,
       icon: PackageSearch,
       colorClass: "text-primary",
       borderClass: "border-primary/20",
