@@ -37,7 +37,7 @@ interface LotInUseTabProps {
 }
 
 export default function LotInUseTab({ activeLots, inventory, refreshData, userRole, labSettings, labName, currentUserName }: LotInUseTabProps) {
-  const OPENABLE_VALIDATION_STATUSES = new Set(["not_required", "approved"])
+  const OPENABLE_VALIDATION_STATUSES = new Set(["not_required", "approved", "archived"])
   const canOpenInventoryLot = (lot: LotEntry) => OPENABLE_VALIDATION_STATUSES.has(lot.validation_status || "not_required")
 
   // ── PRINT METADATA ──
@@ -427,7 +427,7 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
           .eq("status", "In Storage")
           .neq("id", showOpenModal.lotId)
           .lt("expiry_date", showOpenModal.expiry)
-          .in("validation_status", ["approved", "not_required"])
+          .in("validation_status", ["approved", "not_required", "archived"])
           .order("expiry_date", { ascending: true })
           .limit(1)
 
@@ -876,7 +876,7 @@ export default function LotInUseTab({ activeLots, inventory, refreshData, userRo
                   </label>
                   {manualMode === "open" && (
                     <p className="text-xs text-muted-foreground ml-2">
-                      Only lots with validation status Approved or Not Required can be opened to bench.
+                      Only lots with validation status Approved, Archived, or Not Required can be opened to bench.
                     </p>
                   )}
                   <select 

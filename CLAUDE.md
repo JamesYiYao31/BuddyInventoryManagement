@@ -237,8 +237,22 @@ adjacent domain. No PHI is stored — intentional product decision.
 - [x] Inventory expanded row shows active thresholds
       → "Thresholds: Urgent < X days · Expiring Soon < X days · Low Stock ≤ X units"
       → "(lab default)" label for values using fallback
-- [ ] Header bell notifications — align to per-item thresholds
-- [ ] Super admin full features (billing view, view lab/org details, role editing)
+- [x] Open-to-bench allowlist fix — archived lots can now be opened
+      to bench after validation records are moved to history. Fixed in
+      openNewLotInSupabase(), OPENABLE_VALIDATION_STATUSES, FEFO check,
+      and helper text (4 locations)
+- [x] Header bell notifications redesigned
+      → hooks/use-bell-alerts.ts (separate hook, 60s auto-refresh, per-item thresholds)
+      → hooks/use-lab-alerts.ts extracted for dashboard alert cards
+      → Activity log action type filter (12 types, quick-select pills)
+      → Zero quantity ghost lot bug fixed (app guard + DB constraint)
+- [x] Super admin full features — /super-admin/labs/[id] and /super-admin/orgs/[id]
+      detail pages, billing overview, role editing, tech key reset,
+      invite revoke, trial extend, Stripe placeholder
+- [x] profiles.created_at column added
+      → Backfilled from auth.users for existing members
+      → Joined date now shows in super admin lab/org member tabs
+        and org admin member cards
 - [ ] Clean up test data (orgs, labs, profiles)
 
 ### Future — Post 10 Customers
@@ -450,8 +464,11 @@ archived = manager clicked "Move to History"
 - Lots with status `pending_coa`, `pending_validation`, `pending_approval`,
   or `rejected` are BLOCKED from Open to Bench
 - Technicians cannot see the Validation & COA tab — manager only
-- Open-to-bench backend uses ALLOWLIST: only `not_required` and `approved`
-  can be opened (never use a blocklist approach)
+- Open-to-bench backend uses ALLOWLIST: only `not_required`, `approved`,
+  and `archived` can be opened (never use a blocklist approach)
+- Archiving a lot's validation records (Move to History) does not block
+  the physical lot from being opened to bench — archived means COA/validation
+  docs are filed, not that the lot is invalid
 
 ### Who Does What
 - **Technician:** uploads COA file, uploads Lot Validation file
@@ -501,6 +518,11 @@ validation_archived_at (timestamptz, nullable)
 - `validation_status` valid values:
   `not_required`, `pending_coa`, `pending_validation`,
   `pending_approval`, `approved`, `rejected`, `archived`
+- Constraints:
+  - `check_quantity_not_zero`: enforces count > 0 or units > 0
+    depending on quantity_type
+  - `inventory_lots_validation_status_check`: existing allowlist
+    constraint on validation_status values
 
 ### items
 ```
@@ -561,13 +583,15 @@ status, notes, date_requested
 ### profiles
 ```
 id, lab_id, org_id, full_name,
-role ('super_admin' | 'org_admin' | 'manager' | 'technician')
+role ('super_admin' | 'org_admin' | 'manager' | 'technician'),
+created_at (timestamptz, default now())
 ```
 - email column intentionally removed — stored in auth.users only
 - RLS is ENABLED with policies
 - Super admin has lab_id = NULL, org_id = NULL
 - Org admin has lab_id = NULL, org_id = <uuid>
 - Never query email from profiles — use admin.auth.admin.getUserById()
+- created_at backfilled from auth.users.created_at for existing users
 
 ### lab_invites
 ```
@@ -873,6 +897,50 @@ Four expandable KPI cards on the dashboard home tab:
 
 ---
 
+## Bell Notifications Architecture
+
+### Hook: hooks/use-bell-alerts.ts
+Separate from useLabAlerts — owns its own Supabase queries.
+Refreshes every 60 seconds automatically.
+Accepts userRole to gate manager-only queries at fetch time.
+Returns: pendingApprovals, requestsPending, orderedNotReceived,
+benchExpiring, outOfStock, totalCount, isLoading
+
+### Categories (in display order)
+1. **Pending Approvals** (manager only)
+   → `inventory_lots` WHERE `validation_status` IN
+     (`pending_approval`, `pending_coa`)
+   → Navigates to `?tab=validation`
+
+2. **Requests Awaiting Approval** (manager only)
+   → `requests` WHERE `status = 'pending'`
+     AND `date_requested <= now() - 3 days`
+   → Navigates to `?tab=requests`
+
+3. **Ordered Not Yet Received** (all roles)
+   → `requests` WHERE `status = 'ordered'`
+   → Navigates to `?tab=requests`
+
+4. **Bench Expiry Today/Tomorrow** (all roles)
+   → `active_lots` WHERE `working_expiry_date`
+     BETWEEN today AND today + 1 day
+   → Navigates to `?tab=lotinuse`
+
+5. **Out of Stock** (all roles)
+   → items with zero total units across all
+     `inventory_lots` WHERE `status = 'In Storage'`
+   → Navigates to `?tab=inventory`
+
+### Rules (Never Break These)
+- Manager-only categories gated at BOTH fetch time and render time
+- Bell uses `router.replace()` for all navigation (not `router.push()`)
+- Badge hidden when totalCount = 0 or while loading
+- Badge display capped at 99+
+- Max 20 rows in dropdown, then "and X more alerts"
+- Empty state: checkmark icon + "No alerts right now"
+
+---
+
 ## Coding Conventions
 
 - Prefer **server components** unless client interactivity is needed
@@ -896,7 +964,7 @@ Four expandable KPI cards on the dashboard home tab:
 - All inventory_lots queries must include `.eq("lab_id", labId)`
   — never filter by id alone
 - `openNewLotInSupabase()` initial lot fetch must be scoped to lab_id
-- Open-to-bench validation uses allowlist (not_required, approved only)
+- Open-to-bench validation uses allowlist (not_required, approved, archived only) — never use a blocklist approach
 - ValidationTab only mounts when `userRole === 'manager'`
   (render-time guard, not just sidebar hide)
 - No console.log statements in production code

@@ -31,6 +31,16 @@ type MemberRow = {
   full_name: string
   role: string
   lab_id: string
+  created_at: string | null
+}
+
+function formatJoinDate(iso: string | null | undefined): string {
+  if (!iso) return "—"
+  try {
+    return new Date(iso).toLocaleDateString(undefined, { dateStyle: "medium" })
+  } catch {
+    return iso
+  }
 }
 
 type ActiveInviteRow = {
@@ -120,7 +130,7 @@ export default function OrgAdminPage() {
 
     const { data: memberRows, error: memErr } = await supabase
       .from("profiles")
-      .select("id, full_name, role, lab_id")
+      .select("id, full_name, role, lab_id, created_at")
       .in("lab_id", labIds)
       .order("full_name", { ascending: true })
 
@@ -502,6 +512,7 @@ export default function OrgAdminPage() {
                                 >
                                   {m.role === "manager" ? "Manager" : "Technician"}
                                 </span>
+                                <p className="text-xs text-muted-foreground mt-1">Joined {formatJoinDate(m.created_at)}</p>
                               </div>
                               <div className="flex flex-wrap gap-2 shrink-0">
                                 {m.role === "manager" ? (

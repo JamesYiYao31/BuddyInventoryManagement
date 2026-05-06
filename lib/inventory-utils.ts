@@ -1250,7 +1250,7 @@ export const openNewLotInSupabase = async (
 
   if (fetchErr || !invLot) throw new Error("Could not find inventory lot.")
 
-  if (!["not_required", "approved"].includes(invLot.validation_status || "")) {
+  if (!["not_required", "approved", "archived"].includes(invLot.validation_status || "")) {
     throw new Error("This lot is not approved for bench use.")
   }
 

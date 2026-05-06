@@ -16,6 +16,7 @@ import {
   Plus,
   X,
   ChevronRight,
+  CreditCard,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 
@@ -303,6 +304,26 @@ export default function SuperAdminPage() {
 
     return [...singles, ...orgGroups]
   }, [labs, labsSearch, labsTypeFilter, labsStatusFilter, orgById])
+
+  const trialCount = useMemo(
+    () => organizations.filter(o => o.plan === 'trial').length,
+    [organizations]
+  )
+
+  const expiringThisWeek = useMemo(() => {
+    const now = new Date()
+    const cutoff = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
+    return organizations.filter(o => {
+      if (!o.trial_ends_at) return false
+      const ends = new Date(o.trial_ends_at)
+      return ends >= now && ends <= cutoff
+    }).length
+  }, [organizations])
+
+  const activeCount = useMemo(
+    () => organizations.filter(o => o.plan !== 'trial').length,
+    [organizations]
+  )
 
   const handleGenerateInvite = async () => {
     setGenerateMsg(null)
@@ -635,10 +656,12 @@ export default function SuperAdminPage() {
     await refreshAll()
   }
 
-  const handleViewLab = (_lab: LabRow) => {}
+  const handleViewLab = (lab: LabRow) => {
+    router.push(`/super-admin/labs/${lab.id}`)
+  }
 
-  const handleViewOrganization = (_org: OrganizationRow) => {
-    // TODO(Session 4): Navigate to organization detail page.
+  const handleViewOrganization = (org: OrganizationRow) => {
+    router.push(`/super-admin/orgs/${org.id}`)
   }
 
   const formatDate = (iso: string) => {
@@ -870,6 +893,33 @@ export default function SuperAdminPage() {
               )}
             </>
           )}
+        </section>
+
+        {/* Billing Overview */}
+        <section className="rounded-2xl border border-border bg-card p-8 shadow-sm space-y-6">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-primary/10">
+              <CreditCard className="size-5 text-primary" aria-hidden />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold">Billing Overview</h2>
+              <p className="text-xs text-muted-foreground">Trial and subscription status across all organizations.</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-5 space-y-1">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-amber-800 dark:text-amber-400">Total on Trial</p>
+              <p className="text-3xl font-black text-amber-700 dark:text-amber-400">{trialCount}</p>
+            </div>
+            <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-5 space-y-1">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-red-800 dark:text-red-400">Expiring This Week</p>
+              <p className="text-3xl font-black text-red-700 dark:text-red-400">{expiringThisWeek}</p>
+            </div>
+            <div className="rounded-xl border border-green-500/20 bg-green-500/5 p-5 space-y-1">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-green-800 dark:text-green-400">Total Active</p>
+              <p className="text-3xl font-black text-green-700 dark:text-green-400">{activeCount}</p>
+            </div>
+          </div>
         </section>
 
         {/* Section 2 — All labs */}
