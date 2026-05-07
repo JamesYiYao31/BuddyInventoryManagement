@@ -20,6 +20,8 @@ type LabDetail = {
   archived_at: string | null
   org_id: string | null
   tech_key: string | null
+  trial_starts_at: string | null
+  trial_ends_at: string | null
 }
 
 type LabSettings = {
@@ -97,6 +99,23 @@ function computeTrialInfo(org: OrgDetail) {
   const elapsed = Math.max(0, 90 - daysRemaining)
   const pct = Math.min(100, Math.max(0, (elapsed / 90) * 100))
   return { trialEnd, daysRemaining, pct }
+}
+
+function computeLabTrialInfo(lab: LabDetail) {
+  const now = new Date()
+  const trialEnd = lab.trial_ends_at
+    ? new Date(lab.trial_ends_at)
+    : new Date(new Date(lab.created_at).getTime() + 90 * 86400000)
+  const trialStart = lab.trial_starts_at
+    ? new Date(lab.trial_starts_at)
+    : new Date(lab.created_at)
+  const daysRemaining = Math.max(
+    0,
+    Math.ceil((trialEnd.getTime() - now.getTime()) / 86400000)
+  )
+  const elapsed = Math.max(0, 90 - daysRemaining)
+  const pct = Math.min(100, Math.max(0, (elapsed / 90) * 100))
+  return { trialEnd, trialStart, daysRemaining, pct }
 }
 
 function generateTechKey(): string {
@@ -238,7 +257,7 @@ export default function LabDetailPage() {
   const fetchLab = useCallback(async () => {
     const { data, error } = await supabase
       .from("labs")
-      .select("id, name, created_at, is_archived, archived_at, org_id, tech_key")
+      .select("id, name, created_at, is_archived, archived_at, org_id, tech_key, trial_starts_at, trial_ends_at")
       .eq("id", labId)
       .maybeSingle()
 
@@ -740,30 +759,85 @@ export default function LabDetailPage() {
                     </p>
                   </>
                 ) : (
-                  <>
-                    <p className="text-sm text-muted-foreground">
-                      This is a single-lab customer. Trial data is stored on the labs table but the columns may not exist yet.
-                    </p>
-                    <pre className="rounded-xl border border-border bg-muted/30 px-4 py-3 text-xs font-mono overflow-x-auto whitespace-pre-wrap">
-{`ALTER TABLE labs
-ADD COLUMN IF NOT EXISTS trial_starts_at timestamptz DEFAULT now();
-ALTER TABLE labs
-ADD COLUMN IF NOT EXISTS trial_ends_at timestamptz
-DEFAULT now() + INTERVAL '90 days';`}
-                    </pre>
-                    <div className="flex flex-wrap items-center gap-3">
-                      <button
-                        type="button"
-                        disabled
-                        className="h-9 px-4 rounded-xl border border-border text-xs font-bold opacity-40 inline-flex items-center gap-2 cursor-not-allowed"
-                      >
-                        Manage Billing
-                      </button>
-                      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold bg-zinc-500/10 text-zinc-500">
-                        Stripe Integration Coming Soon
-                      </span>
-                    </div>
-                  </>
+                  (() => {
+                    const labTrial = computeLabTrialInfo(lab!)
+                    const labDaysColor =
+                      labTrial.daysRemaining > 30
+                        ? "text-green-700 dark:text-green-400"
+                        : labTrial.daysRemaining > 10
+                        ? "text-amber-700 dark:text-amber-400"
+                        : "text-red-700 dark:text-red-400"
+                    const labProgressColor =
+                      labTrial.daysRemaining > 30
+                        ? "bg-green-500"
+                        : labTrial.daysRemaining > 10
+                        ? "bg-amber-500"
+                        : "bg-red-500"
+                    return (
+                      <>
+                        <div className="flex items-center gap-3">
+                          <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-bold capitalize bg-amber-500/15 text-amber-800 dark:text-amber-400">
+                            trial
+                          </span>
+                          <span className="text-sm text-muted-foreground">
+                            Single Lab
+                          </span>
+                        </div>
+
+                        <dl className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                          <div>
+                            <dt className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                              Trial Start
+                            </dt>
+                            <dd className="mt-1 text-sm font-medium">
+                              {formatDateOnly(labTrial.trialStart.toISOString())}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                              Trial End
+                            </dt>
+                            <dd className="mt-1 text-sm font-medium">
+                              {formatDateOnly(labTrial.trialEnd.toISOString())}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                              Days Remaining
+                            </dt>
+                            <dd className={`mt-1 text-2xl font-black ${labDaysColor}`}>
+                              {labTrial.daysRemaining}
+                            </dd>
+                          </div>
+                        </dl>
+
+                        <div className="space-y-1.5">
+                          <div className="h-2 rounded-full bg-muted overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${labProgressColor}`}
+                              style={{ width: `${labTrial.pct}%` }}
+                            />
+                          </div>
+                          <p className="text-[10px] text-muted-foreground font-medium">
+                            {Math.round(labTrial.pct)}% of 90-day trial elapsed
+                          </p>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-3">
+                          <button
+                            type="button"
+                            disabled
+                            className="h-9 px-4 rounded-xl border border-border text-xs font-bold opacity-40 inline-flex items-center gap-2 cursor-not-allowed"
+                          >
+                            Manage Billing
+                          </button>
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold bg-zinc-500/10 text-zinc-500">
+                            Stripe Integration Coming Soon
+                          </span>
+                        </div>
+                      </>
+                    )
+                  })()
                 )}
               </div>
             )}

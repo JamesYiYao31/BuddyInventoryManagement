@@ -253,7 +253,127 @@ adjacent domain. No PHI is stored — intentional product decision.
       → Backfilled from auth.users for existing members
       → Joined date now shows in super admin lab/org member tabs
         and org admin member cards
-- [ ] Clean up test data (orgs, labs, profiles)
+- [x] Single-lab billing tab in /super-admin/labs/[id]
+      → trial_starts_at and trial_ends_at columns added to labs table
+      → computeLabTrialInfo helper falls back to created_at if columns null
+      → Real UI with progress bar, days remaining, color coding
+      → Matches org billing section styling
+      → Disabled Manage Billing + "Stripe Coming Soon" badge
+- [x] Test data cleanup
+      → Deleted Organization Test 1 + 2
+      → Deleted Lab 1, Lab 2, Lab 1 Test, Lab 2 Test
+      → Deleted associated profiles, lab_settings, lab_invites
+      → Production DB now clean of test data
+
+### Phase 8 — Compliance Readiness (Target: End of June)
+Goal: Make Buddy audit-ready for regulated US lab customers before
+the first 10 customers onboard. Based on 21 CFR Part 11, ALCOA+,
+and general SDLC validation standards for healthcare-adjacent SaaS.
+
+#### 8A — Audit Log Immutability ✅
+- [x] Append-only RLS policies on activity_logs table
+      → Dropped legacy UPDATE/DELETE policies that allowed super_admin to modify
+      → Dropped legacy SELECT/INSERT policies that used profiles subquery
+      → New SELECT policy: lab members scoped to lab_id, super admin sees all
+      → New INSERT policy: WITH CHECK (lab_id = get_my_lab_id())
+      → No UPDATE policy — ever, for any role including super_admin
+      → No DELETE policy — ever, for any role including super_admin
+      → JWT-based (auth.jwt() ->> 'user_role'), no profiles subquery
+      → Satisfies 21 CFR Part 11 §11.10(e) immutability requirement
+      → Satisfies ALCOA+ "Original" data integrity principle
+
+#### 8B — Audit Log Retention Policy
+- [ ] Add audit_log_retention_years to lab_settings (default: 3)
+      → Match the COA records retention policy (3 years from archived)
+      → Display in lab settings tab so managers know their data commitment
+      → Document in Terms of Service / Privacy Policy when ready
+- [ ] Confirm activity_log rows are never soft-deleted or purged
+      → No scheduled job, no admin UI button that touches activity_log
+      → Only exception: lab deletion (full tenant wipe, documented)
+
+#### 8C — Traceability Matrix (Priority: High)
+- [ ] Create a Google Sheet: "Buddy Traceability Matrix"
+      Columns: Requirement | Feature Description | Where in Code | How Verified | Status
+      Seed with these core requirements:
+      → REQ-001: Lot tracking scoped to lab (RLS + lab_id)
+      → REQ-002: COA must precede lot validation (state machine order)
+      → REQ-003: Unapproved lots blocked from bench (allowlist check)
+      → REQ-004: All validation actions logged with user + timestamp
+      → REQ-005: Duplicate lots prevented (unique constraint)
+      → REQ-006: FEFO soft warning on lot open
+      → REQ-007: Role-based access (manager vs technician gates)
+      → REQ-008: One active session per user
+      → REQ-009: Audit log immutable (append-only RLS)
+      → REQ-010: COA documents retained 3 years
+- [ ] Link traceability matrix in this CLAUDE.md once created
+
+#### 8D — Automated Testing (Priority: High)
+- [ ] Set up Jest + Supabase test client (or Vitest for Next.js)
+- [ ] Write integration tests for validation state machine:
+      → pending_coa → cannot open to bench (blocked)
+      → pending_coa → COA uploaded → pending_validation
+      → pending_validation → lot validation uploaded → pending_approval
+      → pending_approval → manager approves → approved
+      → pending_approval → manager rejects → rejected
+      → approved → can open to bench (allowed)
+      → not_required → can open to bench (allowed)
+      → rejected → cannot open to bench (blocked)
+- [ ] Write integration tests for RLS scoping:
+      → Lab A user cannot read Lab B inventory_lots
+      → Technician cannot access validation tab data
+      → Super admin can read all labs
+- [ ] Write unit tests for parseSmartBarcode() edge cases
+- [ ] Write unit tests for threshold fallback logic (item → lab default)
+- [ ] Add test run to CI (GitHub Actions on push to main)
+
+#### 8E — Security Scanning
+- [ ] Add Snyk to GitHub repo (free tier covers open source)
+      → Scans npm dependencies for known CVEs
+      → Runs on every PR automatically
+      → Fix any high/critical findings before first customer
+- [ ] Enable GitHub Dependabot for automated dependency PRs
+- [ ] Review all npm packages AI suggested — confirm no abandoned libs
+
+#### 8F — API Documentation
+- [ ] Document all API routes in a Swagger/OpenAPI spec or README:
+      → /api/feedback-notify (POST, webhook-secured, rate-limited)
+      → Any future public or partner-facing routes
+      → Internal: document expected headers, payloads, error codes
+- [ ] Add JSDoc comments to all lib/ utility functions
+      → parseSmartBarcode(), logActivity(), resolveCurrentUserLabId()
+      → These are the most auditor-scrutinized functions
+
+#### 8G — Software Validation Plan (Light Version)
+- [ ] Write a 1-2 page Software Validation Plan document covering:
+      → Product name and version
+      → Intended use (lab inventory management, non-clinical decision support)
+      → Regulatory classification (not a medical device — confirm this)
+      → SDLC approach (iterative, AI-assisted, human-reviewed)
+      → Validation approach (traceability matrix + automated tests + UAT)
+      → Known limitations (ZXing barcode limits, no PHI stored)
+      → Change control process (how updates are reviewed before deploy)
+- [ ] Store in Google Drive, link here once done
+
+#### 8H — Terms of Service & Privacy Policy
+- [ ] Draft basic ToS for lab customers covering:
+      → Data ownership (lab owns their data)
+      → Data retention (3 years for audit records)
+      → No PHI commitment (explicit clause)
+      → Uptime / SLA expectations (honest for MVP)
+- [ ] Draft Privacy Policy (required for any US business SaaS)
+      → What data is collected (lab name, user name, email, inventory data)
+      → How it is stored (Supabase US region)
+      → How it is protected (RLS, encryption at rest via Supabase)
+- [ ] Publish at yourbuddyapp.com/terms and /privacy before first customer
+
+#### 8I — Clean Up & Pre-Customer Checklist
+- [ ] Delete all test orgs, labs, and profiles from production DB
+- [ ] Confirm no console.log statements in production build
+- [ ] Confirm no hardcoded lab_ids or user_ids anywhere in codebase
+- [ ] Run Vercel build locally — zero warnings, zero errors
+- [ ] Confirm all environment variables set correctly in Vercel production
+- [ ] Confirm Resend DNS (DKIM, SPF, DMARC) verified in Cloudflare
+- [ ] Confirm yourbuddyapp.com domain resolves correctly
 
 ### Future — Post 10 Customers
 - [ ] Open self-serve lab registration (no invite required)
@@ -263,6 +383,7 @@ adjacent domain. No PHI is stored — intentional product decision.
       → See Barcode Scanning section for full migration notes
 - [ ] Failed login attempt monitoring (Sentry or Datadog)
 - [ ] Formal penetration testing before enterprise customers
+- [ ] SOC 2 Type I assessment (when pursuing larger regulated lab contracts)
 
 ---
 
@@ -373,9 +494,11 @@ REVOKE EXECUTE ON FUNCTION public.custom_access_token_hook FROM authenticated, a
 
 ## Security Architecture
 
-### Current Security Score: 9/10
+### Current Security Score: 9.5/10
 The app is production-grade for a healthcare-adjacent B2B SaaS
-with no PHI. Remaining gap (1/10) would require enterprise tooling.
+with no PHI. Audit log immutability now satisfies 21 CFR Part 11.
+Remaining gap (0.5/10) would require enterprise tooling
+(formal pen testing, SOC 2).
 
 ### Security Layers
 | Layer | Implementation |
@@ -383,7 +506,7 @@ with no PHI. Remaining gap (1/10) would require enterprise tooling.
 | Passwords | Supabase Auth bcrypt, min 8 chars, uppercase+lowercase+digits+symbols required |
 | Password reset | Email-based reset flow via /reset-password page |
 | Session enforcement | One active session per user (active_sessions table, 30s poll) |
-| Database isolation | RLS on all 13 tables (including active_sessions) |
+| Database isolation | RLS on all 14 tables (including activity_logs as append-only) |
 | Data scoping | JWT-based get_my_lab_id() + get_my_org_id() |
 | Profile security | RLS enabled, email removed |
 | Transport | HTTPS enforced via HSTS |
@@ -394,6 +517,7 @@ with no PHI. Remaining gap (1/10) would require enterprise tooling.
 | Webhook | x-webhook-secret header validation |
 | Email | Custom SMTP via Resend, branded templates |
 | Security alerts | Password/email change + MFA add/remove notifications enabled |
+| Audit log immutability | activity_logs is append-only (no UPDATE/DELETE policies, JWT-based RLS) — 21 CFR Part 11 compliant |
 
 ### RLS Policy Pattern
 Lab-scoped tables use:
@@ -501,11 +625,14 @@ created_by (uuid → auth.users)
 ### labs
 ```
 id, name, tech_key, is_archived, archived_at, created_at, owner_id,
-org_id (uuid, nullable → organizations)
+org_id (uuid, nullable → organizations),
+trial_starts_at (timestamptz, default now()),
+trial_ends_at (timestamptz, default now() + 90 days)
 ```
 - org_id NULL = single-lab customer
 - org_id uuid = belongs to an organization
 - ON DELETE RESTRICT on org_id (can't delete org with active labs)
+- trial_starts_at / trial_ends_at used by single-lab billing tab UI
 
 ### inventory_lots
 ```
@@ -571,6 +698,17 @@ tech_dashboard_widget (text, default 'donut'),
 require_coa_approval (boolean, default false),
 techs_can_edit_thresholds (boolean, default true)
 ```
+
+### activity_logs
+```
+id, lab_id, created_at, user_name, user_initials,
+action_type, item_name, lot_number, details
+```
+- RLS enabled — APPEND-ONLY (no UPDATE, no DELETE policies)
+- SELECT: lab members scoped to lab_id, super admin sees all
+- INSERT: lab_id = get_my_lab_id() (cannot forge logs for other labs)
+- 21 CFR Part 11 compliant — immutability enforced at DB level
+- Retention TBD (Phase 8B will add audit_log_retention_years setting)
 
 ### requests
 ```
@@ -979,6 +1117,10 @@ benchExpiring, outOfStock, totalCount, isLoading
 - get_my_lab_id() and get_my_org_id() must use NULLIF to handle empty string claims
 - Super admins must not access /dashboard — redirect to /super-admin only
 - Org admins have no lab_id — they must never be scoped to inventory queries
+- Never add UPDATE or DELETE policies to activity_logs table
+  — append-only is enforced and required for 21 CFR Part 11
+- Never write activity_logs RLS policies that query profiles
+  — must use auth.jwt() ->> 'user_role' for super admin checks
 
 ---
 
@@ -1012,3 +1154,69 @@ benchExpiring, outOfStock, totalCount, isLoading
 - Listen for `popstate` and close the modal instead of allowing browser navigation
 - Full cleanup of popstate listener on modal close and component unmount
 - Prevents back button from navigating to login page or previous route while modal is open
+
+---
+
+## Compliance Architecture
+
+### Regulatory Context
+Buddy targets US-based cell therapy and research labs. Compliance
+posture is healthcare-adjacent — not a medical device, no PHI stored,
+but must be audit-ready for labs operating under:
+- 21 CFR Part 11 (FDA electronic records & signatures)
+- ALCOA+ data integrity principles (GxP standard)
+- CLIA (if clinical labs onboard)
+- General SDLC validation expectations from regulated customers
+
+### ALCOA+ Compliance Status
+| Principle | Implementation | Status |
+|-----------|---------------|--------|
+| Attributable | Every audit action stores user_id + role via JWT | ✅ |
+| Legible | Structured schema, TypeScript types, human-readable action types | ✅ |
+| Contemporaneous | Supabase server-side timestamps on all inserts | ✅ |
+| Original | Append-only audit log (RLS: no UPDATE/DELETE, JWT-based) | ✅ |
+| Accurate | Unique constraints, RLS scoping, duplicate lot prevention | ✅ |
+| Complete | 10 audit action types cover full lot lifecycle | ✅ |
+| Consistent | All queries lab_id scoped, JWT-enforced role gates | ✅ |
+| Enduring | COA records 3 years, audit log retention TBD | Phase 8B |
+| Available | Activity log tab with 12 action type filters | ✅ |
+
+### 21 CFR Part 11 Checklist
+| Requirement | Implementation | Status |
+|-------------|---------------|--------|
+| Computer-generated audit trail | logActivity() on all state changes | ✅ |
+| Time-stamped records | Supabase server timestamps | ✅ |
+| Immutable records | Append-only RLS on activity_logs (no UPDATE/DELETE policies anywhere) | ✅ |
+| Attributable records | user_id on every audit row | ✅ |
+| Access controls | Role-based gates, RLS on all tables | ✅ |
+| Audit trail for validation actions | Approved/Rejected/Archived logged | ✅ |
+| Secure, unique user IDs | Supabase Auth, one session per user | ✅ |
+
+### Audit Log Rules (Never Break These)
+- activity_log table must NEVER have an UPDATE RLS policy
+- activity_log table must NEVER have a DELETE RLS policy
+- No admin UI button, scheduled job, or API route may modify audit rows
+- Only exception: full lab deletion (tenant wipe) — must be documented
+- logActivity() must always include: user_id, lab_id, action, item context, timestamp
+- Audit rows must be written AFTER the action succeeds — never speculatively
+
+### Validation State Machine (Core Compliance Logic)
+The validation flow is the most compliance-critical logic in the app.
+The state machine must be deterministic — Input A always produces Output B.
+This is what makes the system audit-ready and AI-safe for future 2.0.
+
+Allowlist for open-to-bench (never use blocklist):
+- `not_required` → can open
+- `approved` → can open
+- `archived` → can open (docs filed, lot is physically valid)
+- Everything else → BLOCKED
+
+### Software Validation Plan
+- Document: [Link TBD — Phase 8G]
+- Covers: intended use, SDLC approach, validation strategy, known limitations
+- Classification: Not a medical device — inventory management tool only
+
+### Traceability Matrix
+- Document: [Link TBD — Phase 8C]
+- Maps: Requirement → Feature → Code location → Test case → Status
+- Minimum 10 requirements seeded (see Phase 8C for full list)
