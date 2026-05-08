@@ -138,7 +138,7 @@ const sendFeedbackEmail = async (record: FeedbackRecord, submitter: SubmitterInf
   `
 
   await resend.emails.send({
-    from: 'onboarding@resend.dev',
+    from: 'Buddy Inventory Management <noreply@yourbuddyapp.com>',
     to: 'yiyao3112@gmail.com',
     subject,
     html,
