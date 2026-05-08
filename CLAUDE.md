@@ -36,8 +36,8 @@ adjacent domain. No PHI is stored — intentional product decision.
 - **UI Generation:** v0
 - **Editor:** Cursor with Claude Code
 - **Deployment:** Vercel (buddy-lab-tracker.vercel.app)
-- **Email:** Resend (noreply@yourbuddyapp.com pending DNS, onboarding@resend.dev interim)
-- **Domain:** yourbuddyapp.com (Cloudflare DNS, pending Resend verification)
+- **Email:** Resend (noreply@yourbuddyapp.com — verified ✅)
+- **Domain:** yourbuddyapp.com (Cloudflare DNS, Resend verified)
 - **Rate Limiting:** Upstash Redis (@upstash/ratelimit, US-East-1)
 - **Feedback Logging:** Google Sheets via service account
 
@@ -216,9 +216,12 @@ adjacent domain. No PHI is stored — intentional product decision.
       → Dedicated API key for Supabase SMTP (separate from app key)
       → Using Supabase built-in email temporarily until domain DNS verifies
 - [x] Domain setup — yourbuddyapp.com
-      → Purchased via Cloudflare
-      → Resend domain added, DNS records pending verification
-      → DKIM, SPF, DMARC records to add in Cloudflare
+      → Purchased via Cloudflare Registrar
+      → Cloudflare zone activated (resolved nameserver mismatch issue)
+      → Resend domain verified — MX, SPF, DKIM, DMARC all green
+      → Sender switched from onboarding@resend.dev → noreply@yourbuddyapp.com
+      → /api/feedback-notify uses branded sender
+      → Supabase SMTP sender updated to noreply@yourbuddyapp.com
 - [x] Supabase security notifications enabled
       → Password changed, email changed, MFA added/removed
 - [x] Feedback icon updated (bug emoji → MessageSquareDiff from lucide-react)
@@ -259,6 +262,16 @@ adjacent domain. No PHI is stored — intentional product decision.
       → Real UI with progress bar, days remaining, color coding
       → Matches org billing section styling
       → Disabled Manage Billing + "Stripe Coming Soon" badge
+- [x] Forgot password on login page
+      → "Forgot password?" link added below password field on Sign In view only
+      → Modal opens with email field (pre-filled from login form)
+      → Calls supabase.auth.resetPasswordForEmail with redirectTo /reset-password
+      → Success message intentionally vague to prevent email enumeration
+      → ESC key closes modal, Enter key submits
+      → Branded reset email arrives from noreply@yourbuddyapp.com
+- [x] /reset-password flow tested end-to-end
+      → Email link → reset page → new password → redirect to login → sign in works
+      → Password strength checklist enforces all rules before submit enabled
 - [x] Test data cleanup
       → Deleted Organization Test 1 + 2
       → Deleted Lab 1, Lab 2, Lab 1 Test, Lab 2 Test
@@ -515,7 +528,7 @@ Remaining gap (0.5/10) would require enterprise tooling
 | Preview URLs | Vercel Authentication enabled |
 | Account security | 2FA on Supabase + Vercel |
 | Webhook | x-webhook-secret header validation |
-| Email | Custom SMTP via Resend, branded templates |
+| Email | Custom SMTP via Resend, branded templates, verified sender (noreply@yourbuddyapp.com) |
 | Security alerts | Password/email change + MFA add/remove notifications enabled |
 | Audit log immutability | activity_logs is append-only (no UPDATE/DELETE policies, JWT-based RLS) — 21 CFR Part 11 compliant |
 
@@ -1112,6 +1125,8 @@ benchExpiring, outOfStock, totalCount, isLoading
 - Never rewrite get_my_lab_id() to query profiles — must use auth.jwt()
 - Never rewrite get_my_org_id() to query profiles — must use auth.jwt()
 - Never expose service role key or other secrets with NEXT_PUBLIC_ prefix
+- Email change is blocked for technicians by design — must be done by manager
+  (security anchor — prevents account hijacking via compromised email access)
 - Rate limiting must stay on all API routes — use Upstash pattern
 - Never write labs RLS policies that query profiles table — use JWT claims only
 - get_my_lab_id() and get_my_org_id() must use NULLIF to handle empty string claims

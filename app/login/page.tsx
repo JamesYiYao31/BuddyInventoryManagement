@@ -27,6 +27,12 @@ function LoginContent() {
   const [error, setError] = useState<string | null>(null)
   const [registerSuccessBanner, setRegisterSuccessBanner] = useState<string | null>(null)
 
+  const [forgotPasswordOpen, setForgotPasswordOpen] = useState(false)
+  const [forgotPasswordEmail, setForgotPasswordEmail] = useState("")
+  const [forgotPasswordSubmitting, setForgotPasswordSubmitting] = useState(false)
+  const [forgotPasswordSent, setForgotPasswordSent] = useState(false)
+  const [forgotPasswordError, setForgotPasswordError] = useState<string | null>(null)
+
   const router = useRouter()
 
   const handleSignIn = useCallback(async () => {
@@ -152,6 +158,32 @@ function LoginContent() {
     setIsLoading(false)
   }
 
+  const closeForgotPassword = useCallback(() => {
+    setForgotPasswordOpen(false)
+    setForgotPasswordEmail("")
+    setForgotPasswordError(null)
+    setForgotPasswordSent(false)
+  }, [])
+
+  const handleForgotPassword = async () => {
+    setForgotPasswordError(null)
+    const trimmedEmail = forgotPasswordEmail.trim()
+    if (!trimmedEmail) {
+      setForgotPasswordError("Please enter your email address.")
+      return
+    }
+    setForgotPasswordSubmitting(true)
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(trimmedEmail, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    })
+    setForgotPasswordSubmitting(false)
+    if (resetError) {
+      setForgotPasswordError(resetError.message)
+      return
+    }
+    setForgotPasswordSent(true)
+  }
+
   const handleSignInEnterKeyDown = useCallback(
     (e: ReactKeyboardEvent<HTMLInputElement>) => {
       if (e.key !== "Enter") return
@@ -175,6 +207,15 @@ function LoginContent() {
       document.removeEventListener("keydown", handleEnter)
     }
   }, [isRegistering, isLoading, handleSignIn])
+
+  useEffect(() => {
+    if (!forgotPasswordOpen) return
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeForgotPassword()
+    }
+    document.addEventListener("keydown", handleEsc)
+    return () => document.removeEventListener("keydown", handleEsc)
+  }, [forgotPasswordOpen, closeForgotPassword])
 
   return (
     <div className="relative flex min-h-screen flex-col bg-background font-sans antialiased overflow-hidden">
@@ -307,6 +348,23 @@ function LoginContent() {
                   />
                 </div>
 
+                {!isRegistering && (
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setForgotPasswordOpen(true)
+                        setForgotPasswordEmail(email)
+                        setForgotPasswordSent(false)
+                        setForgotPasswordError(null)
+                      }}
+                      className="text-xs font-bold uppercase tracking-widest text-primary hover:underline"
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
+                )}
+
                 {isRegistering ? (
                   <div className="space-y-2">
                     <label className="text-[10px] font-black uppercase text-muted-foreground tracking-widest ml-2">Confirm Password</label>
@@ -346,6 +404,71 @@ function LoginContent() {
           <p className="mt-8 text-center text-sm font-black uppercase tracking-[0.3em] text-muted-foreground">Authorized personnel only</p>
         </div>
       </main>
+
+      {forgotPasswordOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-card shadow-2xl p-10 space-y-6">
+            <div className="flex flex-col items-center text-center space-y-3">
+              <Image src="/buddy-logo.png" alt="Logo" width={48} height={48} className="h-12 w-auto drop-shadow-md" />
+              <h2 className="text-2xl font-black tracking-tight text-foreground">Reset your password</h2>
+              <p className="text-sm text-muted-foreground font-medium">
+                Enter your email and we'll send you a reset link.
+              </p>
+            </div>
+
+            {forgotPasswordError && (
+              <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-500 font-bold rounded-2xl text-center text-sm">
+                {forgotPasswordError}
+              </div>
+            )}
+
+            {forgotPasswordSent ? (
+              <div className="p-4 bg-green-500/10 border border-green-500/20 text-green-700 dark:text-green-400 font-bold rounded-2xl text-center text-sm">
+                If an account exists for that email, we've sent a password reset link. Check your inbox.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase text-muted-foreground tracking-widest ml-2">Email Address</label>
+                <input
+                  type="email"
+                  value={forgotPasswordEmail}
+                  onChange={(e) => setForgotPasswordEmail(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.nativeEvent.stopImmediatePropagation()
+                      void handleForgotPassword()
+                    }
+                  }}
+                  className="h-14 w-full rounded-2xl border border-input bg-background px-6 text-lg focus:ring-4 focus:ring-primary/10 outline-none transition-all"
+                  placeholder="name@facility.org"
+                  autoComplete="email"
+                  autoFocus
+                />
+              </div>
+            )}
+
+            <div className="flex flex-col gap-3">
+              {!forgotPasswordSent && (
+                <button
+                  type="button"
+                  disabled={forgotPasswordSubmitting}
+                  onClick={() => void handleForgotPassword()}
+                  className="h-14 w-full rounded-2xl bg-primary text-base font-black text-primary-foreground shadow-2xl shadow-primary/20 hover:scale-[1.01] active:scale-95 transition-all disabled:opacity-60 disabled:pointer-events-none uppercase tracking-widest"
+                >
+                  {forgotPasswordSubmitting ? <Loader2 className="size-6 animate-spin mx-auto" /> : "Send reset link"}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={closeForgotPassword}
+                className="h-14 w-full rounded-2xl border border-border bg-background text-sm font-black uppercase tracking-widest text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-all"
+              >
+                {forgotPasswordSent ? "Close" : "Cancel"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
