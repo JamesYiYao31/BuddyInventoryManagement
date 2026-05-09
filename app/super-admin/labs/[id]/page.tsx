@@ -33,6 +33,7 @@ type LabSettings = {
   require_coa_approval: boolean | null
   techs_can_edit_thresholds: boolean | null
   onboarding_complete: boolean | null
+  audit_log_retention_years: number | null
 }
 
 type MemberRow = {
@@ -207,6 +208,11 @@ export default function LabDetailPage() {
   // Billing extend busy
   const [extendBusy, setExtendBusy] = useState(false)
 
+  // Audit log retention
+  const [retentionInput, setRetentionInput] = useState<string>("3")
+  const [retentionBusy, setRetentionBusy] = useState(false)
+  const [retentionError, setRetentionError] = useState<string | null>(null)
+
   // ── Toast helpers ──────────────────────────────────────────────────────────
 
   function showToast(kind: "success" | "error", text: string) {
@@ -284,7 +290,11 @@ export default function LabDetailPage() {
       .select("*")
       .eq("lab_id", labId)
       .maybeSingle()
-    setSettings(data as LabSettings | null)
+    const settingsData = data as LabSettings | null
+    setSettings(settingsData)
+    if (settingsData?.audit_log_retention_years != null) {
+      setRetentionInput(String(settingsData.audit_log_retention_years))
+    }
   }, [labId])
 
   const fetchMembers = useCallback(async () => {
@@ -358,6 +368,27 @@ export default function LabDetailPage() {
     }
     setLab((prev) => (prev ? { ...prev, tech_key: newKey } : prev))
     showToast("success", "Tech key reset successfully.")
+  }
+
+  const handleSaveRetention = async () => {
+    setRetentionError(null)
+    const parsed = parseInt(retentionInput, 10)
+    if (isNaN(parsed) || parsed < 1 || parsed > 10) {
+      setRetentionError("Must be a whole number between 1 and 10.")
+      return
+    }
+    setRetentionBusy(true)
+    const { error } = await supabase
+      .from("lab_settings")
+      .update({ audit_log_retention_years: parsed })
+      .eq("lab_id", labId)
+    setRetentionBusy(false)
+    if (error) {
+      setRetentionError(error.message)
+      return
+    }
+    setSettings((prev) => (prev ? { ...prev, audit_log_retention_years: parsed } : prev))
+    showToast("success", `Audit log retention updated to ${parsed} ${parsed === 1 ? "year" : "years"}.`)
   }
 
   const handleEditRoleConfirm = async () => {
@@ -590,6 +621,49 @@ export default function LabDetailPage() {
                       Reset Tech Key
                     </button>
                   </div>
+                </div>
+
+                {/* Audit Log Retention card */}
+                <div className="rounded-2xl border border-border bg-card p-6 shadow-sm space-y-4">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                    Audit Log Retention
+                  </p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    How long activity logs, COA records, and lot validation documents are retained for this lab. Default is 3 years (matches COA records policy and 21 CFR Part 11 requirements). Range: 1-10 years.
+                  </p>
+                  <div className="flex flex-col sm:flex-row sm:items-end gap-4">
+                    <div className="flex-1 space-y-2">
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                        Years
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={10}
+                        value={retentionInput}
+                        onChange={(e) => {
+                          setRetentionInput(e.target.value)
+                          setRetentionError(null)
+                        }}
+                        className="w-full h-11 border border-input bg-background rounded-xl px-4 text-base font-bold outline-none focus:ring-2 focus:ring-primary/20"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      disabled={retentionBusy || retentionInput === String(settings?.audit_log_retention_years ?? 3)}
+                      onClick={() => void handleSaveRetention()}
+                      className="h-11 px-5 rounded-xl bg-primary text-primary-foreground text-xs font-bold hover:opacity-90 disabled:opacity-50 disabled:pointer-events-none inline-flex items-center justify-center gap-2"
+                    >
+                      {retentionBusy && <Loader2 className="size-3.5 animate-spin" />}
+                      Save Retention
+                    </button>
+                  </div>
+                  {retentionError && (
+                    <p className="text-xs text-destructive">{retentionError}</p>
+                  )}
+                  <p className="text-[10px] text-muted-foreground italic">
+                    Changes take effect immediately on the customer's Lab Settings page. Decreasing retention does not delete existing records — only future cleanup behavior is affected.
+                  </p>
                 </div>
               </div>
             )}

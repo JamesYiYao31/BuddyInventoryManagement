@@ -75,7 +75,7 @@ adjacent domain. No PHI is stored — intentional product decision.
 - Vercel deployment live ✅
 - Mobile responsiveness complete (phone + tablet) ✅
 - Tab URL persistence (?tab=inventory survives refresh) ✅
-- Idle auto-logout (45min timeout, 2min warning dialog) ✅
+- Idle auto-logout (10min timeout, 8min idle + 2min warning dialog) ✅
 - Buddy logo only in sidebar (text removed) ✅
 
 ### Phase 3 — Onboarding & Support ✅
@@ -295,14 +295,44 @@ and general SDLC validation standards for healthcare-adjacent SaaS.
       → Satisfies 21 CFR Part 11 §11.10(e) immutability requirement
       → Satisfies ALCOA+ "Original" data integrity principle
 
-#### 8B — Audit Log Retention Policy
-- [ ] Add audit_log_retention_years to lab_settings (default: 3)
-      → Match the COA records retention policy (3 years from archived)
-      → Display in lab settings tab so managers know their data commitment
-      → Document in Terms of Service / Privacy Policy when ready
-- [ ] Confirm activity_log rows are never soft-deleted or purged
-      → No scheduled job, no admin UI button that touches activity_log
+#### 8B — Audit Log Retention Policy ✅
+- [x] Add audit_log_retention_years to lab_settings (default: 3, range 1-10)
+      → Column added with CHECK constraint (audit_log_retention_years_range)
+      → Backfilled all existing labs to 3-year default
+      → Read-only Data Retention card displayed in customer Lab Settings tab
+      → 21 CFR Part 11 compliance note + "contact support" change request
+      → Editable by super admin in /super-admin/labs/[id] Overview tab
+      → Range validated 1-10 years on both client and database
+      → Success toast confirms changes; takes effect immediately customer-side
+
+IMPORTANT — Retention Behavior Today:
+- The audit_log_retention_years value is a stored COMMITMENT, not an
+  automated deletion schedule.
+- No cron job, scheduled function, or cleanup process currently deletes
+  any audit_logs rows.
+- Records are kept INDEFINITELY in the database; the retention value
+  represents the minimum guaranteed retention period.
+- This is compliance-safe: keeping records LONGER than promised is
+  always acceptable; under-retaining would not be.
+- Customer-facing answer: "We commit to retaining your audit logs for
+  at least X years (your configured value). Currently we don't delete
+  any audit records — they are preserved indefinitely."
+
+- [x] Confirm activity_logs rows are never soft-deleted or purged
+      → No scheduled job, no admin UI button that touches activity_logs
+      → Append-only RLS prevents UPDATE/DELETE at database level (Phase 8A)
       → Only exception: lab deletion (full tenant wipe, documented)
+- [ ] Document retention commitment in Terms of Service / Privacy Policy
+      → Pending Phase 8H
+- [ ] Future: Automated retention cleanup job (NOT URGENT — storage is cheap)
+      → Reads each lab's audit_log_retention_years setting
+      → Calculates cutoff: now - retention_years
+      → Deletes activity_logs rows older than cutoff
+      → Writes cleanup summary to a separate retention_cleanup_log table
+      → Runs nightly via Supabase scheduled function or external cron
+      → Must be additive: labs with longer settings keep records longer
+      → Test extensively before enabling — deletion is the one operation
+        that cannot be undone (audit log is append-only via RLS)
 
 #### 8C — Traceability Matrix (Priority: High)
 - [ ] Create a Google Sheet: "Buddy Traceability Matrix"
@@ -709,8 +739,11 @@ low_stock_threshold (integer, default 5),
 lab_timezone (text, default 'America/Chicago'),
 tech_dashboard_widget (text, default 'donut'),
 require_coa_approval (boolean, default false),
-techs_can_edit_thresholds (boolean, default true)
+techs_can_edit_thresholds (boolean, default true),
+audit_log_retention_years (integer, default 3, CHECK 1-10)
 ```
+- audit_log_retention_years is read-only in UI; changes via support
+  to preserve compliance integrity (21 CFR Part 11)
 
 ### activity_logs
 ```
@@ -955,11 +988,12 @@ Idle detection tracks: `mousemove, mousedown, keydown,
 touchstart, scroll, click`
 
 Timer flow:
-- 43 minutes of inactivity → show warning dialog
+- 8 minutes of inactivity → show warning dialog
 - Warning dialog shows 2-minute countdown in m:ss format
 - "Stay Logged In" → resets all timers, closes dialog
 - "Log Out Now" → immediate signOut + redirect to /login
 - Timer expires → auto signOut + redirect to /login
+- Total time from last activity to auto-logout: 10 minutes
 
 Warning dialog styling:
 - Amber warning header with icon (urgency signal)
@@ -1136,6 +1170,9 @@ benchExpiring, outOfStock, totalCount, isLoading
   — append-only is enforced and required for 21 CFR Part 11
 - Never write activity_logs RLS policies that query profiles
   — must use auth.jwt() ->> 'user_role' for super admin checks
+- audit_log_retention_years must remain read-only on the customer Lab Settings UI
+  — only super admin may edit it (in /super-admin/labs/[id] Overview tab)
+  — preserves compliance integrity by requiring provider involvement
 
 ---
 
@@ -1193,7 +1230,7 @@ but must be audit-ready for labs operating under:
 | Accurate | Unique constraints, RLS scoping, duplicate lot prevention | ✅ |
 | Complete | 10 audit action types cover full lot lifecycle | ✅ |
 | Consistent | All queries lab_id scoped, JWT-enforced role gates | ✅ |
-| Enduring | COA records 3 years, audit log retention TBD | Phase 8B |
+| Enduring | COA records 3 years, audit log retention configurable per lab (default 3, range 1-10), records currently preserved indefinitely | ✅ |
 | Available | Activity log tab with 12 action type filters | ✅ |
 
 ### 21 CFR Part 11 Checklist

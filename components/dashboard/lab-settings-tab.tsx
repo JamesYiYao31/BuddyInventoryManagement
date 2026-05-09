@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { Settings, Save, Loader2, ShieldAlert, Package, Clock, AlertTriangle, LayoutDashboard, Users, ShieldCheck, User as UserIcon, Shield, KeyRound, Pencil } from "lucide-react"
+import { Settings, Save, Loader2, ShieldAlert, Package, Clock, AlertTriangle, LayoutDashboard, Users, ShieldCheck, User as UserIcon, Shield, KeyRound, Pencil, FileClock } from "lucide-react"
 import {
   LabSettings, TechDashboardWidget, fetchLabSettings, updateLabSettings,
   LabProfile, fetchLabProfiles, updateUserRole, resolveCurrentUserLabId,
@@ -31,6 +31,7 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
   const [techKeySaving, setTechKeySaving] = useState(false)
   const [techKeyError, setTechKeyError] = useState<string | null>(null)
   const [techKeySaved, setTechKeySaved] = useState(false)
+  const [retentionYears, setRetentionYears] = useState<number>(3)
 
   // ── TEAM MANAGEMENT STATE ──
   const [profiles, setProfiles] = useState<LabProfile[]>([])
@@ -56,6 +57,16 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
         const nextTechKey = lab?.tech_key || ""
         setCurrentTechKey(nextTechKey)
         setTechKeyInput(nextTechKey)
+      }
+      if (scopedLabId) {
+        const { data: settingsRow } = await supabase
+          .from("lab_settings")
+          .select("audit_log_retention_years")
+          .eq("lab_id", scopedLabId)
+          .maybeSingle()
+        if (settingsRow?.audit_log_retention_years) {
+          setRetentionYears(settingsRow.audit_log_retention_years)
+        }
       }
       setLoading(false)
     }
@@ -245,6 +256,26 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 xl:grid-cols-4">
+          {/* ── Data Retention (read-only compliance info) ── */}
+          <div className="rounded-2xl border border-border bg-card p-8 space-y-6 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-primary/10"><FileClock className="size-5 text-primary" /></div>
+              <div>
+                <p className="text-sm font-bold text-foreground">Data Retention</p>
+                <p className="text-xs text-muted-foreground">How long audit logs and validation records are kept.</p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest ml-1">Audit Log Retention</label>
+              <div className="w-full h-14 border border-input bg-muted rounded-2xl px-6 text-2xl font-bold text-foreground inline-flex items-center">
+                {retentionYears} {retentionYears === 1 ? "year" : "years"}
+              </div>
+              <p className="text-xs text-muted-foreground ml-1 leading-relaxed">
+                Activity logs, COA records, and lot validation documents are retained for <span className="font-bold">{retentionYears} {retentionYears === 1 ? "year" : "years"}</span> from creation. This supports <span className="font-bold">21 CFR Part 11</span> audit requirements. To request a change, contact support.
+              </p>
+            </div>
+          </div>
+
           {/* ── Tech Key ── */}
           <div className="rounded-2xl border border-border bg-card p-8 space-y-6 shadow-sm">
             <div className="flex items-center gap-3">
