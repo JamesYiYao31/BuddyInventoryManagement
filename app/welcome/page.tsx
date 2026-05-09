@@ -464,6 +464,18 @@ function WelcomeContent() {
               </p>
             </div>
 
+            <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-primary">Audit Log Retention: 3 Years</span>
+              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Activity logs, COA records, and lot validation documents are retained for <span className="font-bold text-foreground">3 years</span> by default to support 21 CFR Part 11 audit requirements. Records are append-only — once written, they cannot be modified or deleted, even by your lab manager or our team.
+              </p>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Need extended retention (e.g., <span className="font-bold text-foreground">7 years</span> for GMP-regulated cell therapy)? Contact support after onboarding and we&apos;ll update your retention period.
+              </p>
+            </div>
+
             <button
               type="button"
               disabled={saving}
