@@ -10,6 +10,7 @@ import {
   verifyActiveSessionForUser,
   voluntarySignOut,
 } from "@/lib/active-session"
+import { getMfaEnrollmentStatus, getAssuranceLevel } from "@/lib/mfa"
 
 // Utilities & Types
 import { 
@@ -469,7 +470,7 @@ function DashboardPageContent() {
         setUserRole(uiRole)
         setIsSuperAdmin(sa)
 
-        // Onboarding check — managers only
+        // a) Onboarding FIRST — /welcome handles 2FA internally as Step 4
         if (profile?.role === "manager" && profile?.lab_id) {
           const { data: settings } = await supabase
             .from("lab_settings")
@@ -478,6 +479,21 @@ function DashboardPageContent() {
             .maybeSingle()
           if (!settings?.onboarding_complete) {
             router.replace("/welcome")
+            return
+          }
+        }
+
+        // b) 2FA enrollment gate — only after onboarding is confirmed complete
+        // c) 2FA challenge gate — enrolled but not yet at aal2
+        if (profile?.role === "manager" || profile?.role === "org_admin") {
+          const { enrolled } = await getMfaEnrollmentStatus()
+          if (!enrolled) {
+            router.replace("/mfa-setup")
+            return
+          }
+          const level = await getAssuranceLevel()
+          if (level === "aal1") {
+            router.replace("/mfa-challenge")
             return
           }
         }

@@ -2,9 +2,11 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
-import { FlaskConical, Loader2, Copy, Check } from "lucide-react"
+import { FlaskConical, Loader2, Copy, Check, CheckCircle2, Shield } from "lucide-react"
+import Image from "next/image"
 import { supabase } from "@/lib/supabase"
 import { TIMEZONES } from "@/lib/timezones"
+import { getMfaEnrollmentStatus, enrollTotp, verifyTotpEnrollment } from "@/lib/mfa"
 
 type WelcomeSettings = {
   lab_timezone: string
@@ -18,12 +20,20 @@ function WelcomeContent() {
   const router = useRouter()
 
   const [bootLoading, setBootLoading] = useState(true)
-  const [step, setStep] = useState<1 | 2 | 3>(1)
+  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1)
   const [saving, setSaving] = useState(false)
   const [copied, setCopied] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [techKeyError, setTechKeyError] = useState<string | null>(null)
   const [techKeySaving, setTechKeySaving] = useState(false)
+
+  const [mfaLoading, setMfaLoading] = useState(false)
+  const [mfaEnrollData, setMfaEnrollData] = useState<{ qrCodeUrl: string; secret: string; factorId: string } | null>(null)
+  const [mfaLoadFailed, setMfaLoadFailed] = useState(false)
+  const [mfaCode, setMfaCode] = useState("")
+  const [mfaVerifying, setMfaVerifying] = useState(false)
+  const [mfaError, setMfaError] = useState<string | null>(null)
+  const [mfaRetry, setMfaRetry] = useState(0)
 
   const [labId, setLabId] = useState("")
   const [fullName, setFullName] = useState("")
@@ -179,6 +189,51 @@ function WelcomeContent() {
     setStep(3)
   }
 
+  useEffect(() => {
+    if (step !== 4) return
+    let cancelled = false
+    const loadMfa = async () => {
+      setMfaLoading(true)
+      setMfaLoadFailed(false)
+      setMfaEnrollData(null)
+      setMfaError(null)
+
+      const { enrolled } = await getMfaEnrollmentStatus()
+      if (cancelled) return
+      if (enrolled) {
+        setStep(5)
+        return
+      }
+
+      const data = await enrollTotp()
+      if (cancelled) return
+      if (!data) {
+        setMfaLoadFailed(true)
+        setMfaLoading(false)
+        return
+      }
+      setMfaEnrollData(data)
+      setMfaLoading(false)
+    }
+    void loadMfa()
+    return () => {
+      cancelled = true
+    }
+  }, [step, mfaRetry])
+
+  const handleMfaVerify = async () => {
+    if (!mfaEnrollData || mfaCode.length !== 6 || mfaVerifying) return
+    setMfaVerifying(true)
+    setMfaError(null)
+    const result = await verifyTotpEnrollment(mfaEnrollData.factorId, mfaCode)
+    if (!result.success) {
+      setMfaError(result.error ?? "Invalid code. Please try again.")
+      setMfaVerifying(false)
+      return
+    }
+    setStep(5)
+  }
+
   const handleFinishSetup = async () => {
     setSaving(true)
     setErrorMessage(null)
@@ -244,7 +299,7 @@ function WelcomeContent() {
     }
 
     setSaving(false)
-    router.replace("/dashboard")
+    setStep(4)
   }
 
   if (bootLoading) {
@@ -271,18 +326,20 @@ function WelcomeContent() {
       </header>
 
       <main className="mx-auto max-w-lg px-6 py-10 space-y-6">
-        <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-3">
-          <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Step {step} of 3</p>
-          <div className="flex items-center gap-2">
-            {[1, 2, 3].map((dot) => (
-              <span
-                key={dot}
-                className={`h-2.5 w-2.5 rounded-full ${dot <= step ? "bg-primary" : "bg-muted"}`}
-                aria-hidden
-              />
-            ))}
+        {step <= 4 && (
+          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-3">
+            <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Step {step} of 4</p>
+            <div className="flex items-center gap-2">
+              {[1, 2, 3, 4].map((dot) => (
+                <span
+                  key={dot}
+                  className={`h-2.5 w-2.5 rounded-full ${dot <= step ? "bg-primary" : "bg-muted"}`}
+                  aria-hidden
+                />
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
         {errorMessage ? (
           <p
@@ -483,7 +540,128 @@ function WelcomeContent() {
               className="w-full h-12 rounded-xl bg-primary text-primary-foreground font-bold text-sm shadow-sm hover:opacity-90 disabled:opacity-50 disabled:pointer-events-none inline-flex items-center justify-center gap-2"
             >
               {saving ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
-              Finish Setup
+              Next →
+            </button>
+          </section>
+        )}
+
+        {step === 4 && (
+          <section className="space-y-6 rounded-2xl border border-border bg-card p-8 shadow-sm">
+            <div className="space-y-2">
+              <h2 className="text-2xl font-black tracking-tight text-foreground">Secure your account</h2>
+              <p className="text-sm text-muted-foreground">
+                Set up two-factor authentication to protect your lab data and meet 21 CFR Part 11 access control requirements.
+              </p>
+            </div>
+
+            {mfaLoading && (
+              <div className="flex flex-col items-center justify-center py-10 gap-3">
+                <Loader2 className="size-8 animate-spin text-primary" aria-hidden />
+                <p className="text-sm text-muted-foreground">Preparing authenticator setup…</p>
+              </div>
+            )}
+
+            {!mfaLoading && mfaLoadFailed && (
+              <div className="space-y-4">
+                <p className="text-sm font-medium rounded-xl border border-destructive/30 bg-destructive/10 text-destructive px-4 py-3">
+                  Could not load 2FA setup. Please try again.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setMfaRetry((n) => n + 1)}
+                  className="w-full h-12 rounded-xl border border-border bg-background text-sm font-bold hover:bg-muted transition-all"
+                >
+                  Try again
+                </button>
+              </div>
+            )}
+
+            {!mfaLoading && mfaEnrollData && (
+              <div className="space-y-6">
+                <div className="flex flex-col items-center gap-4">
+                  <div className="rounded-2xl border-2 border-border p-2 bg-white">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={mfaEnrollData.qrCodeUrl} alt="Authenticator QR code" width={160} height={160} />
+                  </div>
+                  <div className="w-full space-y-1">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground text-center">
+                      Manual entry key
+                    </p>
+                    <code className="block w-full break-all rounded-xl border border-border bg-muted px-4 py-2 text-center text-xs font-mono tracking-widest text-foreground">
+                      {mfaEnrollData.secret}
+                    </code>
+                  </div>
+                </div>
+
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Open Google Authenticator, Authy, or any TOTP app. Tap <span className="font-bold text-foreground">Add account</span>, scan the QR code above, then enter the 6-digit code shown.
+                </p>
+
+                {mfaError ? (
+                  <p role="alert" className="text-sm font-medium rounded-xl border border-destructive/30 bg-destructive/10 text-destructive px-4 py-3 text-center">
+                    {mfaError}
+                  </p>
+                ) : null}
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">
+                    Verification code
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={6}
+                    value={mfaCode}
+                    onChange={(e) => {
+                      setMfaCode(e.target.value.replace(/\D/g, "").slice(0, 6))
+                      setMfaError(null)
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && mfaCode.length === 6 && !mfaVerifying) {
+                        e.preventDefault()
+                        void handleMfaVerify()
+                      }
+                    }}
+                    className="w-full h-12 border border-input bg-background rounded-xl px-4 text-center text-xl font-mono tracking-widest outline-none focus:ring-2 focus:ring-primary/20"
+                    placeholder="000000"
+                    autoComplete="one-time-code"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  disabled={mfaCode.length !== 6 || mfaVerifying}
+                  onClick={() => void handleMfaVerify()}
+                  className="w-full h-12 rounded-xl bg-primary text-primary-foreground font-bold text-sm shadow-sm hover:opacity-90 disabled:opacity-50 disabled:pointer-events-none inline-flex items-center justify-center gap-2"
+                >
+                  {mfaVerifying ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Shield className="size-4" aria-hidden />}
+                  {mfaVerifying ? "Verifying…" : "Enable two-factor authentication"}
+                </button>
+              </div>
+            )}
+          </section>
+        )}
+
+        {step === 5 && (
+          <section className="space-y-6 rounded-2xl border border-border bg-card p-8 shadow-sm text-center">
+            <div className="flex flex-col items-center gap-4">
+              <div className="flex size-16 items-center justify-center rounded-full bg-green-500/10">
+                <CheckCircle2 className="size-9 text-green-600 dark:text-green-400" aria-hidden />
+              </div>
+              <div className="space-y-2">
+                <h2 className="text-2xl font-black tracking-tight text-foreground">You&apos;re all set!</h2>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  Your lab is configured and your account is secured. Welcome to Buddy Inventory Management.
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => router.replace("/dashboard")}
+              className="w-full h-12 rounded-xl bg-primary text-primary-foreground font-bold text-sm shadow-sm hover:opacity-90 inline-flex items-center justify-center"
+            >
+              Go to Dashboard →
             </button>
           </section>
         )}

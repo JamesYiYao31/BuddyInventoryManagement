@@ -67,7 +67,10 @@ header bell notifications (5 categories with role gating), super admin
 full feature set (lab/org detail pages, billing, role editing, tech
 key reset, invite revoke, trial extend), profiles.created_at backfill,
 production test data wiped, single-lab billing tab, idle timeout
-adjusted to 10 min (8 min idle + 2 min warning).
+adjusted to 10 min (8 min idle + 2 min warning),
+two-factor authentication (TOTP) for managers + org admins via Supabase MFA,
+optional for technicians, AAL2-gated dashboard access, server-side
+enrollment endpoint handles ghost factor cleanup atomically.
 
 ### Phase 8: Compliance Readiness (Target: End of June)
 Goal: audit-ready for regulated US lab customers before first 10 onboard.
@@ -152,6 +155,16 @@ medical device), SDLC approach, validation strategy, known limitations
 - Vercel build clean (zero warnings, zero errors)
 - All env vars set correctly in production
 - yourbuddyapp.com domain resolves correctly
+
+#### 8J — Two-Factor Authentication ✅
+- TOTP via Supabase MFA (max 1 factor per user)
+- Mandatory for managers + org admins, optional for technicians
+- Server-side enrollment endpoint (`/api/mfa/enroll`) handles ghost factor
+  cleanup atomically using admin API
+- AAL2-gated dashboard access for privileged roles
+- Onboarding Step 4 embeds enrollment for new managers
+- `/mfa-setup`, `/mfa-challenge`, dashboard gate, login flow all wired
+- React Strict Mode double-mount guarded via `useRef` lock
 
 ### Future — Post 10 Customers
 - Open self-serve lab registration (drop invite-only model)
@@ -248,7 +261,7 @@ REVOKE EXECUTE ON FUNCTION public.custom_access_token_hook FROM authenticated, a
 
 ## Security Architecture
 
-### Current Security Score: 9.5/10
+### Current Security Score: 9.7/10
 Production-grade for healthcare-adjacent B2B SaaS with no PHI.
 Audit log immutability satisfies 21 CFR Part 11. Remaining 0.5/10
 gap requires enterprise tooling (formal pen testing, SOC 2).
@@ -271,6 +284,66 @@ gap requires enterprise tooling (formal pen testing, SOC 2).
 | Email | Custom SMTP via Resend (noreply@yourbuddyapp.com verified) |
 | Security alerts | Password/email change + MFA add/remove notifications |
 | Audit log immutability | activity_logs append-only — 21 CFR Part 11 compliant |
+
+### Two-Factor Authentication (2FA / TOTP)
+
+- **Library:** Supabase MFA (built-in TOTP)
+- **Max factors per user:** 1 (enforced in Supabase dashboard)
+- **Friendly name:** `Buddy Inventory Management`
+- **Standard:** RFC 6238 TOTP (works with Google Authenticator, Authy, 1Password, etc.)
+
+#### Role-tiered enforcement
+| Role | 2FA | Enforcement |
+|------|-----|-------------|
+| super_admin | ✅ Supabase dashboard MFA (separate from app MFA) | Manual |
+| org_admin | ✅ Mandatory | Login + dashboard gate |
+| manager | ✅ Mandatory | Login + dashboard gate |
+| technician | ⚪ Optional | Voluntary via Profile Settings |
+
+#### AAL (Authenticator Assurance Level) model
+- `aal1` = password verified only
+- `aal2` = password + TOTP verified this session
+- Managers + org admins must reach `aal2` to access `/dashboard`
+- AAL is encoded in the JWT and read via `supabase.auth.mfa.getAuthenticatorAssuranceLevel()`
+
+#### Gate order (NEVER REORDER)
+On every dashboard load, in `checkSessionAndRole`:
+1. **First:** if role is `manager` and `onboarding_complete = false` → `/welcome`
+2. **Second:** if role is `manager`/`org_admin` AND not enrolled in 2FA → `/mfa-setup`
+3. **Third:** if role is `manager`/`org_admin` AND enrolled AND AAL is `aal1` → `/mfa-challenge`
+4. **Otherwise:** proceed to dashboard
+
+Onboarding MUST run first because `/welcome` Step 4 handles 2FA enrollment internally.
+
+#### Server-side enrollment endpoint (`/api/mfa/enroll`)
+Enrollment runs server-side, NOT directly via the client SDK, because:
+- Supabase's `listFactors()` on the client hides unverified factors (SDK design)
+- Cleanup of "ghost" unverified factors must use admin API (`admin.auth.admin.mfa.listFactors`)
+- Race conditions between cleanup and enroll require sequential server-side calls
+
+Flow:
+1. Browser reads access token from Supabase session (stored in localStorage)
+2. Browser POSTs to `/api/mfa/enroll` with `Authorization: Bearer <token>`
+3. Server validates token via admin client (`admin.auth.getUser(token)`)
+4. Server lists all factors for that user (admin API sees verified + unverified)
+5. Server deletes any `status = 'unverified'` factors (sequential awaits)
+6. Server creates fresh enrollment via user-scoped client
+7. Returns `{ qrCodeUrl, secret, factorId }` to browser
+8. Browser displays QR + 6-digit input
+9. Verification via `supabase.auth.mfa.challengeAndVerify()` (client-side is fine here)
+
+#### Pages
+- `/mfa-setup` — enrollment (QR + secret + 6-digit input). Uses `useRef` lock to prevent React Strict Mode double-invocation. Has guard: if already enrolled, redirects to `/dashboard`.
+- `/mfa-challenge` — login TOTP verification. Redirects to `/mfa-setup` if not enrolled.
+- `/welcome` Step 4 — enrollment inside onboarding. Auto-skips to Step 5 if already enrolled.
+
+#### Rules (Never Break)
+- Server-side enroll endpoint is the ONLY way to start enrollment — never call `supabase.auth.mfa.enroll()` directly from client code
+- `/api/mfa/enroll` must derive `user_id` from the validated access token, never from request body
+- Only `status = 'unverified'` factors may be deleted by the cleanup; verified factors are never touched
+- React Strict Mode double-mount must be guarded with `useRef` on `/mfa-setup` (effect creates server-side state)
+- Friendly name conflicts are handled by deleting unverified factors before enroll, not by appending timestamps
+- Dashboard gate order: onboarding → setup → challenge → dashboard. Never reorder.
 
 ### RLS Policy Pattern
 Lab-scoped tables:
@@ -760,6 +833,11 @@ orderedNotReceived, benchExpiring, outOfStock, totalCount, isLoading.
   is enforced and required for 21 CFR Part 11
 - activity_logs RLS policies must use JWT only — never profiles subquery
 - audit_log_retention_years read-only on customer UI; super admin only
+- Two-factor enrollment must go through `/api/mfa/enroll` — never call `supabase.auth.mfa.enroll()` directly from client code
+- `/mfa-setup` page must use `useRef` lock to prevent React Strict Mode double-invocation (causes ghost factor race)
+- Dashboard gate order is fixed: onboarding → 2FA setup → 2FA challenge → dashboard
+- `listFactors()` from the client SDK hides unverified factors — use admin API (`admin.auth.admin.mfa.listFactors`) when you need to see them
+- Never delete verified 2FA factors automatically — only `status = 'unverified'` can be cleaned up programmatically
 
 ---
 

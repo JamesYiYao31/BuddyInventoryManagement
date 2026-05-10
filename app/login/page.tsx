@@ -4,6 +4,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState, type KeyboardEvent
 import { Loader2, Key } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { persistNewActiveSession, voluntarySignOut } from "@/lib/active-session"
+import { getMfaEnrollmentStatus } from "@/lib/mfa"
 import { useRouter, useSearchParams } from "next/navigation"
 import Image from "next/image"
 
@@ -49,16 +50,39 @@ function LoginContent() {
         await persistNewActiveSession(userId)
         const { data: profile } = await supabase
           .from("profiles")
-          .select("role")
+          .select("role, lab_id")
           .eq("id", userId)
           .maybeSingle()
 
-        if (profile?.role === "super_admin") {
+        const role = profile?.role
+
+        if (role === "super_admin") {
           router.push("/super-admin")
-        } else if (profile?.role === "org_admin") {
-          router.push("/org-admin")
         } else {
-          router.push("/dashboard")
+          // Check onboarding for managers before any 2FA gate.
+          // /welcome handles 2FA internally as Step 4.
+          let onboardingComplete = true
+          if (role === "manager" && profile?.lab_id) {
+            const { data: settings } = await supabase
+              .from("lab_settings")
+              .select("onboarding_complete")
+              .eq("lab_id", profile.lab_id)
+              .maybeSingle()
+            onboardingComplete = !!settings?.onboarding_complete
+          }
+
+          if (role === "manager" && !onboardingComplete) {
+            router.push("/welcome")
+          } else {
+            const { enrolled } = await getMfaEnrollmentStatus()
+            if ((role === "manager" || role === "org_admin") && !enrolled) {
+              router.push("/mfa-setup")
+            } else if (enrolled) {
+              router.push("/mfa-challenge")
+            } else {
+              router.push("/dashboard")
+            }
+          }
         }
       } else {
         router.push("/dashboard")
