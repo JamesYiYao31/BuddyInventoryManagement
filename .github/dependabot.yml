@@ -14,6 +14,7 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      - dependency-name: "@zxing/*"
     labels:
       - "dependencies"
     commit-message:
