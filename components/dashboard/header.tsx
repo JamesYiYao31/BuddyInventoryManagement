@@ -30,7 +30,7 @@ import { ProfileSettingsDialog } from "@/components/dashboard/profile-settings-d
 
 interface DashboardHeaderProps {
   user?: any
-  role?: "manager" | "technician"
+  role?: "manager" | "org_admin" | "technician" | "super_admin"
   labName?: string
   inventory?: InventoryGroup[]
   activeLots?: LotInUseEntry[]
