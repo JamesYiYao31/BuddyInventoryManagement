@@ -165,6 +165,8 @@ medical device), SDLC approach, validation strategy, known limitations
 - Onboarding Step 4 embeds enrollment for new managers
 - `/mfa-setup`, `/mfa-challenge`, dashboard gate, login flow all wired
 - React Strict Mode double-mount guarded via `useRef` lock
+- Profile Settings → Security tab for in-app 2FA management
+  (enable/disable for technicians, regenerate for managers/org admins)
 
 ### Future — Post 10 Customers
 - Open self-serve lab registration (drop invite-only model)
@@ -344,6 +346,55 @@ Flow:
 - React Strict Mode double-mount must be guarded with `useRef` on `/mfa-setup` (effect creates server-side state)
 - Friendly name conflicts are handled by deleting unverified factors before enroll, not by appending timestamps
 - Dashboard gate order: onboarding → setup → challenge → dashboard. Never reorder.
+
+### Profile Settings — Security Tab
+
+The Profile Settings dialog has two sub-tabs: Profile (identity) and Security
+(account protection). Password reset and 2FA management both live under Security.
+
+#### 2FA management by role
+
+| Role | UI |
+|------|-----|
+| super_admin | Informational note: "2FA managed via Supabase dashboard" |
+| manager / org_admin | Enabled badge + "Regenerate 2FA" button |
+| technician (no 2FA) | Disabled badge + "Enable 2FA" button |
+| technician (has 2FA) | Enabled badge + "Disable 2FA" button |
+
+#### Flows
+
+**Enable 2FA (technician):** Closes dialog → routes to `/mfa-setup` →
+server-side enrollment via `/api/mfa/enroll` → user scans QR → verify →
+redirect to `/dashboard`.
+
+**Disable 2FA (technician):** Inline confirmation card → on confirm,
+`unenrollTotp()` from `lib/mfa.ts` → UI updates in place, no page reload.
+
+**Regenerate 2FA (manager / org_admin):** Inline confirmation card → on
+confirm, `unenrollTotp()` removes existing verified factor → router pushes
+to `/mfa-setup` → user scans NEW QR → verify → redirect to `/dashboard`.
+
+#### Regenerate window — expected behavior, NOT a bug
+
+Between `unenrollTotp()` and re-verification on `/mfa-setup`, the manager
+briefly has zero 2FA factors. If they close the tab during this window:
+- Next login: password verifies (AAL1)
+- Dashboard gate sees "manager with no 2FA" → routes to `/mfa-setup`
+- User completes enrollment normally — no lockout
+
+This is correct behavior. The gate order handles it cleanly. Do not "fix"
+this by trying to keep the old factor until the new one verifies — that
+would require two simultaneous factors, which conflicts with the
+"max 1 factor per user" Supabase setting.
+
+#### UX patterns
+- Inline confirmation cards (not nested dialogs) — avoids screen-reader
+  focus-trap ambiguity and z-index issues
+- Amber card for Regenerate (warning), red card for Disable (destructive)
+- MFA status pre-fetched in the dialog's open `useEffect` so tab switch
+  is instant
+- Standard modal UX: ESC closes, Android back closes, Enter submits primary
+  action on confirmation cards
 
 ### RLS Policy Pattern
 Lab-scoped tables:
@@ -838,6 +889,8 @@ orderedNotReceived, benchExpiring, outOfStock, totalCount, isLoading.
 - Dashboard gate order is fixed: onboarding → 2FA setup → 2FA challenge → dashboard
 - `listFactors()` from the client SDK hides unverified factors — use admin API (`admin.auth.admin.mfa.listFactors`) when you need to see them
 - Never delete verified 2FA factors automatically — only `status = 'unverified'` can be cleaned up programmatically
+- Profile Settings Security tab must not call `supabase.auth.mfa.enroll()` directly — enable flow routes to `/mfa-setup` which uses `/api/mfa/enroll`
+- The Regenerate 2FA flow has an expected window where the user has zero factors — do not try to keep the old factor active during re-enrollment (Supabase max 1 factor per user)
 
 ---
 
