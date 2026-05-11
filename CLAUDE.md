@@ -129,10 +129,25 @@ Seed requirements:
 - Unit tests for threshold fallback logic (item → lab default)
 - GitHub Actions CI on push to main
 
-#### 8E — Security Scanning (Pending)
-- Snyk on GitHub (free tier covers open source) — npm CVE scans
-- Enable Dependabot for automated dependency PRs
-- Audit npm packages — confirm no abandoned libs
+#### 8E — Security Scanning ✅
+- Dependabot enabled (alerts + security updates + version updates)
+- `.github/dependabot.yml` configured:
+  - Weekly schedule, groups minor/patch updates into single PR
+  - Ignores major version bumps (manual review only)
+  - Ignores `@zxing/*` packages (frozen pending Dynamsoft migration)
+- Snyk connected via GitHub integration — auto-PRs for fixable CVEs
+- `npm-audit-exceptions.md` documents accepted risks with rationale:
+  - glob (High) via eslint-config-next — dev-only, CLI flag not reachable
+    at runtime
+  - postcss (Moderate) bundled inside Next.js internals — build-time only,
+    no user CSS input accepted
+- Patched during setup:
+  - Next.js DoS (GHSA-q4gf-8mx6-v5v3) → bumped to 16.2.6
+  - minimatch ReDoS (GHSA-3ppc-4f35-3m26)
+  - Top-level postcss XSS (GHSA-qx2v-qp2m-jg93)
+- Dependabot major-version PRs require manual review before merge
+  (lucide-react v1, typescript 6, hookform-resolvers 5 closed pending
+  deliberate testing)
 
 #### 8F — API Documentation (Pending)
 - Document /api/feedback-notify in Swagger/OpenAPI or README
@@ -263,10 +278,12 @@ REVOKE EXECUTE ON FUNCTION public.custom_access_token_hook FROM authenticated, a
 
 ## Security Architecture
 
-### Current Security Score: 9.7/10
-Production-grade for healthcare-adjacent B2B SaaS with no PHI.
-Audit log immutability satisfies 21 CFR Part 11. Remaining 0.5/10
-gap requires enterprise tooling (formal pen testing, SOC 2).
+### Current Security Score: 9.8/10
+Production-grade for healthcare-adjacent B2B SaaS with no PHI. Audit log
+immutability satisfies 21 CFR Part 11. App-level 2FA on privileged
+accounts. Automated dependency scanning via Dependabot + Snyk with
+documented accepted risks. Remaining 0.2/10 gap requires enterprise
+tooling (formal pen testing, SOC 2).
 
 ### Security Layers
 | Layer | Implementation |
@@ -966,6 +983,60 @@ Allowlist for open-to-bench (NEVER use blocklist):
 - Document: [Link TBD — Phase 8C]
 - Maps: Requirement → Feature → Code → Test → Status
 - 10 requirements seeded
+
+---
+
+## Dependency Management Conventions
+
+### Dependabot policy
+- **Patch/minor updates:** Auto-grouped into a single weekly PR. Safe to
+  merge after Vercel preview build passes.
+- **Major version updates:** Dependabot is configured to IGNORE these.
+  Major bumps must be opened manually after testing.
+- **Security CVEs:** Dependabot opens these as separate PRs regardless of
+  severity. Review individually.
+- **Frozen packages:** `@zxing/*` is ignored pending Dynamsoft migration.
+
+### When merging Dependabot PRs
+1. Verify Vercel preview build passes (green checkmark next to PR title)
+2. For security CVE PRs, read the advisory link to assess production
+   relevance
+3. After merge, run locally: `git pull && npm install && npm audit`
+4. If new vulnerabilities appear, run `npm audit fix` (no --force)
+5. If `npm audit fix --force` is suggested, DO NOT run it without first
+   verifying what package will be downgraded — npm often suggests
+   destructive downgrades (e.g., "fix postcss by downgrading Next to 9.3.3")
+
+### npm install warnings to take seriously
+- `npm warn ERESOLVE overriding peer dependency` → package.json and
+  package-lock.json may now disagree. Run `npm install` again with no
+  arguments to test for consistency. Vercel's strict CI will fail where
+  local lenient install succeeds.
+- `multiple lockfiles detected` (Next.js warning) → a stray
+  package-lock.json exists outside the project. Delete the stray one.
+
+### Accepted vulnerability risks
+Documented in `npm-audit-exceptions.md`. Reviewed monthly. Entries require:
+- Vulnerability ID and severity
+- Affected dependency chain
+- Production risk assessment (why it's not exploitable in our usage)
+- Fix path (what we're waiting for)
+
+### Lockfile rules
+- Only one `package-lock.json` exists — at the repo root
+- Never run `npm install` outside the project folder (creates stray lockfiles)
+- `package-lock.json` MUST be committed to git for deterministic builds
+
+### Vercel build failures from Dependabot branches
+Vercel runs preview builds on every Dependabot branch. Failures on those
+branches are NOT production incidents — they signal that a proposed update
+is incompatible. Only failures on the `main` branch indicate a real
+production deploy issue.
+
+To reduce email noise:
+- Settings → Notifications → toggle off "Deployment failure" for Preview
+  deployments
+- Keep Production failure emails ON
 
 ---
 
