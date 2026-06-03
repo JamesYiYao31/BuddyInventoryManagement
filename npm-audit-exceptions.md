@@ -1,6 +1,6 @@
 # npm audit — Accepted Risks
 
-Last reviewed: May 10, 2026
+Last reviewed: June 2, 2026
 
 This document lists known npm audit vulnerabilities that have been
 assessed and intentionally not patched, with rationale. All entries
@@ -44,6 +44,54 @@ authored in the codebase and processed at build time, not runtime.
 when they update their bundled PostCSS. npm's suggested fix
 ("downgrade to next@9.3.3") is not viable — it would break the entire
 application. Awaiting Next.js patch release.
+
+---
+
+## qs <6.x via googleapis (Medium) — CWE-476
+
+**Chain:** qs → googleapis (transitive)
+
+**Vulnerability:** NULL Pointer Dereference in `qs@6.15.1` (CVSS 6.9).
+
+**Production risk:** Low. qs is a query-string parser used by googleapis
+SDK internally for Google Sheets feedback logging. The vulnerable code
+path requires specially crafted input to trigger the null deref, causing
+a process-level crash rather than data exfiltration. Our use of
+googleapis is constrained to a single server-side endpoint
+(`/api/feedback-notify`) that sends well-formed structured data — we
+never pass user-controlled query strings to the SDK.
+
+**Fix path:** No supported fix from upstream as of triage. Awaiting
+googleapis to bump its qs dependency. Snyk flagged "no supported fix
+available."
+
+---
+
+## ws <8.x via supabase-js (Medium) — CWE-908
+
+**Chain:** ws → @supabase/supabase-js (transitive)
+
+**Vulnerability:** Use of Uninitialized Resource in `ws@8.20.0` (CVSS 6.9).
+
+**Production risk:** Low. ws is the WebSocket library Supabase uses for
+its realtime subscriptions. Buddy Inventory Management does NOT use
+Supabase realtime channels — all our data fetching goes through the
+standard REST API (PostgREST). The vulnerable code path is in WebSocket
+upgrade handling, which our code never invokes.
+
+**Fix path:** No supported fix from upstream as of triage. Awaiting
+supabase-js to bump its ws dependency. Snyk flagged "no supported fix
+available."
+
+---
+
+## uuid via resend (Medium) — CWE-1285 — RESOLVED
+
+**Chain:** uuid → resend
+
+**Status:** Patched by upgrading resend from 6.12.2 to 6.12.3.
+
+**Date resolved:** June 2, 2026
 
 ---
 

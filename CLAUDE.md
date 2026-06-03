@@ -908,6 +908,72 @@ orderedNotReceived, benchExpiring, outOfStock, totalCount, isLoading.
 - Never delete verified 2FA factors automatically — only `status = 'unverified'` can be cleaned up programmatically
 - Profile Settings Security tab must not call `supabase.auth.mfa.enroll()` directly — enable flow routes to `/mfa-setup` which uses `/api/mfa/enroll`
 - The Regenerate 2FA flow has an expected window where the user has zero factors — do not try to keep the old factor active during re-enrollment (Supabase max 1 factor per user)
+- After May 30, 2026, new Supabase tables in `public` schema require
+  explicit GRANT statements for the Data API to access them. Existing
+  tables grandfathered until October 30, 2026.
+- All new table SQL must follow the Standard New Table Template below
+  (create + grant + RLS + policies — four steps, in that order).
+
+---
+
+## Standard New Table SQL Template
+
+Every new table in the `public` schema must include four steps:
+create → grant → enable RLS → add policies. Skipping the GRANT step
+means the Data API (supabase-js, PostgREST) cannot reach the table,
+even with RLS perfectly configured.
+
+```sql
+-- 1. Create the table
+create table public.your_table (
+  id uuid primary key default gen_random_uuid(),
+  lab_id uuid not null references public.labs(id) on delete cascade,
+  -- ... your columns
+  created_at timestamptz not null default now()
+);
+
+-- 2. Grant Data API access (required May 30, 2026+)
+grant select, insert, update, delete on public.your_table to authenticated;
+grant select, insert, update, delete on public.your_table to service_role;
+-- Note: only grant to `anon` if the table needs unauthenticated access
+-- (which it almost never does for B2B SaaS)
+
+-- 3. Enable RLS
+alter table public.your_table enable row level security;
+
+-- 4. Add lab-scoped policies (standard pattern)
+create policy "lab members select own rows"
+  on public.your_table for select to authenticated
+  using (
+    (auth.jwt() ->> 'user_role' = 'super_admin')
+    or (lab_id = get_my_lab_id())
+  );
+
+create policy "lab members insert own rows"
+  on public.your_table for insert to authenticated
+  with check (lab_id = get_my_lab_id());
+
+-- ... add update/delete policies as needed
+```
+
+### Why this matters
+- Pre May 30, 2026: GRANT was implicit. Tables in `public` schema were
+  automatically exposed to the API.
+- Post May 30, 2026: GRANT is explicit. Missing GRANT → PostgREST returns
+  error code 42501.
+- Existing Buddy tables (created before May 30) are grandfathered. Only
+  affects new tables going forward.
+
+### Audit existing grants
+To check current grants on all public tables:
+
+```sql
+select table_name, grantee, privilege_type
+from information_schema.table_privileges
+where table_schema = 'public'
+  and grantee in ('authenticated', 'anon', 'service_role')
+order by table_name, grantee;
+```
 
 ---
 
