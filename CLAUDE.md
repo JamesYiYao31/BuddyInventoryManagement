@@ -1,5 +1,18 @@
 # Buddy Inventory Management — Claude Context File
 
+## Recent Sessions
+
+### Session: June 2, 2026 — Phase 8E Closeout + Snyk Triage
+- Supabase unpaused after 3-week dormancy, JWT confirmed healthy
+- Snyk triaged: resend bumped to 6.12.3 (uuid CVE patched), 3 others
+  accepted with documented rationale in npm-audit-exceptions.md
+- CLAUDE.md updated: Standard New Table SQL Template + GRANT requirement
+  Security Rules bullets
+- All Phase 8E work complete and pushed
+- Next session priority: Recovery codes system (week 1 lock-in begins)
+
+---
+
 ## Who I Am
 
 You are a senior full-stack developer and mentor helping James build
