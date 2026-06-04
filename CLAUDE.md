@@ -2,6 +2,23 @@
 
 ## Recent Sessions
 
+### Session: June 2, 2026 (evening) — Break-Glass Runbook + Traceability Matrix
+- Created docs/break-glass-runbook.md (4 scenarios: super_admin lockout,
+  broken JWT hook, manual profile fix, stuck MFA factor delete)
+- Validated runbook diagnostics against live DB: auth.mfa_factors columns
+  confirmed; supabase_auth_admin confirmed to have EXECUTE on
+  custom_access_token_hook (healthy baseline)
+- Corrected Scenario 2 diagnostics (pg_get_functiondef alias for SQL editor
+  LIMIT; has_schema_privilege instead of misleading usage_privileges view)
+- Created docs/traceability-matrix.md (8C) — REQ-001–REQ-010 mapped to real
+  code locations and verification status (all manual; 8D coverage map included)
+- Created docs/software-validation-plan.md (8G) — skeleton outline only,
+  not yet written
+- CONFIRMED: super_admin (James) currently has ZERO app-level MFA factors —
+  this is the exact gap the weekend recovery-codes + super_admin TOTP
+  enforcement work will close
+- Next: recovery codes system (weekend heavy build)
+
 ### Session: June 2, 2026 — Phase 8E Closeout + Snyk Triage
 - Supabase unpaused after 3-week dormancy, JWT confirmed healthy
 - Snyk triaged: resend bumped to 6.12.3 (uuid CVE patched), 3 others
@@ -1054,14 +1071,16 @@ Allowlist for open-to-bench (NEVER use blocklist):
 - Everything else → BLOCKED
 
 ### Software Validation Plan
-- Document: [Link TBD — Phase 8G]
+- Document: docs/software-validation-plan.md (skeleton — not yet written)
 - Covers: intended use, SDLC, validation strategy, known limits
 - Classification: NOT a medical device
 
 ### Traceability Matrix
-- Document: [Link TBD — Phase 8C]
+- Document: docs/traceability-matrix.md
 - Maps: Requirement → Feature → Code → Test → Status
 - 10 requirements seeded
+
+- Break-glass emergency recovery: docs/break-glass-runbook.md
 
 ---
 
