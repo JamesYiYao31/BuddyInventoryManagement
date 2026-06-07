@@ -13,7 +13,7 @@ type WelcomeSettings = {
   expiring_soon_days: number
   urgent_days: number
   low_stock_threshold: number
-  requires_coa_approval: boolean
+  require_coa_approval: boolean
 }
 
 function WelcomeContent() {
@@ -103,7 +103,7 @@ function WelcomeContent() {
 
       const { data: settings } = await supabase
         .from("lab_settings")
-        .select("lab_timezone, expiring_soon_days, urgent_days, low_stock_threshold, requires_coa_approval")
+        .select("lab_timezone, expiring_soon_days, urgent_days, low_stock_threshold, require_coa_approval")
         .eq("lab_id", scopedLabId)
         .maybeSingle()
 
@@ -119,7 +119,7 @@ function WelcomeContent() {
         expiring_soon_days: 30,
         urgent_days: 7,
         low_stock_threshold: 5,
-        requires_coa_approval: false,
+        require_coa_approval: false,
       }
       const resolved = {
         ...fallbackSettings,
@@ -130,7 +130,7 @@ function WelcomeContent() {
       setExpiringSoonDays(String(resolved.expiring_soon_days))
       setUrgentDays(String(resolved.urgent_days))
       setLowStockThreshold(String(resolved.low_stock_threshold))
-      setRequiresCoaApproval(Boolean(resolved.requires_coa_approval))
+      setRequiresCoaApproval(Boolean(resolved.require_coa_approval))
       setBootLoading(false)
     }
 
