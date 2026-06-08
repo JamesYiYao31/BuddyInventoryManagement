@@ -7,7 +7,8 @@ import {
   Shield, ShieldOff, RefreshCw, Info,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
-import { getMfaEnrollmentStatus, unenrollTotp } from "@/lib/mfa"
+import { getMfaEnrollmentStatus, generateMfaRecoveryCodes, unenrollTotp } from "@/lib/mfa"
+import { RecoveryCodesDisplay, RecoveryCodesLoading } from "@/components/mfa/recovery-codes-display"
 import { useToast } from "@/hooks/use-toast"
 import {
   Dialog,
@@ -62,6 +63,9 @@ export function ProfileSettingsDialog({
   const [showDisableConfirm, setShowDisableConfirm] = useState(false)
   const [showRegenerateConfirm, setShowRegenerateConfirm] = useState(false)
   const [unenrolling, setUnenrolling] = useState(false)
+  const [showRegenerateRecoveryConfirm, setShowRegenerateRecoveryConfirm] = useState(false)
+  const [generatingRecoveryCodes, setGeneratingRecoveryCodes] = useState(false)
+  const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null)
 
   // Reset everything and load MFA status when dialog opens.
   useEffect(() => {
@@ -72,6 +76,8 @@ export function ProfileSettingsDialog({
     setActiveTab("profile")
     setShowDisableConfirm(false)
     setShowRegenerateConfirm(false)
+    setShowRegenerateRecoveryConfirm(false)
+    setRecoveryCodes(null)
     setMfaError(null)
 
     async function loadMfaStatus() {
@@ -210,6 +216,30 @@ export function ProfileSettingsDialog({
       setShowRegenerateConfirm(false)
     } finally {
       setUnenrolling(false)
+    }
+  }
+
+  const handleGenerateRecoveryCodes = async () => {
+    setGeneratingRecoveryCodes(true)
+    setMfaError(null)
+    try {
+      const generated = await generateMfaRecoveryCodes()
+      if (!generated) {
+        setMfaError("Could not generate recovery codes. Please try again.")
+        setShowRegenerateRecoveryConfirm(false)
+        return
+      }
+      setRecoveryCodes(generated.codes)
+      setShowRegenerateRecoveryConfirm(false)
+      toast({
+        title: "New recovery codes generated",
+        description: "Save them now — previous codes no longer work.",
+      })
+    } catch {
+      setMfaError("Could not generate recovery codes. Please try again.")
+      setShowRegenerateRecoveryConfirm(false)
+    } finally {
+      setGeneratingRecoveryCodes(false)
     }
   }
 
@@ -419,6 +449,66 @@ export function ProfileSettingsDialog({
 
                       {mfaError && (
                         <p role="alert" className="text-xs font-medium text-red-400">{mfaError}</p>
+                      )}
+
+                      {mfaEnrolled && role !== "super_admin" && (
+                        <div className="rounded-xl border border-border bg-muted/20 p-4 space-y-3">
+                          <div>
+                            <p className="text-xs font-bold text-foreground">Recovery codes</p>
+                            <p className="text-[11px] text-muted-foreground leading-relaxed mt-1">
+                              One-time backup codes if you lose your authenticator device.
+                            </p>
+                          </div>
+
+                          {generatingRecoveryCodes ? (
+                            <RecoveryCodesLoading />
+                          ) : recoveryCodes ? (
+                            <RecoveryCodesDisplay
+                              codes={recoveryCodes}
+                              onDismiss={() => setRecoveryCodes(null)}
+                              dismissLabel="Done"
+                            />
+                          ) : showRegenerateRecoveryConfirm ? (
+                            <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-3">
+                              <p className="text-xs font-bold text-foreground">Generate new recovery codes?</p>
+                              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                                This invalidates all previous recovery codes immediately. Save the new batch in a secure place.
+                              </p>
+                              <div className="flex gap-2 justify-end">
+                                <button
+                                  type="button"
+                                  onClick={() => setShowRegenerateRecoveryConfirm(false)}
+                                  disabled={generatingRecoveryCodes}
+                                  className="h-9 px-4 rounded-xl text-xs font-black uppercase tracking-widest border border-border bg-background hover:bg-muted disabled:opacity-50 transition-all"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleGenerateRecoveryCodes()}
+                                  disabled={generatingRecoveryCodes}
+                                  className="inline-flex items-center gap-2 h-9 px-4 rounded-xl text-xs font-black uppercase tracking-widest bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50 transition-all"
+                                >
+                                  {generatingRecoveryCodes
+                                    ? <Loader2 className="size-3.5 animate-spin" />
+                                    : <KeyRound className="size-3.5" />}
+                                  Generate
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex justify-end">
+                              <button
+                                type="button"
+                                onClick={() => setShowRegenerateRecoveryConfirm(true)}
+                                className="inline-flex items-center gap-2 h-10 px-5 rounded-xl text-xs font-black uppercase tracking-widest border border-border bg-background hover:bg-muted transition-all"
+                              >
+                                <KeyRound className="size-4" />
+                                Generate new recovery codes
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       )}
 
                       {/* manager / org_admin: mandatory, regenerate only */}

@@ -72,3 +72,84 @@ export async function unenrollTotp(factorId: string): Promise<{ success: boolean
   if (error) return { success: false, error: error.message }
   return { success: true }
 }
+
+export async function generateMfaRecoveryCodes(): Promise<{ codes: string[] } | null> {
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+    if (!session?.access_token) return null
+
+    const response = await fetch("/api/mfa/recovery-codes/generate", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    })
+
+    if (!response.ok) return null
+
+    const data = (await response.json()) as { codes?: string[] }
+    if (!Array.isArray(data.codes) || data.codes.length === 0) return null
+    return { codes: data.codes }
+  } catch {
+    return null
+  }
+}
+
+export async function checkRecoveryElevation(): Promise<boolean> {
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+    if (!session?.access_token) return false
+
+    const response = await fetch("/api/mfa/recovery-elevation-status", {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    })
+    if (!response.ok) return false
+
+    const data = (await response.json().catch(() => ({}))) as { elevated?: boolean }
+    return data.elevated === true
+  } catch {
+    return false
+  }
+}
+
+export async function redeemMfaRecoveryCode(
+  code: string,
+): Promise<{ success: boolean; error?: string; remainingCount?: number }> {
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+    if (!session?.access_token) {
+      return { success: false, error: "Not authenticated." }
+    }
+
+    const response = await fetch("/api/mfa/recovery-codes/redeem", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ code }),
+    })
+
+    const data = (await response.json().catch(() => ({}))) as {
+      success?: boolean
+      error?: string
+      remainingCount?: number
+    }
+
+    if (!response.ok) {
+      return {
+        success: false,
+        error: data.error ?? "Invalid recovery code.",
+        remainingCount: data.remainingCount,
+      }
+    }
+
+    return { success: true, remainingCount: data.remainingCount }
+  } catch {
+    return { success: false, error: "Could not redeem recovery code." }
+  }
+}

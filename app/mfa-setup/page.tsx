@@ -5,7 +5,8 @@ import Image from "next/image"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Loader2, Shield, Smartphone, QrCode, KeyRound } from "lucide-react"
-import { enrollTotp, verifyTotpEnrollment } from "@/lib/mfa"
+import { enrollTotp, generateMfaRecoveryCodes, verifyTotpEnrollment } from "@/lib/mfa"
+import { RecoveryCodesDisplay, RecoveryCodesLoading } from "@/components/mfa/recovery-codes-display"
 
 function MfaSetupContent() {
   const router = useRouter()
@@ -16,6 +17,8 @@ function MfaSetupContent() {
   const [code, setCode] = useState("")
   const [verifying, setVerifying] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null)
+  const [generatingRecoveryCodes, setGeneratingRecoveryCodes] = useState(false)
   const hasEnrolledRef = useRef(false)
 
   useEffect(() => {
@@ -40,20 +43,35 @@ function MfaSetupContent() {
       setVerifying(false)
       return
     }
+    setVerifying(false)
+    setGeneratingRecoveryCodes(true)
+    const generated = await generateMfaRecoveryCodes()
+    setGeneratingRecoveryCodes(false)
+    if (!generated) {
+      setError("2FA enabled, but recovery codes could not be generated. You can create them later in Profile Settings → Security.")
+      const returnTo = searchParams.get("returnTo")
+      router.replace(returnTo ?? "/dashboard")
+      return
+    }
+    setRecoveryCodes(generated.codes)
+  }, [enrollData, code, verifying, searchParams, router])
+
+  const handleRecoveryCodesDismiss = useCallback(() => {
     const returnTo = searchParams.get("returnTo")
     router.replace(returnTo ?? "/dashboard")
-  }, [enrollData, code, verifying, searchParams, router])
+  }, [searchParams, router])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Enter") return
+      if (recoveryCodes || generatingRecoveryCodes) return
       if (code.length !== 6) return
       e.preventDefault()
       void handleVerify()
     }
     document.addEventListener("keydown", onKey)
     return () => document.removeEventListener("keydown", onKey)
-  }, [code, handleVerify])
+  }, [code, handleVerify, recoveryCodes, generatingRecoveryCodes])
 
   if (loading) {
     return (
@@ -78,6 +96,31 @@ function MfaSetupContent() {
           >
             Back to login
           </Link>
+        </div>
+      </div>
+    )
+  }
+
+  if (generatingRecoveryCodes) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-background">
+        <div className="w-full max-w-md rounded-[2rem] border border-border bg-card p-10 shadow-2xl ring-2 ring-border/60">
+          <RecoveryCodesLoading />
+        </div>
+      </div>
+    )
+  }
+
+  if (recoveryCodes) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-background">
+        <div className="w-full max-w-md rounded-[2rem] border border-border bg-card p-10 shadow-2xl ring-2 ring-border/60 space-y-6">
+          <div className="text-center space-y-2">
+            <Image src="/buddy-logo.png" alt="Buddy" width={64} height={64} className="h-16 w-auto mx-auto drop-shadow-md" priority />
+            <h1 className="text-2xl font-black tracking-tight text-foreground">Save your recovery codes</h1>
+            <p className="text-sm text-muted-foreground">Two-factor authentication is enabled.</p>
+          </div>
+          <RecoveryCodesDisplay codes={recoveryCodes} onDismiss={handleRecoveryCodesDismiss} />
         </div>
       </div>
     )

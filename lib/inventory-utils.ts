@@ -734,6 +734,8 @@ export type ActivityActionType =
   | "Submitted COA"
   | "Submitted Lot Validation"
   | "Archived Lot"
+  | "MFA Recovery Code Redeemed"
+  | "MFA Recovery Code Redeem Failed"
 
 export interface ActivityLogEntry {
   id: string

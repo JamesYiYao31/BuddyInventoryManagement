@@ -10,7 +10,7 @@ import {
   verifyActiveSessionForUser,
   voluntarySignOut,
 } from "@/lib/active-session"
-import { getMfaEnrollmentStatus, getAssuranceLevel } from "@/lib/mfa"
+import { getMfaEnrollmentStatus, getAssuranceLevel, checkRecoveryElevation } from "@/lib/mfa"
 
 // Utilities & Types
 import { 
@@ -493,8 +493,11 @@ function DashboardPageContent() {
           }
           const level = await getAssuranceLevel()
           if (level === "aal1") {
-            router.replace("/mfa-challenge")
-            return
+            const recovered = await checkRecoveryElevation()
+            if (!recovered) {
+              router.replace("/mfa-challenge")
+              return
+            }
           }
         }
 
