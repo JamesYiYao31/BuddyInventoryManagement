@@ -2,6 +2,45 @@
 
 ## Recent Sessions
 
+### Session: June 7, 2026 — Recovery Codes SHIPPED + Hook Lockout Recovery
+- Recovery codes COMPLETE and verified in production (commit 8f13692).
+  Generation (enrollment + Security-tab regen), redeem at /mfa-challenge,
+  session elevation gate, audit logging. bcryptjs, 10 codes/batch, XXXX-XXXX.
+- **Supabase RESERVES the `aal` claim — the access token hook CANNOT set
+  aal2.** Confirmed empirically: hook stamped lab_id/user_role fine but aal
+  stayed aal1. Custom recovery codes cannot produce native aal2.
+- **Working recovery architecture (DB-row gate, NOT aal):**
+  1. Service-role redeem route bcrypt-verifies code, marks used, writes a
+     TTL'd row to mfa_recovery_elevations (session_id, expires_at = now+60min).
+  2. Dashboard gate (checkSessionAndRole): if aal1, calls
+     checkRecoveryElevation() → GET /api/mfa/recovery-elevation-status
+     (service-role checks valid unexpired row for this session). Passes gate
+     if elevated. Checked LIVE so the TTL is honored.
+  3. Hook does NOT touch aal or the elevation table.
+     redeemMfaRecoveryCode() no longer calls refreshSession/getAssuranceLevel.
+  - Chosen over a JWT elevation claim: a token claim can't be revoked
+    mid-life and ignores expires_at; live DB check honors the TTL and keeps
+    the fragile hook minimal. No RLS policy checks aal2 (verified) — data
+    security is lab_id/user_role + RLS, both correct on recovery login.
+- **HOOK LOCKOUT root cause + permanent guardrail:** hook runs as
+  supabase_auth_admin (rolbypassrls = FALSE). It needs BOTH (a) GRANT SELECT
+  on every table it reads (profiles AND labs), AND (b) an RLS policy
+  permitting supabase_auth_admin (existing "Allow auth admin to read
+  profiles" USING true). Missing GRANT → "permission denied" → TOTAL
+  LOCKOUT. Missing/blocking policy → reads return EMPTY (no error) → corrupt
+  claims (lab_id null, role defaults 'technician') → get_my_lab_id() null →
+  labs 406 → onboarding bounce. Silent and nasty: login "works" but mints
+  broken tokens. Grant + policy ANY new table the hook touches.
+- **STALE TOKEN lesson:** after ANY hook change, only a FULLY re-minted
+  token reflects it. Cached/localStorage sessions carry old claims =
+  phantom bugs. Real test = full sign-out / clear localStorage → fresh
+  login → decode token. Burned ~1hr on a stale token this session.
+- Auth localStorage key is `buddylab-auth` (custom storageKey, NOT default
+  sb-<ref>-auth-token).
+- Also fixed: lab_settings column require_coa_approval (no 's') in
+  app/welcome/page.tsx (committed separately earlier).
+- Full live hook SQL saved to docs/custom-access-token-hook.sql.
+
 ### Session: June 2, 2026 (evening) — Break-Glass Runbook + Traceability Matrix
 - Created docs/break-glass-runbook.md (4 scenarios: super_admin lockout,
   broken JWT hook, manual profile fix, stuck MFA factor delete)
@@ -1081,6 +1120,26 @@ Allowlist for open-to-bench (NEVER use blocklist):
 - 10 requirements seeded
 
 - Break-glass emergency recovery: docs/break-glass-runbook.md
+
+---
+
+## Custom Access Token Hook (lives in Supabase, NOT in Git)
+
+Full SQL: docs/custom-access-token-hook.sql (source of record — the hook is
+NOT deployed from Git; it lives in the Supabase DB).
+
+- Injects lab_id / org_id / user_role into JWT claims. Does NOT touch aal
+  (Supabase reserves aal; hook-set values are overwritten).
+- After any CREATE OR REPLACE, RE-APPLY all three grants (they are stripped):
+  EXECUTE on the function, SELECT on profiles, SELECT on labs — all to
+  supabase_auth_admin.
+- GUARDRAIL: any NEW table the hook reads needs (a) GRANT SELECT to
+  supabase_auth_admin (rolbypassrls=false) AND (b) an RLS policy permitting
+  that role. Miss either → lockout or silent corrupt claims.
+- Diagnostics: Supabase Auth Logs (exact error);
+  has_table_privilege('supabase_auth_admin','public.<table>','SELECT');
+  pg_proc.prosrc to read the hook body (NOT pg_get_functiondef — editor
+  auto-LIMIT bug).
 
 ---
 

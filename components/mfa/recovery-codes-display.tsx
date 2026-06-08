@@ -29,21 +29,21 @@ export function RecoveryCodesDisplay({
   }, [codesText])
 
   const handleDownload = useCallback(() => {
-    const blob = new Blob(
-      [
-        "Buddy Inventory Management — MFA Recovery Codes\n",
-        "Save these in a secure location. Each code works once.\n\n",
-        codesText,
-        "\n",
-      ].join(""),
-      { type: "text/plain;charset=utf-8" },
-    )
+    const content =
+      "Buddy Inventory Management — MFA Recovery Codes\n" +
+      "Save these in a secure location. Each code works once.\n\n" +
+      codesText +
+      "\n"
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement("a")
     anchor.href = url
     anchor.download = "buddy-mfa-recovery-codes.txt"
+    anchor.style.display = "none"
+    document.body.appendChild(anchor)
     anchor.click()
-    URL.revokeObjectURL(url)
+    document.body.removeChild(anchor)
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
   }, [codesText])
 
   return (
