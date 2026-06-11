@@ -233,12 +233,15 @@ medical device), SDLC approach, validation strategy, known limitations
 - Privacy Policy: data collected, Supabase US storage, RLS protection
 - Publish at yourbuddyapp.com/terms and /privacy before first customer
 
-#### 8I — Pre-Customer Checklist (Pending)
-- No console.log in production build
-- No hardcoded lab_ids/user_ids anywhere
-- Vercel build clean (zero warnings, zero errors)
-- All env vars set correctly in production
-- yourbuddyapp.com domain resolves correctly
+#### 8I — Pre-Customer Checklist ✅
+- Full checklist authored: docs/pre-customer-checklist.md
+- 8 sections (test data hygiene, audit integrity, RLS, build, env,
+  auth/2FA, email/domain, customer-facing surfaces) + final sign-off
+- Each section phase-tagged to source work (8A/8B/8E/8F/8H/8J etc.)
+- Doubles as a go-live readiness gate, not just cleanup
+- Oakwood = synthetic-data demo lab, kept for demo continuity
+  (deletable any time; excluded from wipe steps by default)
+- Verification steps run against PRODUCTION, not localhost
 
 #### 8J — Two-Factor Authentication ✅
 - TOTP via Supabase MFA (max 1 factor per user)

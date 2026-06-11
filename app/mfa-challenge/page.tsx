@@ -3,13 +3,28 @@
 import { Suspense, useCallback, useEffect, useState } from "react"
 import Image from "next/image"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Loader2, Shield } from "lucide-react"
 import { getMfaEnrollmentStatus, redeemMfaRecoveryCode, verifyTotpChallenge } from "@/lib/mfa"
 import { normalizeRecoveryCode } from "@/lib/recovery-code-format"
+import { supabase } from "@/lib/supabase"
+
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  const parts = token.split(".")
+  if (parts.length !== 3) return null
+  try {
+    const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/")
+    const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4)
+    const json = atob(padded)
+    return JSON.parse(json) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
 
 function MfaChallengeContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
 
   const [loading, setLoading] = useState(true)
   const [factorId, setFactorId] = useState<string | null>(null)
@@ -37,6 +52,20 @@ function MfaChallengeContent() {
     }
   }, [router])
 
+  const resolvePostChallengeRedirect = useCallback(async () => {
+    const returnTo = searchParams.get("returnTo")
+    if (returnTo) return returnTo
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+    const role = session?.access_token
+      ? decodeJwtPayload(session.access_token)?.user_role
+      : null
+    if (role === "super_admin") return "/super-admin"
+    return "/dashboard"
+  }, [searchParams])
+
   const handleVerify = useCallback(async () => {
     if (!factorId || code.length !== 6 || verifying) return
     setVerifying(true)
@@ -47,8 +76,8 @@ function MfaChallengeContent() {
       setVerifying(false)
       return
     }
-    router.replace("/dashboard")
-  }, [factorId, code, verifying, router])
+    router.replace(await resolvePostChallengeRedirect())
+  }, [factorId, code, verifying, router, resolvePostChallengeRedirect])
 
   const handleRedeemRecovery = useCallback(async () => {
     const normalized = normalizeRecoveryCode(recoveryCode)
@@ -61,8 +90,8 @@ function MfaChallengeContent() {
       setVerifying(false)
       return
     }
-    router.replace("/dashboard")
-  }, [recoveryCode, verifying, router])
+    router.replace(await resolvePostChallengeRedirect())
+  }, [recoveryCode, verifying, router, resolvePostChallengeRedirect])
 
   const canSubmitTotp = code.length === 6 && !verifying
   const canSubmitRecovery = normalizeRecoveryCode(recoveryCode).length === 8 && !verifying

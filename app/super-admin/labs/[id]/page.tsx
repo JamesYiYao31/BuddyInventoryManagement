@@ -9,6 +9,7 @@ import {
   ChevronRight,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { resolveSuperAdminMfaRedirect } from "@/lib/super-admin-mfa-gate"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -245,6 +246,12 @@ export default function LabDetailPage() {
 
       if (profile?.role !== "super_admin") {
         router.replace("/dashboard")
+        return
+      }
+
+      const mfaRedirect = await resolveSuperAdminMfaRedirect()
+      if (mfaRedirect) {
+        if (!cancelled) router.replace(mfaRedirect)
         return
       }
 

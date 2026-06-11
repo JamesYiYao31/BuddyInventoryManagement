@@ -5,7 +5,7 @@ import Image from "next/image"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Loader2, Shield, Smartphone, QrCode, KeyRound } from "lucide-react"
-import { enrollTotp, generateMfaRecoveryCodes, verifyTotpEnrollment } from "@/lib/mfa"
+import { enrollTotp, generateMfaRecoveryCodes, getMfaEnrollmentStatus, verifyTotpEnrollment } from "@/lib/mfa"
 import { RecoveryCodesDisplay, RecoveryCodesLoading } from "@/components/mfa/recovery-codes-display"
 
 function MfaSetupContent() {
@@ -21,17 +21,27 @@ function MfaSetupContent() {
   const [generatingRecoveryCodes, setGeneratingRecoveryCodes] = useState(false)
   const hasEnrolledRef = useRef(false)
 
+  const postSetupRedirect = useCallback(() => {
+    const returnTo = searchParams.get("returnTo")
+    router.replace(returnTo ?? "/dashboard")
+  }, [searchParams, router])
+
   useEffect(() => {
     if (hasEnrolledRef.current) return
     hasEnrolledRef.current = true
 
     async function load() {
+      const { enrolled } = await getMfaEnrollmentStatus()
+      if (enrolled) {
+        postSetupRedirect()
+        return
+      }
       const data = await enrollTotp()
       setEnrollData(data)
       setLoading(false)
     }
     void load()
-  }, [])
+  }, [postSetupRedirect])
 
   const handleVerify = useCallback(async () => {
     if (!enrollData || code.length !== 6 || verifying) return
@@ -49,17 +59,15 @@ function MfaSetupContent() {
     setGeneratingRecoveryCodes(false)
     if (!generated) {
       setError("2FA enabled, but recovery codes could not be generated. You can create them later in Profile Settings → Security.")
-      const returnTo = searchParams.get("returnTo")
-      router.replace(returnTo ?? "/dashboard")
+      postSetupRedirect()
       return
     }
     setRecoveryCodes(generated.codes)
-  }, [enrollData, code, verifying, searchParams, router])
+  }, [enrollData, code, verifying, postSetupRedirect])
 
   const handleRecoveryCodesDismiss = useCallback(() => {
-    const returnTo = searchParams.get("returnTo")
-    router.replace(returnTo ?? "/dashboard")
-  }, [searchParams, router])
+    postSetupRedirect()
+  }, [postSetupRedirect])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

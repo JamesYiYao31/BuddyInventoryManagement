@@ -17,8 +17,14 @@ import {
   X,
   ChevronRight,
   CreditCard,
+  Settings,
+  LogOut,
 } from "lucide-react"
+import type { User } from "@supabase/supabase-js"
 import { supabase } from "@/lib/supabase"
+import { voluntarySignOut } from "@/lib/active-session"
+import { resolveSuperAdminMfaRedirect } from "@/lib/super-admin-mfa-gate"
+import { ProfileSettingsDialog } from "@/components/dashboard/profile-settings-dialog"
 
 type OrganizationRow = {
   id: string
@@ -87,6 +93,9 @@ export default function SuperAdminPage() {
 
   const [gateLoading, setGateLoading] = useState(true)
   const [authorized, setAuthorized] = useState(false)
+  const [authUser, setAuthUser] = useState<User | null>(null)
+  const [profileDialogOpen, setProfileDialogOpen] = useState(false)
+  const [signingOut, setSigningOut] = useState(false)
 
   const [provisionMode, setProvisionMode] = useState<ProvisionMode>("single")
 
@@ -197,8 +206,6 @@ export default function SuperAdminPage() {
       const {
         data: { session },
       } = await supabase.auth.getSession()
-      console.log("SESSION USER:", JSON.stringify(session?.user, null, 2))
-
       if (!session?.user) {
         if (!cancelled) router.replace("/")
         return
@@ -217,6 +224,13 @@ export default function SuperAdminPage() {
         return
       }
 
+      const mfaRedirect = await resolveSuperAdminMfaRedirect()
+      if (mfaRedirect) {
+        if (!cancelled) router.replace(mfaRedirect)
+        return
+      }
+
+      setAuthUser(session.user)
       setAuthorized(true)
       setGateLoading(false)
       await Promise.all([fetchOrganizations(), fetchLabs(), fetchInvites()])
@@ -687,6 +701,13 @@ export default function SuperAdminPage() {
 
   const labsTableLoading = labsLoading || orgsLoading
 
+  const handleSignOut = async () => {
+    if (signingOut) return
+    setSigningOut(true)
+    await voluntarySignOut(authUser?.id)
+    router.replace("/login")
+  }
+
   if (gateLoading || !authorized) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-background">
@@ -709,8 +730,35 @@ export default function SuperAdminPage() {
               <p className="text-xs text-muted-foreground truncate">Lab Inventory Management internal control panel</p>
             </div>
           </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setProfileDialogOpen(true)}
+              aria-label="Profile settings"
+              className="inline-flex items-center gap-2 h-10 px-4 rounded-xl border border-border bg-background text-sm font-bold hover:bg-muted/50"
+            >
+              <Settings className="size-4" aria-hidden />
+              Settings
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleSignOut()}
+              disabled={signingOut}
+              className="inline-flex items-center gap-2 h-10 px-4 rounded-xl border border-border bg-background text-sm font-bold hover:bg-muted/50 disabled:opacity-50"
+            >
+              <LogOut className="size-4" aria-hidden />
+              {signingOut ? "Signing out…" : "Sign out"}
+            </button>
+          </div>
         </div>
       </header>
+
+      <ProfileSettingsDialog
+        open={profileDialogOpen}
+        onOpenChange={setProfileDialogOpen}
+        user={authUser}
+        role="super_admin"
+      />
 
       <main className="mx-auto max-w-6xl px-6 py-10 space-y-12">
         {/* Section 1 — Provisioning */}

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
   Loader2, Mail, UserCircle2, KeyRound, ShieldCheck, Beaker, Save,
-  Shield, ShieldOff, RefreshCw, Info,
+  Shield, ShieldOff, RefreshCw,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { getMfaEnrollmentStatus, generateMfaRecoveryCodes, unenrollTotp } from "@/lib/mfa"
@@ -210,7 +210,11 @@ export function ProfileSettingsDialog({
         return
       }
       onOpenChange(false)
-      router.push("/mfa-setup")
+      router.push(
+        role === "super_admin"
+          ? "/mfa-setup?returnTo=/super-admin"
+          : "/mfa-setup",
+      )
     } catch {
       setMfaError("Could not remove existing 2FA. Please try again.")
       setShowRegenerateConfirm(false)
@@ -243,7 +247,9 @@ export function ProfileSettingsDialog({
     }
   }
 
-  const isPrivilegedRole = role === "manager" || role === "org_admin"
+  const isPrivilegedRole = role === "manager" || role === "org_admin" || role === "super_admin"
+  const mfaSetupPath =
+    role === "super_admin" ? "/mfa-setup?returnTo=/super-admin" : "/mfa-setup"
   const roleLabel =
     role === "manager" ? "Manager"
     : role === "org_admin" ? "Org Admin"
@@ -412,151 +418,241 @@ export function ProfileSettingsDialog({
                   </h3>
                 </div>
 
-                {/* super_admin: informational only */}
-                {role === "super_admin" && (
-                  <div className="flex items-start gap-3 rounded-xl border border-border bg-muted/40 p-4">
-                    <Info className="size-4 text-muted-foreground mt-0.5 shrink-0" />
-                    <p className="text-[11px] text-muted-foreground leading-relaxed">
-                      2FA for super admin accounts is managed via the Supabase dashboard.
-                    </p>
+                {mfaLoading ? (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+                    <Loader2 className="size-4 animate-spin" />
+                    <span>Loading 2FA status…</span>
                   </div>
-                )}
-
-                {/* All other roles */}
-                {role !== "super_admin" && (
-                  mfaLoading ? (
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
-                      <Loader2 className="size-4 animate-spin" />
-                      <span>Loading 2FA status…</span>
+                ) : (
+                  <>
+                    {/* Status badge */}
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-bold text-foreground">Status</p>
+                      {mfaEnrolled ? (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-green-500/10 border border-green-500/20 text-green-600">
+                          <ShieldCheck className="size-3" />
+                          Enabled
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-muted border border-border text-muted-foreground">
+                          <ShieldOff className="size-3" />
+                          Disabled
+                        </span>
+                      )}
                     </div>
-                  ) : (
-                    <>
-                      {/* Status badge */}
-                      <div className="flex items-center justify-between">
-                        <p className="text-xs font-bold text-foreground">Status</p>
-                        {mfaEnrolled ? (
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-green-500/10 border border-green-500/20 text-green-600">
-                            <ShieldCheck className="size-3" />
-                            Enabled
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-muted border border-border text-muted-foreground">
-                            <ShieldOff className="size-3" />
-                            Disabled
-                          </span>
-                        )}
-                      </div>
 
-                      {mfaError && (
-                        <p role="alert" className="text-xs font-medium text-red-400">{mfaError}</p>
-                      )}
+                    {mfaError && (
+                      <p role="alert" className="text-xs font-medium text-red-400">{mfaError}</p>
+                    )}
 
-                      {mfaEnrolled && role !== "super_admin" && (
-                        <div className="rounded-xl border border-border bg-muted/20 p-4 space-y-3">
-                          <div>
-                            <p className="text-xs font-bold text-foreground">Recovery codes</p>
-                            <p className="text-[11px] text-muted-foreground leading-relaxed mt-1">
-                              One-time backup codes if you lose your authenticator device.
-                            </p>
-                          </div>
-
-                          {generatingRecoveryCodes ? (
-                            <RecoveryCodesLoading />
-                          ) : recoveryCodes ? (
-                            <RecoveryCodesDisplay
-                              codes={recoveryCodes}
-                              onDismiss={() => setRecoveryCodes(null)}
-                              dismissLabel="Done"
-                            />
-                          ) : showRegenerateRecoveryConfirm ? (
-                            <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-3">
-                              <p className="text-xs font-bold text-foreground">Generate new recovery codes?</p>
-                              <p className="text-[11px] text-muted-foreground leading-relaxed">
-                                This invalidates all previous recovery codes immediately. Save the new batch in a secure place.
-                              </p>
-                              <div className="flex gap-2 justify-end">
-                                <button
-                                  type="button"
-                                  onClick={() => setShowRegenerateRecoveryConfirm(false)}
-                                  disabled={generatingRecoveryCodes}
-                                  className="h-9 px-4 rounded-xl text-xs font-black uppercase tracking-widest border border-border bg-background hover:bg-muted disabled:opacity-50 transition-all"
-                                >
-                                  Cancel
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => void handleGenerateRecoveryCodes()}
-                                  disabled={generatingRecoveryCodes}
-                                  className="inline-flex items-center gap-2 h-9 px-4 rounded-xl text-xs font-black uppercase tracking-widest bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50 transition-all"
-                                >
-                                  {generatingRecoveryCodes
-                                    ? <Loader2 className="size-3.5 animate-spin" />
-                                    : <KeyRound className="size-3.5" />}
-                                  Generate
-                                </button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="flex justify-end">
-                              <button
-                                type="button"
-                                onClick={() => setShowRegenerateRecoveryConfirm(true)}
-                                className="inline-flex items-center gap-2 h-10 px-5 rounded-xl text-xs font-black uppercase tracking-widest border border-border bg-background hover:bg-muted transition-all"
-                              >
-                                <KeyRound className="size-4" />
-                                Generate new recovery codes
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* manager / org_admin: mandatory, regenerate only */}
-                      {isPrivilegedRole && (
-                        <>
+                    {/* Privileged enrolled: recovery codes + replace authenticator side by side */}
+                    {isPrivilegedRole && mfaEnrolled && (
+                      <>
+                        {role !== "super_admin" && (
                           <p className="text-[11px] text-muted-foreground leading-relaxed">
                             Two-factor authentication is required for your role and cannot be disabled.
                           </p>
-                          {showRegenerateConfirm ? (
-                            <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-3">
-                              <p className="text-xs font-bold text-foreground">Confirm regeneration</p>
-                              <p className="text-[11px] text-muted-foreground leading-relaxed">
-                                This will remove your current authenticator and require you to re-scan a new QR code. You'll be redirected to set up 2FA again.
+                        )}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {/* LEFT — Recovery Codes */}
+                          <div className="rounded-xl border border-border bg-muted/20 p-4 space-y-3 flex flex-col">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <KeyRound className="size-4 text-muted-foreground" />
+                                <p className="text-xs font-bold text-foreground">Recovery Codes</p>
+                              </div>
+                              <p className="text-[11px] text-muted-foreground leading-relaxed mt-1">
+                                One-time backup codes if you lose your authenticator device. Generating new codes invalidates your previous ones.
                               </p>
-                              <div className="flex gap-2 justify-end">
+                            </div>
+
+                            {generatingRecoveryCodes ? (
+                              <RecoveryCodesLoading />
+                            ) : recoveryCodes ? (
+                              <RecoveryCodesDisplay
+                                codes={recoveryCodes}
+                                onDismiss={() => setRecoveryCodes(null)}
+                                dismissLabel="Done"
+                              />
+                            ) : showRegenerateRecoveryConfirm ? (
+                              <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-3">
+                                <p className="text-xs font-bold text-foreground">Generate new recovery codes?</p>
+                                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                                  This invalidates all previous recovery codes immediately. Save the new batch in a secure place.
+                                </p>
+                                <div className="flex gap-2 justify-end">
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowRegenerateRecoveryConfirm(false)}
+                                    disabled={generatingRecoveryCodes}
+                                    className="h-9 px-4 rounded-xl text-xs font-black uppercase tracking-widest border border-border bg-background hover:bg-muted disabled:opacity-50 transition-all"
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleGenerateRecoveryCodes()}
+                                    disabled={generatingRecoveryCodes}
+                                    className="inline-flex items-center gap-2 h-9 px-4 rounded-xl text-xs font-black uppercase tracking-widest bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50 transition-all"
+                                  >
+                                    {generatingRecoveryCodes
+                                      ? <Loader2 className="size-3.5 animate-spin" />
+                                      : <KeyRound className="size-3.5" />}
+                                    Generate
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex justify-end mt-auto">
                                 <button
                                   type="button"
-                                  onClick={() => setShowRegenerateConfirm(false)}
-                                  disabled={unenrolling}
-                                  className="h-9 px-4 rounded-xl text-xs font-black uppercase tracking-widest border border-border bg-background hover:bg-muted disabled:opacity-50 transition-all"
+                                  onClick={() => setShowRegenerateRecoveryConfirm(true)}
+                                  className="inline-flex items-center justify-center gap-2 h-10 px-5 rounded-xl text-xs font-black uppercase tracking-widest border border-border bg-background hover:bg-muted transition-all w-full sm:w-auto"
                                 >
-                                  Cancel
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => void handleRegenerate2FA()}
-                                  disabled={unenrolling}
-                                  className="inline-flex items-center gap-2 h-9 px-4 rounded-xl text-xs font-black uppercase tracking-widest bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50 transition-all"
-                                >
-                                  {unenrolling
-                                    ? <Loader2 className="size-3.5 animate-spin" />
-                                    : <RefreshCw className="size-3.5" />}
-                                  {unenrolling ? "Removing…" : "Regenerate"}
+                                  <KeyRound className="size-4" />
+                                  Generate New Recovery Codes
                                 </button>
                               </div>
+                            )}
+                          </div>
+
+                          {/* RIGHT — Replace Authenticator */}
+                          <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-3 flex flex-col">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <RefreshCw className="size-4 text-amber-500" />
+                                <p className="text-xs font-bold text-foreground">Replace Authenticator</p>
+                              </div>
+                              <p className="text-[11px] text-muted-foreground leading-relaxed mt-1">
+                                Removes your current authenticator app and starts a fresh 2FA setup. Use this if you got a new phone.
+                              </p>
                             </div>
-                          ) : (
-                            <div className="flex justify-end">
+
+                            {showRegenerateConfirm ? (
+                              <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-3 mt-auto">
+                                <p className="text-xs font-bold text-foreground">Confirm regeneration</p>
+                                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                                  This will remove your current authenticator and require you to re-scan a new QR code. You'll be redirected to set up 2FA again.
+                                </p>
+                                <div className="flex gap-2 justify-end">
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowRegenerateConfirm(false)}
+                                    disabled={unenrolling}
+                                    className="h-9 px-4 rounded-xl text-xs font-black uppercase tracking-widest border border-border bg-background hover:bg-muted disabled:opacity-50 transition-all"
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleRegenerate2FA()}
+                                    disabled={unenrolling}
+                                    className="inline-flex items-center gap-2 h-9 px-4 rounded-xl text-xs font-black uppercase tracking-widest bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50 transition-all"
+                                  >
+                                    {unenrolling
+                                      ? <Loader2 className="size-3.5 animate-spin" />
+                                      : <RefreshCw className="size-3.5" />}
+                                    {unenrolling ? "Removing…" : "Regenerate"}
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex justify-end mt-auto">
+                                <button
+                                  type="button"
+                                  onClick={() => setShowRegenerateConfirm(true)}
+                                  className="inline-flex items-center justify-center gap-2 h-10 px-5 rounded-xl text-xs font-black uppercase tracking-widest bg-foreground text-background shadow-sm hover:bg-foreground/90 transition-all w-full sm:w-auto"
+                                >
+                                  <RefreshCw className="size-4" />
+                                  Regenerate 2FA
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    {/* Technician enrolled: recovery codes (standalone) */}
+                    {role === "technician" && mfaEnrolled && (
+                      <div className="rounded-xl border border-border bg-muted/20 p-4 space-y-3">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <KeyRound className="size-4 text-muted-foreground" />
+                            <p className="text-xs font-bold text-foreground">Recovery Codes</p>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground leading-relaxed mt-1">
+                            One-time backup codes if you lose your authenticator device. Generating new codes invalidates your previous ones.
+                          </p>
+                        </div>
+
+                        {generatingRecoveryCodes ? (
+                          <RecoveryCodesLoading />
+                        ) : recoveryCodes ? (
+                          <RecoveryCodesDisplay
+                            codes={recoveryCodes}
+                            onDismiss={() => setRecoveryCodes(null)}
+                            dismissLabel="Done"
+                          />
+                        ) : showRegenerateRecoveryConfirm ? (
+                          <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-3">
+                            <p className="text-xs font-bold text-foreground">Generate new recovery codes?</p>
+                            <p className="text-[11px] text-muted-foreground leading-relaxed">
+                              This invalidates all previous recovery codes immediately. Save the new batch in a secure place.
+                            </p>
+                            <div className="flex gap-2 justify-end">
                               <button
                                 type="button"
-                                onClick={() => setShowRegenerateConfirm(true)}
-                                className="inline-flex items-center gap-2 h-10 px-5 rounded-xl text-xs font-black uppercase tracking-widest bg-foreground text-background shadow-sm hover:bg-foreground/90 transition-all"
+                                onClick={() => setShowRegenerateRecoveryConfirm(false)}
+                                disabled={generatingRecoveryCodes}
+                                className="h-9 px-4 rounded-xl text-xs font-black uppercase tracking-widest border border-border bg-background hover:bg-muted disabled:opacity-50 transition-all"
                               >
-                                <RefreshCw className="size-4" />
-                                Regenerate 2FA
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void handleGenerateRecoveryCodes()}
+                                disabled={generatingRecoveryCodes}
+                                className="inline-flex items-center gap-2 h-9 px-4 rounded-xl text-xs font-black uppercase tracking-widest bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50 transition-all"
+                              >
+                                {generatingRecoveryCodes
+                                  ? <Loader2 className="size-3.5 animate-spin" />
+                                  : <KeyRound className="size-3.5" />}
+                                Generate
                               </button>
                             </div>
-                          )}
+                          </div>
+                        ) : (
+                          <div className="flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => setShowRegenerateRecoveryConfirm(true)}
+                              className="inline-flex items-center justify-center gap-2 h-10 px-5 rounded-xl text-xs font-black uppercase tracking-widest border border-border bg-background hover:bg-muted transition-all w-full sm:w-auto"
+                            >
+                              <KeyRound className="size-4" />
+                              Generate New Recovery Codes
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                      {/* super_admin not enrolled: enable only */}
+                      {role === "super_admin" && !mfaEnrolled && (
+                        <>
+                          <p className="text-[11px] text-muted-foreground leading-relaxed">
+                            Add an extra layer of security to your account with an authenticator app.
+                          </p>
+                          <div className="flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => { onOpenChange(false); router.push(mfaSetupPath) }}
+                              className="inline-flex items-center gap-2 h-10 px-5 rounded-xl text-xs font-black uppercase tracking-widest bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 transition-all"
+                            >
+                              <Shield className="size-4" />
+                              Enable 2FA
+                            </button>
+                          </div>
                         </>
                       )}
 
@@ -616,7 +712,7 @@ export function ProfileSettingsDialog({
                             <div className="flex justify-end">
                               <button
                                 type="button"
-                                onClick={() => { onOpenChange(false); router.push("/mfa-setup") }}
+                                onClick={() => { onOpenChange(false); router.push(mfaSetupPath) }}
                                 className="inline-flex items-center gap-2 h-10 px-5 rounded-xl text-xs font-black uppercase tracking-widest bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 transition-all"
                               >
                                 <Shield className="size-4" />
@@ -626,8 +722,7 @@ export function ProfileSettingsDialog({
                           </>
                         )
                       )}
-                    </>
-                  )
+                  </>
                 )}
               </section>
             </>
