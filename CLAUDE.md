@@ -2,6 +2,76 @@
 
 ## Recent Sessions
 
+### Session: June 10, 2026 — Super_Admin + Org_Admin Mandatory 2FA ENFORCED
+- **Super_admin mandatory 2FA gate COMPLETE and verified in production.**
+  James enrolled app-level TOTP, saved recovery codes, verified the
+  recovery-code login path end-to-end, THEN enforcement was turned on.
+  Never enforce before proving the recovery path works.
+- **Discovered + closed prerequisite gap:** super_admin had NO access to
+  Profile Settings at all (dialog only mounted on /dashboard, which
+  super_admin is blocked from; old Security tab showed "managed via
+  Supabase dashboard" note). Mounted ProfileSettingsDialog on /super-admin
+  (gear button in header), replaced the note with real controls:
+  not enrolled → Enable 2FA; enrolled → Regenerate; NO Disable for
+  super_admin (mandatory role, same as managers).
+- **Gate architecture:** /super-admin and /org-admin do NOT pass through
+  the dashboard's checkSessionAndRole — they have their own auth gates.
+  Created shared helper `lib/mfa-gate.ts`:
+  `resolveMfaGateRedirect(returnTo)` mirrors dashboard gate steps 2–3:
+  not enrolled → `/mfa-setup?returnTo=X`; aal2 → pass; aal1 with valid
+  recovery elevation (live DB check) → pass; else `/mfa-challenge?returnTo=X`.
+  Wired into all three /super-admin pages (main, labs/[id], orgs/[id])
+  AFTER role check, BEFORE `setAuthorized(true)`. Error semantics copied
+  from dashboard gate (AAL-check error = fail-open — known, consistent;
+  if ever hardened, change BOTH gates together).
+- **Discovered + closed SECOND gap (Cursor report):** /org-admin performed
+  NO AAL/2FA checks of its own — org_admin 2FA was only enforced by the
+  /dashboard gate, so org_admins landing directly on /org-admin were never
+  challenged despite "mandatory" policy. Wired the shared helper into
+  /org-admin's gate with `returnTo=/org-admin`. Verified with test org_admin.
+- **returnTo plumbing:** /mfa-setup honors returnTo on ALL exit paths via
+  centralized `postSetupRedirect()` (already-enrolled guard, codes-gen
+  failure, codes Continue). /mfa-challenge honors `?returnTo=`, else decodes
+  user_role from JWT: super_admin → /super-admin, else /dashboard.
+  ProfileSettingsDialog takes `mfaReturnTo` prop (defaults: /super-admin for
+  super_admin, else /dashboard); /org-admin mount passes /org-admin.
+- **Profile Settings UX:** enrolled-state 2FA section restructured into two
+  distinct cards (`grid-cols-1 sm:grid-cols-2`): LEFT "Recovery Codes"
+  (neutral) with Generate New Recovery Codes; RIGHT "Replace Authenticator"
+  (amber warning) with Regenerate 2FA. Rationale: the two actions have very
+  different blast radius (reissue codes vs destroy verified factor) and
+  were misclick-prone stacked together. Technician enrolled state unchanged
+  (standalone codes card + disable flow). Dialog widened 560px → 760px.
+  ProfileSettingsDialog now mounted on /org-admin too (gear in header).
+- **Recovery elevation verified live in prod DB:** redeem writes
+  mfa_recovery_elevations row, expires_at = created_at + 60min exactly,
+  still_valid flips false after expiry; expired rows linger as inert rows
+  (gate checks expires_at live — TTL honored by live check, not deletion).
+  60 min = lifetime of the ELEVATION (session trust), not the codes; codes
+  never expire, single-use. Recovery login = 60-min emergency window —
+  intended use is to fix 2FA (Replace Authenticator) within it.
+- **ALCOA+ finding (good news):** activity_logs has NO user_id column at
+  all — attribution is stored as user_name + user_initials TEXT SNAPSHOTS.
+  User deletion physically cannot affect audit attribution. Verified via
+  full FK map: nothing compliance-relevant cascades from auth.users
+  (profiles/mfa_factors/recovery_codes/elevations/active_sessions CASCADE =
+  correct; labs.owner_id SET NULL; feedback/lab_invites/organizations
+  created_by = NO ACTION → must pre-clear referencing rows or user delete
+  is BLOCKED with FK violation).
+- **Test data cleanup:** 3 test users deleted (TestLab manager, TestLab1234
+  manager, JamesonL org_admin) after pre-clearing feedback/lab_invites
+  references. Remaining users: James (super_admin) + Oakwood's two.
+  Test tenants (TestLab, TestLab123, TestOrg, TestLabinOrg) ARCHIVED, not
+  wiped — true tenant wipe (cascades inventory/audit) deferred to 8I
+  pre-customer pass; verify lab_id FK cascade chain before ever running it.
+  Note: deleting tonight's org_admin tester means re-testing the org-admin
+  gate requires provisioning a fresh org + org_admin via invite flow.
+- **Recovery codes regenerated** post-testing (gate tests burned several) —
+  fresh batch of 10 saved, old sheet discarded. Old downloaded sheets
+  become PARTIALLY DEAD after any code use — always regenerate + re-save
+  after burning codes in tests.
+- Stray console.log removed from /super-admin auth gate (8I item).
+
 ### Session: June 7, 2026 — Recovery Codes SHIPPED + Hook Lockout Recovery
 - Recovery codes COMPLETE and verified in production (commit 8f13692).
   Generation (enrollment + Security-tab regen), redeem at /mfa-challenge,
@@ -245,15 +315,18 @@ medical device), SDLC approach, validation strategy, known limitations
 
 #### 8J — Two-Factor Authentication ✅
 - TOTP via Supabase MFA (max 1 factor per user)
-- Mandatory for managers + org admins, optional for technicians
+- Mandatory for super_admin, managers, and org admins; optional for technicians
 - Server-side enrollment endpoint (`/api/mfa/enroll`) handles ghost factor
   cleanup atomically using admin API
-- AAL2-gated dashboard access for privileged roles
+- AAL2-gated access for privileged roles: dashboard gate (manager/org_admin),
+  `lib/mfa-gate.ts` on /super-admin (×3 pages) and /org-admin
+- Recovery codes + DB-row elevation gate (60-min TTL, live check)
 - Onboarding Step 4 embeds enrollment for new managers
 - `/mfa-setup`, `/mfa-challenge`, dashboard gate, login flow all wired
 - React Strict Mode double-mount guarded via `useRef` lock
-- Profile Settings → Security tab for in-app 2FA management
-  (enable/disable for technicians, regenerate for managers/org admins)
+- Profile Settings → Security tab on /dashboard, /super-admin, /org-admin
+  (two-card enrolled layout; enable/disable for technicians; regenerate for
+  privileged roles; no disable for super_admin/manager/org_admin)
 
 ### Future — Post 10 Customers
 - Open self-serve lab registration (drop invite-only model)
@@ -386,15 +459,17 @@ tooling (formal pen testing, SOC 2).
 #### Role-tiered enforcement
 | Role | 2FA | Enforcement |
 |------|-----|-------------|
-| super_admin | ✅ Supabase dashboard MFA (separate from app MFA) | Manual |
-| org_admin | ✅ Mandatory | Login + dashboard gate |
+| super_admin | ✅ Mandatory (app-level TOTP) | `/super-admin` gate (`resolveMfaGateRedirect("/super-admin")`) |
+| org_admin | ✅ Mandatory | `/dashboard` gate AND `/org-admin` gate (`resolveMfaGateRedirect("/org-admin")`) |
 | manager | ✅ Mandatory | Login + dashboard gate |
 | technician | ⚪ Optional | Voluntary via Profile Settings |
 
 #### AAL (Authenticator Assurance Level) model
 - `aal1` = password verified only
 - `aal2` = password + TOTP verified this session
-- Managers + org admins must reach `aal2` to access `/dashboard`
+- Privileged roles must reach `aal2` (or hold valid recovery elevation) to
+  access their routes: managers/org_admins → `/dashboard`; org_admins also
+  → `/org-admin`; super_admin → `/super-admin`
 - AAL is encoded in the JWT and read via `supabase.auth.mfa.getAuthenticatorAssuranceLevel()`
 
 #### Gate order (NEVER REORDER)
@@ -405,6 +480,21 @@ On every dashboard load, in `checkSessionAndRole`:
 4. **Otherwise:** proceed to dashboard
 
 Onboarding MUST run first because `/welcome` Step 4 handles 2FA enrollment internally.
+
+#### Privileged-route MFA gate (`lib/mfa-gate.ts`)
+`/super-admin` and `/org-admin` have their own auth gates — they do NOT pass
+through `checkSessionAndRole`. Shared helper `resolveMfaGateRedirect(returnTo)`
+mirrors dashboard gate steps 2–3:
+1. Not enrolled → `/mfa-setup?returnTo=${returnTo}`
+2. `aal2` → pass (`null`)
+3. `aal1` + valid recovery elevation (live DB check via
+   `checkRecoveryElevation()`) → pass
+4. Otherwise → `/mfa-challenge?returnTo=${returnTo}`
+
+Wired AFTER role confirmation, BEFORE `setAuthorized(true)` on:
+`/super-admin`, `/super-admin/labs/[id]`, `/super-admin/orgs/[id]`, `/org-admin`.
+Error semantics match dashboard gate (AAL API error = fail-open; if hardened,
+change both gates together).
 
 #### Server-side enrollment endpoint (`/api/mfa/enroll`)
 Enrollment runs server-side, NOT directly via the client SDK, because:
@@ -424,8 +514,8 @@ Flow:
 9. Verification via `supabase.auth.mfa.challengeAndVerify()` (client-side is fine here)
 
 #### Pages
-- `/mfa-setup` — enrollment (QR + secret + 6-digit input). Uses `useRef` lock to prevent React Strict Mode double-invocation. Has guard: if already enrolled, redirects to `/dashboard`.
-- `/mfa-challenge` — login TOTP verification. Redirects to `/mfa-setup` if not enrolled.
+- `/mfa-setup` — enrollment (QR + secret + 6-digit input). Uses `useRef` lock to prevent React Strict Mode double-invocation. Honors `?returnTo=` on all exit paths via `postSetupRedirect()` (already-enrolled guard, codes-gen failure, codes Continue); default `/dashboard`.
+- `/mfa-challenge` — login TOTP verification. Honors `?returnTo=`; else JWT role fallback (super_admin → `/super-admin`, else `/dashboard`). Redirects to `/mfa-setup` if not enrolled.
 - `/welcome` Step 4 — enrollment inside onboarding. Auto-skips to Step 5 if already enrolled.
 
 #### Rules (Never Break)
@@ -438,30 +528,38 @@ Flow:
 
 ### Profile Settings — Security Tab
 
-The Profile Settings dialog has two sub-tabs: Profile (identity) and Security
-(account protection). Password reset and 2FA management both live under Security.
+The Profile Settings dialog (`sm:max-w-[760px]`) has two sub-tabs: Profile
+(identity) and Security (account protection). Mounted on `/dashboard` (header),
+`/super-admin` (gear button), and `/org-admin` (gear button). Optional
+`mfaReturnTo` prop controls post-setup redirect (defaults: `/super-admin` for
+super_admin, else `/dashboard`; `/org-admin` mount passes `/org-admin`).
 
 #### 2FA management by role
 
 | Role | UI |
 |------|-----|
-| super_admin | Informational note: "2FA managed via Supabase dashboard" |
-| manager / org_admin | Enabled badge + "Regenerate 2FA" button |
+| super_admin (not enrolled) | Enable 2FA button |
+| super_admin / manager / org_admin (enrolled) | Enabled badge + two-card grid: LEFT "Recovery Codes" (neutral, Generate New Recovery Codes) + RIGHT "Replace Authenticator" (amber warning, Regenerate 2FA). No Disable. |
 | technician (no 2FA) | Disabled badge + "Enable 2FA" button |
-| technician (has 2FA) | Enabled badge + "Disable 2FA" button |
+| technician (has 2FA) | Enabled badge + standalone Recovery Codes card + "Disable 2FA" button |
 
 #### Flows
 
-**Enable 2FA (technician):** Closes dialog → routes to `/mfa-setup` →
-server-side enrollment via `/api/mfa/enroll` → user scans QR → verify →
-redirect to `/dashboard`.
+**Enable 2FA (technician / super_admin not enrolled):** Closes dialog → routes
+to `/mfa-setup?returnTo=${mfaReturnTo}` → server-side enrollment via
+`/api/mfa/enroll` → user scans QR → verify → redirect per `returnTo`.
 
-**Disable 2FA (technician):** Inline confirmation card → on confirm,
+**Disable 2FA (technician only):** Inline confirmation card → on confirm,
 `unenrollTotp()` from `lib/mfa.ts` → UI updates in place, no page reload.
 
-**Regenerate 2FA (manager / org_admin):** Inline confirmation card → on
-confirm, `unenrollTotp()` removes existing verified factor → router pushes
-to `/mfa-setup` → user scans NEW QR → verify → redirect to `/dashboard`.
+**Regenerate 2FA (super_admin / manager / org_admin):** Amber "Replace
+Authenticator" card → inline confirmation → `unenrollTotp()` removes verified
+factor → router pushes to `/mfa-setup?returnTo=${mfaReturnTo}` → user scans
+NEW QR → verify → redirect per `returnTo`.
+
+**Generate recovery codes (all enrolled roles):** Neutral "Recovery Codes"
+card → inline confirmation → `generateMfaRecoveryCodes()` → display batch.
+Invalidates previous codes immediately.
 
 #### Regenerate window — expected behavior, NOT a bug
 
@@ -976,6 +1074,7 @@ orderedNotReceived, benchExpiring, outOfStock, totalCount, isLoading.
 - Two-factor enrollment must go through `/api/mfa/enroll` — never call `supabase.auth.mfa.enroll()` directly from client code
 - `/mfa-setup` page must use `useRef` lock to prevent React Strict Mode double-invocation (causes ghost factor race)
 - Dashboard gate order is fixed: onboarding → 2FA setup → 2FA challenge → dashboard
+- Privileged-route gates (`/super-admin`, `/org-admin`) use `resolveMfaGateRedirect(returnTo)` — steps 2–3 only; never bypass
 - `listFactors()` from the client SDK hides unverified factors — use admin API (`admin.auth.admin.mfa.listFactors`) when you need to see them
 - Never delete verified 2FA factors automatically — only `status = 'unverified'` can be cleaned up programmatically
 - Profile Settings Security tab must not call `supabase.auth.mfa.enroll()` directly — enable flow routes to `/mfa-setup` which uses `/api/mfa/enroll`
@@ -1075,7 +1174,7 @@ validation expectations from regulated customers.
 ### ALCOA+ Status
 | Principle | Implementation | Status |
 |-----------|---------------|--------|
-| Attributable | user_id + role via JWT on every audit row | ✅ |
+| Attributable | user_name + user_initials TEXT snapshots on every audit row (no user_id FK — survives user deletion) | ✅ |
 | Legible | Structured schema, TypeScript types | ✅ |
 | Contemporaneous | Server-side timestamps on all inserts | ✅ |
 | Original | Append-only audit log (RLS no UPDATE/DELETE) | ✅ |
@@ -1091,7 +1190,7 @@ validation expectations from regulated customers.
 | Computer-generated audit trail | logActivity() on all state changes | ✅ |
 | Time-stamped records | Supabase server timestamps | ✅ |
 | Immutable records | Append-only RLS on activity_logs | ✅ |
-| Attributable records | user_id on every audit row | ✅ |
+| Attributable records | user_name + user_initials snapshots on every audit row | ✅ |
 | Access controls | Role-based gates + RLS on all tables | ✅ |
 | Audit trail for validation | Approved/Rejected/Archived logged | ✅ |
 | Secure unique user IDs | Supabase Auth, one session per user | ✅ |
@@ -1100,7 +1199,7 @@ validation expectations from regulated customers.
 - activity_logs must NEVER have UPDATE or DELETE policy
 - No admin UI button, scheduled job, or API may modify audit rows
 - Only exception: full lab deletion (tenant wipe — must be documented)
-- logActivity() must include: user_id, lab_id, action, item context, timestamp
+- logActivity() must include: user_name, user_initials, lab_id, action, item context, timestamp
 - Audit rows written AFTER action succeeds, never speculatively
 
 ### Validation State Machine (Compliance-Critical)

@@ -11,13 +11,17 @@ import {
   Link2,
   Users,
   X,
+  Settings,
 } from "lucide-react"
+import type { User } from "@supabase/supabase-js"
 import { supabase } from "@/lib/supabase"
 import {
   sessionReplacedSignOut,
   verifyActiveSessionForUser,
   voluntarySignOut,
 } from "@/lib/active-session"
+import { resolveMfaGateRedirect } from "@/lib/mfa-gate"
+import { ProfileSettingsDialog } from "@/components/dashboard/profile-settings-dialog"
 
 type LabRow = {
   id: string
@@ -70,6 +74,8 @@ export default function OrgAdminPage() {
 
   const [gateLoading, setGateLoading] = useState(true)
   const [authorized, setAuthorized] = useState(false)
+  const [authUser, setAuthUser] = useState<User | null>(null)
+  const [profileDialogOpen, setProfileDialogOpen] = useState(false)
   const [orgId, setOrgId] = useState<string | null>(null)
   const [orgName, setOrgName] = useState<string>("")
   const [labs, setLabs] = useState<LabRow[]>([])
@@ -211,7 +217,14 @@ export default function OrgAdminPage() {
         return
       }
 
+      const mfaRedirect = await resolveMfaGateRedirect("/org-admin")
+      if (mfaRedirect) {
+        if (!cancelled) router.replace(mfaRedirect)
+        return
+      }
+
       const oid = profile.org_id as string
+      setAuthUser(session.user)
       setOrgId(oid)
       await loadDashboard(oid)
 
@@ -431,16 +444,35 @@ export default function OrgAdminPage() {
               <p className="text-xs text-muted-foreground truncate">Organization Admin</p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => void handleSignOut()}
-            className="shrink-0 inline-flex items-center gap-2 h-10 px-4 rounded-xl border border-border bg-background text-sm font-bold hover:bg-muted/50"
-          >
-            <LogOut className="size-4" aria-hidden />
-            Sign out
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setProfileDialogOpen(true)}
+              aria-label="Profile settings"
+              className="inline-flex items-center gap-2 h-10 px-4 rounded-xl border border-border bg-background text-sm font-bold hover:bg-muted/50"
+            >
+              <Settings className="size-4" aria-hidden />
+              Settings
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleSignOut()}
+              className="inline-flex items-center gap-2 h-10 px-4 rounded-xl border border-border bg-background text-sm font-bold hover:bg-muted/50"
+            >
+              <LogOut className="size-4" aria-hidden />
+              Sign out
+            </button>
+          </div>
         </div>
       </header>
+
+      <ProfileSettingsDialog
+        open={profileDialogOpen}
+        onOpenChange={setProfileDialogOpen}
+        user={authUser}
+        role="org_admin"
+        mfaReturnTo="/org-admin"
+      />
 
       <main className="mx-auto max-w-6xl px-4 sm:px-6 py-8 sm:py-10 space-y-10">
         {pageError ? (

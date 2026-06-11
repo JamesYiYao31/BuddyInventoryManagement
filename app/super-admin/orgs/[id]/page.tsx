@@ -9,7 +9,7 @@ import {
   ChevronRight,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
-import { resolveSuperAdminMfaRedirect } from "@/lib/super-admin-mfa-gate"
+import { resolveMfaGateRedirect } from "@/lib/mfa-gate"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -206,7 +206,7 @@ export default function OrgDetailPage() {
         return
       }
 
-      const mfaRedirect = await resolveSuperAdminMfaRedirect()
+      const mfaRedirect = await resolveMfaGateRedirect("/super-admin")
       if (mfaRedirect) {
         if (!cancelled) router.replace(mfaRedirect)
         return

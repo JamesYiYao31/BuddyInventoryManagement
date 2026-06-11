@@ -23,7 +23,7 @@ import {
 import type { User } from "@supabase/supabase-js"
 import { supabase } from "@/lib/supabase"
 import { voluntarySignOut } from "@/lib/active-session"
-import { resolveSuperAdminMfaRedirect } from "@/lib/super-admin-mfa-gate"
+import { resolveMfaGateRedirect } from "@/lib/mfa-gate"
 import { ProfileSettingsDialog } from "@/components/dashboard/profile-settings-dialog"
 
 type OrganizationRow = {
@@ -224,7 +224,7 @@ export default function SuperAdminPage() {
         return
       }
 
-      const mfaRedirect = await resolveSuperAdminMfaRedirect()
+      const mfaRedirect = await resolveMfaGateRedirect("/super-admin")
       if (mfaRedirect) {
         if (!cancelled) router.replace(mfaRedirect)
         return

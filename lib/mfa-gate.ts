@@ -5,13 +5,13 @@ import {
 } from "@/lib/mfa"
 
 /**
- * Super-admin MFA gate (mirrors dashboard checkSessionAndRole steps 2–3).
+ * Privileged-route MFA gate (mirrors dashboard checkSessionAndRole steps 2–3).
  * Returns a redirect path, or null if the user may proceed.
  */
-export async function resolveSuperAdminMfaRedirect(): Promise<string | null> {
+export async function resolveMfaGateRedirect(returnTo: string): Promise<string | null> {
   const { enrolled } = await getMfaEnrollmentStatus()
   if (!enrolled) {
-    return "/mfa-setup?returnTo=/super-admin"
+    return `/mfa-setup?returnTo=${returnTo}`
   }
 
   const level = await getAssuranceLevel()
@@ -24,7 +24,7 @@ export async function resolveSuperAdminMfaRedirect(): Promise<string | null> {
     if (recovered) {
       return null
     }
-    return "/mfa-challenge?returnTo=/super-admin"
+    return `/mfa-challenge?returnTo=${returnTo}`
   }
 
   return null

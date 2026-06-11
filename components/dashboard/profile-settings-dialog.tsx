@@ -25,6 +25,7 @@ interface ProfileSettingsDialogProps {
   onOpenChange: (open: boolean) => void
   user: any
   role: "manager" | "org_admin" | "technician" | "super_admin"
+  mfaReturnTo?: string
   onProfileUpdated?: () => void | Promise<void>
 }
 
@@ -33,10 +34,15 @@ export function ProfileSettingsDialog({
   onOpenChange,
   user,
   role,
+  mfaReturnTo,
   onProfileUpdated,
 }: ProfileSettingsDialogProps) {
   const { toast } = useToast()
   const router = useRouter()
+
+  const resolvedMfaReturnTo =
+    mfaReturnTo ?? (role === "super_admin" ? "/super-admin" : "/dashboard")
+  const mfaSetupPath = `/mfa-setup?returnTo=${resolvedMfaReturnTo}`
 
   const initialName =
     user?.user_metadata?.full_name ||
@@ -210,11 +216,7 @@ export function ProfileSettingsDialog({
         return
       }
       onOpenChange(false)
-      router.push(
-        role === "super_admin"
-          ? "/mfa-setup?returnTo=/super-admin"
-          : "/mfa-setup",
-      )
+      router.push(`/mfa-setup?returnTo=${resolvedMfaReturnTo}`)
     } catch {
       setMfaError("Could not remove existing 2FA. Please try again.")
       setShowRegenerateConfirm(false)
@@ -248,8 +250,6 @@ export function ProfileSettingsDialog({
   }
 
   const isPrivilegedRole = role === "manager" || role === "org_admin" || role === "super_admin"
-  const mfaSetupPath =
-    role === "super_admin" ? "/mfa-setup?returnTo=/super-admin" : "/mfa-setup"
   const roleLabel =
     role === "manager" ? "Manager"
     : role === "org_admin" ? "Org Admin"
@@ -259,9 +259,9 @@ export function ProfileSettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[560px] p-0 overflow-hidden border-border bg-card">
+      <DialogContent className="sm:max-w-[760px] p-0 overflow-hidden border-border bg-card">
         {/* Header */}
-        <div className="px-7 pt-7 pb-5 border-b border-border bg-muted/30">
+        <div className="px-7 sm:px-9 pt-7 sm:pt-8 pb-5 sm:pb-6 border-b border-border bg-muted/30">
           <DialogHeader className="space-y-1.5">
             <DialogTitle className="text-xl font-black tracking-tight text-foreground">
               Profile Settings
@@ -290,13 +290,13 @@ export function ProfileSettingsDialog({
           ))}
         </div>
 
-        <div className="max-h-[60vh] overflow-y-auto px-7 py-6 space-y-8">
+        <div className="max-h-[60vh] overflow-y-auto px-7 sm:px-9 py-6 sm:py-8 space-y-8 sm:space-y-10">
 
           {/* ── PROFILE TAB ── */}
           {activeTab === "profile" && (
             <>
               {/* Basic Info */}
-              <section className="space-y-4">
+              <section className="space-y-4 sm:space-y-5">
                 <div className="flex items-center gap-2">
                   <UserCircle2 className="size-4 text-primary" />
                   <h3 className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
@@ -334,7 +334,7 @@ export function ProfileSettingsDialog({
               <div className="h-px bg-border" />
 
               {/* Account Details */}
-              <section className="space-y-4">
+              <section className="space-y-4 sm:space-y-5">
                 <div className="flex items-center gap-2">
                   <Mail className="size-4 text-primary" />
                   <h3 className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
@@ -378,7 +378,7 @@ export function ProfileSettingsDialog({
           {activeTab === "security" && (
             <>
               {/* Password */}
-              <section className="space-y-4">
+              <section className="space-y-4 sm:space-y-5">
                 <div className="flex items-center gap-2">
                   <KeyRound className="size-4 text-primary" />
                   <h3 className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
@@ -410,7 +410,7 @@ export function ProfileSettingsDialog({
               <div className="h-px bg-border" />
 
               {/* Two-Factor Authentication */}
-              <section className="space-y-4">
+              <section className="space-y-4 sm:space-y-5">
                 <div className="flex items-center gap-2">
                   <Shield className="size-4 text-primary" />
                   <h3 className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
@@ -453,9 +453,9 @@ export function ProfileSettingsDialog({
                             Two-factor authentication is required for your role and cannot be disabled.
                           </p>
                         )}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                           {/* LEFT — Recovery Codes */}
-                          <div className="rounded-xl border border-border bg-muted/20 p-4 space-y-3 flex flex-col">
+                          <div className="rounded-xl border border-border bg-muted/20 p-4 sm:p-5 space-y-3 sm:space-y-4 flex flex-col min-w-0">
                             <div>
                               <div className="flex items-center gap-2">
                                 <KeyRound className="size-4 text-muted-foreground" />
@@ -517,7 +517,7 @@ export function ProfileSettingsDialog({
                           </div>
 
                           {/* RIGHT — Replace Authenticator */}
-                          <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-3 flex flex-col">
+                          <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 sm:p-5 space-y-3 sm:space-y-4 flex flex-col min-w-0">
                             <div>
                               <div className="flex items-center gap-2">
                                 <RefreshCw className="size-4 text-amber-500" />
@@ -575,7 +575,7 @@ export function ProfileSettingsDialog({
 
                     {/* Technician enrolled: recovery codes (standalone) */}
                     {role === "technician" && mfaEnrolled && (
-                      <div className="rounded-xl border border-border bg-muted/20 p-4 space-y-3">
+                      <div className="rounded-xl border border-border bg-muted/20 p-4 sm:p-5 space-y-3 sm:space-y-4">
                         <div>
                           <div className="flex items-center gap-2">
                             <KeyRound className="size-4 text-muted-foreground" />
