@@ -7,6 +7,7 @@ import { persistNewActiveSession, voluntarySignOut } from "@/lib/active-session"
 import { getMfaEnrollmentStatus } from "@/lib/mfa"
 import { useRouter, useSearchParams } from "next/navigation"
 import Image from "next/image"
+import Link from "next/link"
 
 function LoginContent() {
   const searchParams = useSearchParams()
@@ -426,6 +427,15 @@ function LoginContent() {
             </div>
           </div>
           <p className="mt-8 text-center text-sm font-black uppercase tracking-[0.3em] text-muted-foreground">Authorized personnel only</p>
+          <p className="mt-4 text-center text-xs text-muted-foreground">
+            <Link href="/terms" className="transition-colors hover:text-foreground">
+              Terms
+            </Link>
+            <span aria-hidden> · </span>
+            <Link href="/privacy" className="transition-colors hover:text-foreground">
+              Privacy
+            </Link>
+          </p>
         </div>
       </main>
 
