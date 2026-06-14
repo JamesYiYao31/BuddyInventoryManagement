@@ -2,6 +2,104 @@
 
 ## Recent Sessions
 
+### Session: June 13, 2026 — Doc 8H: ToS + Privacy Policy DRAFTED + Pages SHIPPED
+- **8H was the last remaining go-live blocker; now content-complete.** Two legal
+  docs drafted, two public pages built and verified, content pasted/committed.
+- **Five 8H decisions LOCKED:**
+  1. **Legal entity:** Buddy Technologies LLC — a Wyoming LLC. Chosen as an
+     UMBRELLA entity (not product-named) so the future predictive-health product
+     lives under the same entity with zero new paperwork. Product stays "Buddy
+     Inventory Management." Name availability confirmed on WY SoS search.
+     **NOT YET FORMED** — placeholder in docs until James files. Two-line swap
+     if the registered name ever differs (it won't).
+  2. **Governing law:** Wyoming (follows the entity). WY chosen over DE for
+     solo non-resident founder: ~$100 filing + ~$60/yr report, no state income
+     tax, owner privacy. DE's prestige only matters with VCs (bootstrapping).
+  3. **Legal/privacy contact:** support@yourbuddyapp.com (Cloudflare email
+     routing to inbox; same address used throughout both docs).
+  4. **Uptime posture:** "commercially reasonable efforts," explicit NO SLA, no
+     service credits, maintenance-window clause. Solo founder on Vercel/Supabase
+     can't control third-party downtime → never promise a number.
+  5. **Billing language:** GENERIC ("fees/trial as specified at sign-up or order
+     form"). Deliberately NOT hard-coding trial/grace terms so Stripe details can
+     firm up without amending + re-accepting the ToS.
+- **ToS — three load-bearing clauses (the why, for future edits):**
+  - **§4 No PHI:** not a HIPAA Business Associate, will NOT sign a BAA; customer
+    indemnifies Buddy (§14) if their users upload PHI. Turns the intentional
+    no-PHI architecture into contractual armor.
+  - **§6.2 Compliance support ≠ guarantee:** markets 21 CFR Part 11 / ALCOA+
+    alignment while making the customer's quality system (not the software)
+    responsible for their compliance. Protects against the scariest lawsuit
+    class in this market (blaming software for a failed inspection).
+  - **§13 Liability cap:** no indirect/consequential damages; total liability
+    capped at trailing-12-mo fees (or $100 if pre-revenue). Standard B2B SaaS.
+    NOTE: this caps the AMOUNT; the LLC is what protects PERSONAL assets — two
+    separate walls, both needed.
+  - **§5 retention** uses "AT LEAST" language to mirror 8B stored-commitment
+    design (promise a floor, always exceed it → can't violate own policy).
+- **Privacy Policy — architecture translated to disclosure:**
+  - Subprocessor table = real stack only: Supabase, Vercel, Resend, Upstash,
+    Cloudflare, Google Sheets. Stripe listed as PLANNED, not current.
+  - **§7** discloses the ALCOA+ name-snapshot design UP FRONT: audit entries
+    keep user_name/user_initials even after account deletion, framed as
+    audit-trail integrity → pre-empts any "right to deletion" conflict.
+  - US data residency, no-PHI, no-sale-of-data all stated. Relocation to Asia
+    does NOT change the data-residency story (services stay US-based).
+- **Pages shipped (commit 4942a29, container — verified; content commit separate):**
+  - No `middleware.ts` exists in repo — auth gates are page-level client checks
+    (`checkSessionAndRole`, `resolveMfaGateRedirect`), so new server-component
+    pages CANNOT interfere with auth (the main risk, resolved by architecture).
+  - `components/legal-page.tsx` — shared 720px prose layout, title +
+    `lastUpdated` prop + legal footer (Terms · Privacy · support@).
+  - `app/terms/page.tsx`, `app/privacy/page.tsx` — public server components,
+    static prerender (○), no auth wiring. Content between
+    `{/* === LEGAL CONTENT START/END === */}` markers.
+  - `app/login/page.tsx` — Terms · Privacy footer links added.
+  - Verified logged-out: `/terms` + `/privacy` reachable, `/login` footer renders,
+    login still works, protected routes still gate. Build passes.
+- **Content workflow:** drafted in markdown, converted to hand-built JSX (no new
+  deps; subprocessor table is a real `<table className="legal-table">`). Pasted
+  marker-to-marker into both pages. `lastUpdated` set to publish date and bumped
+  ONLY on real text changes (decided AGAINST auto `new Date()` — an always-today
+  date is legally meaningless and looks buggy). Source drafts retained in
+  `docs/terms-of-service.md` and `docs/privacy-policy.md`.
+- **Watch-items on paste:** if build warns `react/no-unescaped-entities`, add
+  `/* eslint-disable react/no-unescaped-entities */` per page (or escape with
+  `&apos;`); if subprocessor table looks unstyled, add table CSS to
+  `legal-page.tsx`.
+- **STILL REQUIRED before first PAYING customer (non-blocking, in-place swaps):**
+  - Lawyer review of both docs (jurisdiction fine print — WY specifics,
+    liability cap enforceability, state privacy-law nuance). Text is swappable
+    without touching routing.
+  - Form the WY LLC, then confirm registered name matches the placeholder.
+  - Fill real Effective/Last-updated dates at publish.
+- **Payment / Banking Stack Plan (decided this session — for Phase 6+ billing):**
+  - **Architecture:** WY LLC → EIN → US business bank acct (Mercury or Wise
+    Business) → Stripe US (subscription billing) → payout to US acct → Wise for
+    cheap MYR/SGD conversion to James personally.
+  - **Stripe vs Wise are NOT competitors:** Stripe = how customers PAY (recurring
+    card billing, trials, dunning, checkout — maps to Phase 6 billing states).
+    Wise = where money LIVES / currency conversion (NOT a billing engine).
+    Need BOTH, in sequence. Wise/Mercury replaces the BANK, not Stripe.
+  - James HAS an SSN → easy-mode: instant online EIN, standard Stripe
+    verification (no passport/8888 workarounds), normal bank onboarding. SSN is
+    PERMANENT — never changes/expires on relocation. Tax STATUS may change on
+    relocation (citizen/GC = worldwide income, simpler Schedule C, FEIE available;
+    visa-origin SSN non-resident = foreign-owned-LLC filings incl Form 5472 return).
+    Confirm with cross-border tax preparer AFTER move (~$300-600/yr), not now.
+  - Works identically from Malaysia OR Singapore — Stripe verifies the ENTITY;
+    foreign residential address is allowed. Residence only affects the final
+    currency hop + personal tax, not the business machinery.
+  - **Separate business bank account is MANDATORY** (not James's personal acct):
+    commingling funds pierces the LLC veil and destroys the liability protection.
+    Personal account untouched; pay self via deliberate owner's-draw transfers.
+  - **Alternatives considered + rejected:** Merchant-of-Record (Paddle/Polar) —
+    ~5%+ and shows a third party as seller, bad for B2B vendor-qualification.
+    Local entity (SG Pte Ltd / MY Sdn Bhd) — ~10x cost, no benefit to US lab
+    customers. PayPal — weak subscriptions, freeze risk. LLC+Stripe+Wise WINS.
+  - **Annual obligations to calendar:** WY annual report (~$60); US tax filing
+    (Form 5472 + pro-forma 1120 if foreign-owned — $25k penalty if missed).
+
 ### Session: June 10, 2026 — Super_Admin + Org_Admin Mandatory 2FA ENFORCED
 - **Super_admin mandatory 2FA gate COMPLETE and verified in production.**
   James enrolled app-level TOTP, saved recovery codes, verified the
@@ -197,6 +295,16 @@ role management, billing overview).
 - [ ] Stripe + billing (org-level, 3-month trial, 7-day grace)
 - [ ] Marketing website (yourbuddyapp.com)
 
+**Payment / Banking Stack (decided June 13, 2026):**
+WY LLC (Buddy Technologies LLC) → EIN → US business bank (Mercury or Wise
+Business) → Stripe US subscriptions → payout to US acct → Wise for MYR/SGD
+personal conversion. Stripe = billing engine; Wise/Mercury = bank layer — not
+competitors. Separate business account mandatory (veil protection). James has
+SSN → standard EIN + Stripe onboarding. Works from MY or SG; entity verified,
+not residential address. Rejected: MoR (Paddle/Polar), local SG/MY entity,
+PayPal. Calendar: WY annual report ~$60/yr; Form 5472 if foreign-owned LLC.
+ToS billing language kept generic until Stripe terms firm up (see 8H session).
+
 ### Phase 7: Security & UX Hardening ✅
 Editable tech key, one active session per user (active_sessions table
 + 30s poll), password strength enforcement, password reset via email,
@@ -240,7 +348,7 @@ Customer-facing answer: "We commit to retaining your audit logs for
 at least X years (your configured value). Currently we don't delete
 any audit records — they are preserved indefinitely."
 
-- [ ] Document retention commitment in ToS / Privacy Policy (Phase 8H)
+- [x] Document retention commitment in ToS / Privacy Policy (Phase 8H — §5 "at least" language)
 - [ ] Future: Automated retention cleanup job (NOT URGENT — storage cheap)
       Test extensively before enabling — deletion is irreversible.
 
@@ -298,10 +406,22 @@ Seed requirements:
 medical device), SDLC approach, validation strategy, known limitations
 (ZXing barcode limits, no PHI), change control process.
 
-#### 8H — Terms of Service & Privacy Policy (Pending)
-- ToS: data ownership, 3-year retention, no PHI clause, SLA
-- Privacy Policy: data collected, Supabase US storage, RLS protection
-- Publish at yourbuddyapp.com/terms and /privacy before first customer
+#### 8H — Terms of Service & Privacy Policy ✅ (draft + pages shipped)
+- **Entity:** Buddy Technologies LLC (Wyoming) — umbrella LLC, NOT YET FORMED
+- **Published at:** `/terms` and `/privacy` (static, no auth); login footer links
+- **Source drafts:** `docs/terms-of-service.md`, `docs/privacy-policy.md`
+- **Live JSX:** `app/terms/page.tsx`, `app/privacy/page.tsx` (marker blocks)
+- **Layout:** `components/legal-page.tsx` — 720px prose, manual `lastUpdated`
+- **ToS highlights:** no PHI / no BAA (§4); compliance support ≠ guarantee (§6.2);
+  liability cap trailing-12-mo fees (§13); retention "at least" (§5, mirrors 8B);
+  no SLA; generic billing language; WY governing law
+- **Privacy highlights:** subprocessor table (Supabase, Vercel, Resend, Upstash,
+  Cloudflare, Google Sheets; Stripe planned); ALCOA+ name-snapshot disclosure (§7);
+  US residency; no PHI; no sale of data
+- **Contact:** support@yourbuddyapp.com throughout
+- [ ] Lawyer review before first paying customer (in-place text swap, no routing change)
+- [ ] Form WY LLC + confirm registered name matches docs
+- [ ] Set real Effective/Last-updated dates at publish
 
 #### 8I — Pre-Customer Checklist ✅
 - Full checklist authored: docs/pre-customer-checklist.md
