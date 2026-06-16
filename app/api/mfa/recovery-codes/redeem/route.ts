@@ -14,13 +14,18 @@ const ratelimit = new Ratelimit({
 const ELEVATION_TTL_MINUTES = 60
 
 /**
- * Supabase Auth only elevates sessions to AAL2 via native TOTP verify — there is no
- * recovery-code factor type. After a valid recovery code is redeemed we insert a
- * short-lived row in mfa_recovery_elevations; the custom_access_token_hook
- * (Part 1B SQL — merge into your existing hook) sets JWT claim `aal` = `aal2` on the next token
- * refresh. The client MUST call supabase.auth.refreshSession() after success.
+ * Records a temporary recovery elevation after a valid recovery code is redeemed.
+ *
+ * Supabase only reaches native AAL2 via a genuine TOTP verification — there is no
+ * recovery-code factor type, and the custom_access_token_hook cannot set the `aal`
+ * claim (Supabase reserves it; the hook sets only lab_id/org_id/user_role). Instead,
+ * a successful redeem inserts a short-lived row into mfa_recovery_elevations
+ * (60-minute TTL, keyed to the session_id). Both gates — lib/mfa-gate.ts and the
+ * dashboard gate in app/dashboard/page.tsx — authorize an aal1 session by
+ * live-checking that row via GET /api/mfa/recovery-elevation-status. The session
+ * stays at aal1 throughout; recovery login never produces aal2.
  */
-async function grantPendingAal2Elevation(
+async function grantRecoveryElevation(
   admin: ReturnType<typeof createAdminClient>,
   userId: string,
   sessionId: string | null,
@@ -139,7 +144,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Could not redeem recovery code." }, { status: 500 })
     }
 
-    const elevationGranted = await grantPendingAal2Elevation(admin, user.id, sessionId)
+    const elevationGranted = await grantRecoveryElevation(admin, user.id, sessionId)
     if (!elevationGranted) {
       // Code consumed — user must regenerate; elevation requires hook + session_id in JWT.
       await logMfaRecoveryActivity(
@@ -150,8 +155,7 @@ export async function POST(request: NextRequest) {
       )
       return NextResponse.json(
         {
-          error:
-            "Recovery code accepted but session could not be elevated. Ensure the access token hook is configured, then sign in again.",
+          error: "Recovery elevation could not be recorded (missing session_id).",
           remainingCount: remainingBefore - 1,
         },
         { status: 500 },
@@ -168,7 +172,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       remainingCount: remainingBefore - 1,
-      refreshSession: true,
     })
   } catch (error) {
     console.error("MFA recovery codes redeem route failed:", error)
