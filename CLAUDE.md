@@ -2,6 +2,42 @@
 
 ## Recent Sessions
 
+### Session: June 16, 2026 — 8F API Docs + JSDoc, Recovery-Elevation Audit, aal2 Dead-Code Cleanup
+- **8F (API Documentation) COMPLETE.** `docs/api-documentation.md` covers all five
+  routes (feedback-notify, mfa/enroll, recovery-codes/generate + redeem,
+  recovery-elevation-status); JSDoc added on the three most auditor-scrutinized
+  functions in `lib/inventory-utils.ts` (`parseSmartBarcode()`, `logActivity()`,
+  `resolveCurrentUserLabId()`).
+- **Doc-accuracy corrections vs. earlier drafts:** two SEPARATE recovery-codes
+  routes (generate + redeem), redeem rate limit is **20/hr** (generate 10/hr);
+  generate requires a verified TOTP factor first and returns `{ codes, batchId }`;
+  recovery-elevation-status returns `{ elevated: boolean }` and **always 200**
+  (fail-closed to `false`, no 401/500), no `expiresAt` field.
+- **`resolveCurrentUserLabId()` JSDoc fix:** the function QUERIES the `profiles`
+  table for role + lab_id — it does NOT read `lab_id` from the JWT. JSDoc now states
+  that, and points at the JWT-side DB equivalent `get_my_lab_id()` used by RLS.
+- **Recovery-elevation audit (read-only) — model confirmed SOUND.** Recovery-code
+  login authorizes via a row in `mfa_recovery_elevations` (60-min TTL), live-checked
+  by both gates through `/api/mfa/recovery-elevation-status`. The session STAYS at
+  aal1 — it never reaches aal2. Native aal2 comes ONLY from genuine TOTP. The
+  `custom_access_token_hook` never touches `aal` (sets only lab_id/org_id/user_role).
+  No code path depends on the hook setting aal2. The documented gate fail-open
+  behavior on AAL-API error is UNCHANGED.
+- **aal2 dead-code cleanup in `app/api/mfa/recovery-codes/redeem/route.ts`**
+  (cosmetic — zero behavior change, verified: ESLint clean, no new tsc errors):
+  renamed helper `grantPendingAal2Elevation` → `grantRecoveryElevation`; rewrote the
+  false top-of-file comment (claimed the hook sets `aal=aal2` + client must
+  `refreshSession()`) to describe the DB-row model; removed the inert
+  `refreshSession: true` field from the success response (no caller ever read it —
+  verified across `lib/mfa.ts` + `/mfa-challenge`); fixed the misleading 500 error
+  string to `"Recovery elevation could not be recorded (missing session_id)."` Two
+  internal strings still say "AAL2"/"hook" and were left ON PURPOSE: one inline
+  comment, and the `logMfaRecoveryActivity()` detail text on the elevation-failure
+  branch (audit-log wording — out of scope for a cosmetic pass; revise deliberately).
+- **Checklist label correction:** 8C (Traceability Matrix) was actually DONE June 2
+  as `docs/traceability-matrix.md` — it was mislabeled "Pending." Marked ✅ this
+  session. 8F also flipped to ✅.
+
 ### Session: June 13, 2026 — Doc 8H: ToS + Privacy Policy DRAFTED + Pages SHIPPED
 - **8H is the last remaining go-live blocker; now content-complete.** Two legal
   docs drafted, two public pages built and verified, content pasted/committed.
@@ -230,6 +266,9 @@
     mid-life and ignores expires_at; live DB check honors the TTL and keeps
     the fragile hook minimal. No RLS policy checks aal2 (verified) — data
     security is lab_id/user_role + RLS, both correct on recovery login.
+  - **June 16, 2026 audit confirmed this is the LIVE model** (session stays aal1;
+    hook never sets aal2). The stale "aal2-via-hook" leftovers in the redeem route
+    were cleaned up that session — see the June 16 session entry at the top.
 - **HOOK LOCKOUT root cause + permanent guardrail:** hook runs as
   supabase_auth_admin (rolbypassrls = FALSE). It needs BOTH (a) GRANT SELECT
   on every table it reads (profiles AND labs), AND (b) an RLS policy
@@ -392,8 +431,12 @@ any audit records — they are preserved indefinitely."
 - [ ] Future: Automated retention cleanup job (NOT URGENT — storage cheap)
       Test extensively before enabling — deletion is irreversible.
 
-#### 8C — Traceability Matrix (High Priority — Pending)
-Create Google Sheet "Buddy Traceability Matrix" with columns:
+#### 8C — Traceability Matrix ✅
+Done June 2, 2026 as `docs/traceability-matrix.md` (REQ-001–REQ-010 mapped to code
+locations + verification status). Convert to a Google Sheet only when a customer or
+auditor actually needs the spreadsheet form — the markdown is the source of record.
+
+Original plan: Create Google Sheet "Buddy Traceability Matrix" with columns:
 Requirement | Feature | Code Location | How Verified | Status
 
 Seed requirements:
@@ -436,10 +479,18 @@ Seed requirements:
   (lucide-react v1, typescript 6, hookform-resolvers 5 closed pending
   deliberate testing)
 
-#### 8F — API Documentation (Pending)
-- Document /api/feedback-notify in Swagger/OpenAPI or README
-- JSDoc comments on parseSmartBarcode(), logActivity(),
-  resolveCurrentUserLabId() — most auditor-scrutinized functions
+#### 8F — API Documentation ✅
+Done June 16, 2026.
+- `docs/api-documentation.md` documents all five API routes (feedback-notify,
+  mfa/enroll, recovery-codes/generate, recovery-codes/redeem,
+  recovery-elevation-status): purpose, caller, auth, rate limit, request/response
+  shapes, status codes, server-side flow, and security notes per route.
+- JSDoc added on the three most auditor-scrutinized functions in
+  `lib/inventory-utils.ts`: parseSmartBarcode(), logActivity(),
+  resolveCurrentUserLabId(). The resolveCurrentUserLabId() block was corrected to
+  state it queries `profiles` (not the JWT) and cross-references get_my_lab_id().
+- Doc reflects the post-cleanup redeem route (DB-row elevation model, no
+  refreshSession flag, grantRecoveryElevation helper) — see June 16 session above.
 
 #### 8G — Software Validation Plan (Pending)
 1-2 page document: intended use, regulatory classification (NOT a

@@ -81,11 +81,62 @@ export interface ParsedBarcode {
 }
 
 /**
- * Waterfall barcode parser. Detects format, extracts what it can.
+ * Waterfall barcode parser for lab reagent labels.
  *
- * 1. HIBC  — string starts with `+`
- * 2. GS1   — string contains `(01)` or raw AI `01` with 14-digit GTIN
- * 3. Code 128 / plaintext — everything else; entire string → sku
+ * Detects the barcode format from the raw scanned string and extracts
+ * SKU, lot number, and expiry date where available. Used by both the
+ * camera scanner (ZXing) and USB scanner input paths.
+ *
+ * **Format detection order:**
+ * 1. **HIBC** (Health Industry Bar Code) — string starts with `+`
+ *    Parses primary symbol (LIC + product code → SKU) and optional
+ *    secondary symbol (`$$lot/date`). Handles YYDDD (Julian), YYMMDD,
+ *    and MMDDYY date formats.
+ * 2. **GS1-128 / DataMatrix** — string contains parenthesised AIs
+ *    `(01)`, `(10)`, `(17)`, or a raw FNC1 stream starting with `01`
+ *    followed by a 14-digit GTIN. Extracts AI 01 → SKU, AI 10 → lot,
+ *    AI 17 → expiry.
+ * 3. **Code 128 / plaintext fallback** — everything else. The entire
+ *    trimmed string is treated as the SKU; lot and expiry are empty.
+ *
+ * **Return value contract:**
+ * - `sku` is always a string (empty string if not extractable).
+ * - `lot` is always a string (empty string if not present in the barcode).
+ * - `expiry` is always a string in `YYYY-MM-DD` format if parsed,
+ *   otherwise empty string.
+ * - `format` indicates which parser branch was used.
+ * - `raw` is the original unmodified input.
+ *
+ * **Known limitations (ZXing + iPad camera):**
+ * - Long GS1-128 barcodes may not decode reliably on mobile cameras.
+ * - Stacked double barcodes (two GS1 symbols on one label) only yield
+ *   the first scan; the second arrives as a separate USB event.
+ * - Neither limitation affects USB scanner input (Zebra DS confirmed).
+ *
+ * **Dynamsoft migration note:**
+ * When migrating from ZXing to Dynamsoft, add one line at the top of
+ * this function before format detection:
+ * `const trimmed = raw.trim().replace(/\{GS\}/g, "\x1d")`
+ * Dynamsoft uses `{GS}` as its FNC1 separator; this parser already
+ * handles `\x1d` natively.
+ *
+ * @param raw - The raw string from the scanner (camera decode or USB input).
+ * @returns ParsedBarcode with format, sku, lot, expiry, and raw fields.
+ *
+ * @example
+ * // GS1 parenthesised
+ * parseSmartBarcode("(01)00123456789012(10)LOT001(17)261231")
+ * // → { format: "GS1", sku: "00123456789012", lot: "LOT001", expiry: "2026-12-31", raw: "..." }
+ *
+ * @example
+ * // HIBC
+ * parseSmartBarcode("+A123PRODUCTCODE/$$LOT42261231")
+ * // → { format: "HIBC", sku: "A123PRODUCTCODE", lot: "LOT42", expiry: "2026-12-31", raw: "..." }
+ *
+ * @example
+ * // Plain Code 128 fallback
+ * parseSmartBarcode("SKU-98765")
+ * // → { format: "CODE128", sku: "SKU-98765", lot: "", expiry: "", raw: "SKU-98765" }
  */
 export function parseSmartBarcode(raw: string): ParsedBarcode {
   const trimmed = raw.trim()
@@ -869,6 +920,58 @@ export const resolveCurrentUserIdentity = async (): Promise<{
   return { userId: user.id, name, initials, email }
 }
 
+/**
+ * Appends an immutable audit entry to `activity_logs`.
+ *
+ * This is the single authoritative function for writing to the ALCOA+
+ * audit trail. It must be called AFTER a data-mutating operation
+ * succeeds — never speculatively before the operation, and never inside
+ * a transaction that might roll back.
+ *
+ * **Attribution model:**
+ * The caller's identity is resolved server-side via `resolveCurrentUserIdentity()`,
+ * which reads `profiles.full_name` and derives initials. The resulting
+ * `user_name` and `user_initials` are stored as TEXT SNAPSHOTS on the
+ * audit row — there is no `user_id` foreign key. This means audit
+ * attribution is permanently preserved even if the user's account is
+ * later deleted, satisfying the ALCOA+ "Attributable" and "Enduring"
+ * principles.
+ *
+ * **Abort conditions (both silent — log errors, return without throw):**
+ * - No authenticated session (`resolveCurrentUserIdentity()` returns null)
+ * - No lab context (`resolveCurrentUserLabId()` returns null)
+ *
+ * Aborting silently rather than throwing prevents a log failure from
+ * cascading into a broken UI state. The error is written to `console.error`
+ * for Vercel log capture.
+ *
+ * **Immutability guarantee:**
+ * The `activity_logs` table has RLS policies that permit INSERT only —
+ * there are no UPDATE or DELETE policies. This cannot be overridden by
+ * application code and is required for 21 CFR Part 11 §11.10(e).
+ *
+ * @param actionType - One of the allowed ActivityActionType values (see type definition).
+ *   Represents the class of operation: "Added", "Opened", "Used", "Disposed",
+ *   "Ordered", "Received", "Edited", "Deleted from Storage",
+ *   "Deleted from Bench", "Approved Lot", "Rejected Lot",
+ *   "Submitted Lot Validation", "Submitted COA", etc.
+ * @param itemName - Display name of the reagent/item. May be empty string
+ *   for actions not tied to a specific item.
+ * @param lotNumber - Lot number string. May be empty string if not applicable.
+ * @param details - Human-readable description of the specific action taken,
+ *   including contextual identifiers (e.g. "Deducted 2 vials.", "Lot Approved
+ *   by Jane Smith.", "Deleted due to: contamination").
+ *
+ * @returns void. Does not throw. Errors are logged to console.error only.
+ *
+ * @example
+ * // After successfully updating lot quantity:
+ * await logActivity("Used", "Reagent A", "LOT-001", "Deducted 2 vials.")
+ *
+ * @example
+ * // After manager approves a lot:
+ * await logActivity("Approved Lot", "", lotNumber, `Lot Approved by ${identity.name}`)
+ */
 export const logActivity = async (
   actionType: ActivityActionType,
   itemName: string,
@@ -913,6 +1016,45 @@ export interface LabProfile {
   isOwner: boolean
 }
 
+/**
+ * Resolves the authenticated user's `lab_id` by querying the `profiles` table.
+ *
+ * This is the canonical way to get the current user's lab context in
+ * client-side and server-action code. It reads the active Supabase session,
+ * then looks up the user's `role` and `lab_id` from their `profiles` row.
+ *
+ * **Note on the JWT-side equivalent:** RLS policies use a separate DB-side
+ * function `get_my_lab_id()` that reads `lab_id` from the JWT claim (stamped
+ * by `custom_access_token_hook`). This application-side function instead
+ * queries `profiles` directly. The two are kept consistent because the hook
+ * sources the JWT `lab_id` claim from the same `profiles.lab_id` column.
+ *
+ * **Session handling:**
+ * - Calls `supabase.auth.getSession()`. On a session/refresh error, invokes
+ *   `signOutLocalOnRefreshFailure()` to clear a broken local session, then
+ *   returns null.
+ * - Returns null if there is no authenticated user.
+ *
+ * **Return value semantics:**
+ * - Returns the user's `lab_id` UUID string for lab-scoped users (managers,
+ *   technicians).
+ * - Returns null for super_admin (explicitly checked — super_admin has no
+ *   tenant context and must never be scoped to a lab).
+ * - Returns null if the profiles lookup errors, or if `lab_id` is null
+ *   (e.g. org_admin, who is org-scoped rather than lab-scoped).
+ * - Returns null if there is no active session.
+ *
+ * All callers must treat a null return as "no lab context" and abort the
+ * operation. This is a security boundary — proceeding without a lab_id would
+ * result in unscoped database access, violating multi-tenant isolation.
+ *
+ * @returns The user's lab UUID string, or null if not available.
+ *
+ * @example
+ * const labId = await resolveCurrentUserLabId()
+ * if (!labId) return { success: false, error: "No lab context." }
+ * // safe to use labId in lab-scoped queries
+ */
 export const resolveCurrentUserLabId = async (): Promise<string | null> => {
   const {
     data: { session },
