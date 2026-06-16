@@ -31,12 +31,19 @@
   `refreshSession: true` field from the success response (no caller ever read it —
   verified across `lib/mfa.ts` + `/mfa-challenge`); fixed the misleading 500 error
   string to `"Recovery elevation could not be recorded (missing session_id)."` Two
-  internal strings still say "AAL2"/"hook" and were left ON PURPOSE: one inline
-  comment, and the `logMfaRecoveryActivity()` detail text on the elevation-failure
-  branch (audit-log wording — out of scope for a cosmetic pass; revise deliberately).
+  internal strings (one inline comment + the `logMfaRecoveryActivity()` detail text on
+  the elevation-failure branch) were initially deferred from this cosmetic pass; they
+  were cleaned up in follow-up commit 3198381 (see last bullet).
 - **Checklist label correction:** 8C (Traceability Matrix) was actually DONE June 2
   as `docs/traceability-matrix.md` — it was mislabeled "Pending." Marked ✅ this
   session. 8F also flipped to ✅.
+- **Follow-up commit 3198381** finished the redeem-route cleanup: corrected the two
+  remaining stale strings (the inline comment and the audit-log detail text on the
+  elevation-failure branch — both now describe the DB-row model, not a hook dependency),
+  and removed two stray untracked scratch files (root `api-documentation.md` duplicate
+  and `jsdoc-blocks.md`). The redeem route now contains no "aal2"/hook-dependency
+  wording anywhere — code, comments, and audit-log text are fully consistent. Both login
+  paths (native TOTP and recovery code) verified working end-to-end in dev after all edits.
 
 ### Session: June 13, 2026 — Doc 8H: ToS + Privacy Policy DRAFTED + Pages SHIPPED
 - **8H is the last remaining go-live blocker; now content-complete.** Two legal
