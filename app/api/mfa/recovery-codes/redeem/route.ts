@@ -146,12 +146,13 @@ export async function POST(request: NextRequest) {
 
     const elevationGranted = await grantRecoveryElevation(admin, user.id, sessionId)
     if (!elevationGranted) {
-      // Code consumed — user must regenerate; elevation requires hook + session_id in JWT.
+      // Code already consumed above; the mfa_recovery_elevations row could not be
+      // recorded (missing session_id or a DB error), so the user must sign in again.
       await logMfaRecoveryActivity(
         admin,
         user.id,
         "MFA Recovery Code Redeemed",
-        "Recovery code redeemed but AAL2 elevation could not be scheduled (missing session_id or hook not configured).",
+        "Recovery code redeemed but elevation could not be recorded (missing session_id).",
       )
       return NextResponse.json(
         {
