@@ -1,57 +1,264 @@
-# Buddy Inventory Management — Software Validation Plan
+# Software Validation Plan
+## Buddy Inventory Management
 
-> **STATUS: OUTLINE / SKELETON — not yet written.** Section headers and
-> one-line scope notes only. Fill in prose section by section. Target length:
-> 1–2 pages when complete (Phase 8G).
-
-**Document owner:** James (sole developer)
-**Last updated:** June 2, 2026 (skeleton created)
+**Document ID:** BIM-SVP-001  
+**Version:** 1.1  
+**Effective Date:** June 16, 2026  
+**Author:** James [Last Name], Founder — Buddy Technologies LLC  
+**Status:** Active
 
 ---
 
-## 1. Purpose & Scope
-One line: what this document is (the validation plan for Buddy) and what system/version it covers.
+## 1. Purpose and Scope
+
+This Software Validation Plan (SVP) describes the validation approach for **Buddy Inventory Management**, a cloud-based laboratory inventory and compliance tracking system. It defines the intended use of the software, its regulatory classification, the software development lifecycle (SDLC) in use, the validation strategy applied, known limitations, and the change control process.
+
+This document is intended to support customer quality assurance reviews, regulated-lab vendor qualification processes, and internal audit readiness under 21 CFR Part 11 and ALCOA+ data integrity principles.
+
+---
 
 ## 2. Intended Use
-One line: what Buddy is for — lab inventory & lot-validation tracking for small US cell therapy / research labs.
 
-## 3. Regulatory Classification
-One line: **NOT a medical device**; stores **no PHI**; built to be audit-ready for 21 CFR Part 11 + ALCOA+.
+Buddy Inventory Management is a multi-tenant Software as a Service (SaaS) application designed for use by small to mid-sized US-based research and cell therapy laboratories. It supports the following functions:
 
-## 4. System Overview
-One line: brief architecture summary — Next.js + Supabase (RLS multi-tenant), Vercel deployment, no PHI stored.
+- **Lot tracking:** Receiving, cataloguing, and tracking reagent and material lots by expiry date, quantity, and validation status.
+- **COA (Certificate of Analysis) management:** Uploading and associating COA documents with lots prior to validation.
+- **Validation workflow:** Structured lot validation states (Pending → Under Review → Approved / Rejected / Not Required) enforced through an allowlist-based state machine.
+- **Audit logging:** Immutable, append-only records of all lot lifecycle events attributed to the acting user and timestamped at the server.
+- **Role-based access control:** Differentiated access for Managers and Technicians within a lab, with super-admin and organization-admin roles for platform administration.
+- **Inventory management:** Real-time quantity tracking, low-stock threshold alerts, and FEFO (First Expired, First Out) soft warnings.
+- **Barcode scanning:** Camera-based and USB barcode scanner support for rapid lot lookup and receiving.
 
-## 5. SDLC Approach
-One line: how the software is developed — prompt-driven implementation in Cursor, build-then-test, CLAUDE.md as persistent context, GitHub version control.
-
-## 6. Validation Strategy
-One line: how requirements are verified — manual testing now, traceability matrix (8C) as evidence, automated tests (8D) planned post-launch.
-
-## 7. Requirements & Traceability
-One line: point to `docs/traceability-matrix.md` (REQ-001–REQ-010) as the requirement-to-code-to-verification record.
-
-## 8. Known Limitations
-One line: list the honest constraints — ZXing barcode limits (long GS1-128 / stacked on camera), no automated test coverage yet, no PHI by design.
-
-## 9. Change Control Process
-One line: how changes are managed — GitHub commits, Dependabot/Snyk for dependencies, major-version bumps reviewed manually, accepted risks in `npm-audit-exceptions.md`.
-
-## 10. Security & Access Controls
-One line: summary of controls — RLS on all tables, JWT role gates, 2FA on privileged roles, one-active-session, append-only audit log.
-
-## 11. Backup & Recovery
-One line: data backup posture + reference to `docs/break-glass-runbook.md` for emergency recovery.
-
-## 12. Approval / Sign-off
-One line: who reviewed and approved this plan, and date (you, as sole developer, for now).
+The software is used by laboratory personnel to maintain an organized, audit-traceable record of materials used in research and manufacturing workflows.
 
 ---
 
-### Notes for whoever fills this in
-- Keep it to 1–2 pages. Auditors value clarity over volume.
-- Sections 7, 9, and 11 should point to the existing repo docs rather than
-  repeat them (traceability matrix, npm-audit-exceptions, break-glass runbook).
-- Section 8 (Known Limitations) is the most important to be honest in —
-  stating limitations plainly is a strength, not a weakness, in validation docs.
-- Most content already exists in CLAUDE.md; this doc is largely a synthesis of
-  what's there into auditor-facing language.
+## 3. Regulatory Classification
+
+### 3.1 Not a Medical Device
+
+Buddy Inventory Management is **not a medical device** as defined under 21 CFR Part 820 or FDA guidance on Software as a Medical Device (SaMD). Specifically:
+
+- The software does not diagnose, treat, cure, mitigate, or prevent disease.
+- It does not provide clinical decision support or generate patient-facing outputs.
+- It does not process, store, or transmit Protected Health Information (PHI). Customers are contractually prohibited from uploading PHI (Terms of Service §4).
+- It is not intended to be used in clinical diagnostic workflows subject to CLIA or CAP accreditation requirements.
+
+The software is a **laboratory operational tool** — analogous to an electronic lab notebook or inventory ledger — and falls outside the FDA's medical device definition.
+
+### 3.2 Applicability of 21 CFR Part 11
+
+Although Buddy Inventory Management is not itself subject to FDA regulation, its customers may operate under FDA oversight (e.g., cell therapy manufacturers under 21 CFR Parts 210/211/600). These customers require that electronic records and electronic signatures used in their quality systems conform to 21 CFR Part 11.
+
+Buddy Inventory Management is designed and validated to **support** 21 CFR Part 11 compliance within a customer's quality system. The responsibility for determining whether the software is used in a Part 11-applicable context rests with the customer's quality and regulatory affairs functions. Buddy Technologies LLC does not warrant that use of the software automatically satisfies any specific regulatory requirement (Terms of Service §6.2).
+
+### 3.3 ALCOA+ Alignment
+
+All audit records generated by the system are designed to satisfy ALCOA+ data integrity principles: Attributable, Legible, Contemporaneous, Original, Accurate, Complete, Consistent, Enduring, and Available. See Section 6.3 for implementation details.
+
+---
+
+## 4. Software Development Lifecycle (SDLC)
+
+### 4.1 Development Model
+
+Buddy Inventory Management follows an **iterative, phase-based development model** suited to a solo-founder SaaS product. Development occurs in defined phases (Phases 1–8), each with explicit scope, acceptance criteria, and a go/no-go review before the next phase begins. Phases are not time-boxed sprints; they close when scope is demonstrably complete.
+
+### 4.2 Technology Stack
+
+| Layer | Technology |
+|---|---|
+| Framework | Next.js 16 (React, TypeScript) |
+| Styling | Tailwind CSS v4 |
+| Database & Auth | Supabase (PostgreSQL + Row-Level Security + Supabase Auth) |
+| Hosting | Vercel (US region; production at `buddy-lab-tracker.vercel.app`) |
+| Email | Resend (verified domain `yourbuddyapp.com`) |
+| Rate Limiting | Upstash Redis (US-East-1) |
+| DNS / CDN | Cloudflare |
+
+All data is stored in US-based infrastructure. No data is processed or stored outside the United States.
+
+### 4.3 Version Control
+
+All source code is maintained in a private GitHub repository (`Buddyy31/Buddy-Lab-Tracker`). The primary production branch is `main`. A `Backup` branch is maintained as a secondary reference. All production deployments are triggered automatically by merges to `main` via Vercel CI/CD.
+
+Standard commit workflow: `git add .` → `git commit -m "<message>"` → `git push`. Commits are atomic and scoped to a single functional change or closely related set of changes.
+
+### 4.4 Deployment Pipeline
+
+Vercel automatically builds and deploys `main` on every push. Preview deployments are generated for all other branches. Production deployments are reviewed via Vercel's build log before being considered live. Failed builds on `main` are treated as production incidents; failed builds on Dependabot or feature branches are not.
+
+### 4.5 Dependency Management
+
+Third-party dependencies are tracked in `package.json` and locked via `package-lock.json` (committed to version control for deterministic builds). Dependabot is configured for automated security scanning with weekly patch/minor grouping and manual review of major version bumps. The `@zxing/*` barcode library family is frozen pending a planned migration to Dynamsoft Barcode Reader. Accepted dependency vulnerabilities are documented with rationale in `npm-audit-exceptions.md`.
+
+---
+
+## 5. Validation Strategy
+
+### 5.1 Validation Philosophy
+
+Validation is performed to a level of effort commensurate with the risk associated with each function. Higher-risk functions — those that could produce incorrect, unattributed, or undetected errors in audit-critical records — receive the most rigorous validation attention. Lower-risk functions (UI layout, display formatting) are validated through standard functional testing.
+
+Risk is categorized as:
+
+- **High:** Validation state machine, audit log integrity, role-based access control, multi-tenant data isolation (RLS enforcement), authentication gates, recovery code security.
+- **Medium:** Lot creation and editing, COA upload and association, barcode parsing, inventory quantity calculations, email notification delivery.
+- **Low:** Dashboard display, sorting and filtering UI, notification badges, settings persistence.
+
+### 5.2 Testing Approach
+
+Testing is **primarily manual and exploratory**, executed by the developer against the production environment and a local development instance. Each phase includes explicit acceptance criteria verified before closure. A limited automated test suite also exists, run via Node's built-in test runner (`node --test`, exposed as the `npm test` script). Its current scope is narrow — it covers the earliest-expiry comparison logic (`getEarliestExpiry`) — but the harness is in place and is the foundation that Phase 8D will build on.
+
+Testing activities include:
+
+- **Functional testing:** Each feature is exercised against its acceptance criteria on both localhost and production (`buddy-lab-tracker.vercel.app`) before a phase is marked complete.
+- **Regression testing:** When a change touches authentication, RLS, or the validation state machine, adjacent behavior is re-verified (e.g., after MFA gate changes, all three login paths — native TOTP, recovery code, and non-2FA technician — are re-tested).
+- **Database-level verification:** SQL queries against the Supabase production database are used to confirm RLS policy enforcement, FK integrity, and audit log immutability independent of the application layer.
+- **Security path testing:** Auth gate behavior is tested by attempting access from unauthenticated, insufficiently-privileged, and cross-tenant sessions. MFA enforcement is verified by confirming that bypassing the UI does not bypass the gate.
+- **End-to-end testing:** Critical user journeys (lot receive → COA upload → validate → open to bench; new user invite → onboard → enroll 2FA → access dashboard) are exercised in full on production.
+
+**Automated testing (Phase 8D)** — broader integration and unit coverage (validation state machine, RLS isolation, role gates, barcode parsing) — is planned but deferred until post-first-customer onboarding. It will expand the existing Node `--test` harness rather than introduce automated testing from scratch. The current limitation is the *breadth* of automated coverage, not its absence (see Section 7, L-001). Manual regression coverage on every High-risk change is the current mitigating control.
+
+### 5.3 Traceability
+
+A Traceability Matrix (`docs/traceability-matrix.md`) maps each functional requirement to its implementing feature, code location, and verification status. Ten requirements are currently seeded (REQ-001 through REQ-010), covering the full lot lifecycle, audit log behavior, access control, and session management.
+
+### 5.4 Acceptance Criteria for Phase Closure
+
+A development phase is considered validated when:
+
+1. All in-scope features behave as specified under normal conditions.
+2. Edge cases and error paths relevant to data integrity have been exercised and behave correctly.
+3. No open defects in High-risk functions remain unresolved.
+4. Production deployment passes the Vercel build pipeline without errors.
+5. The phase is documented in `CLAUDE.md` (the canonical project context file) with session notes capturing what was built, verified, and any findings.
+
+---
+
+## 6. Compliance Implementation Details
+
+### 6.1 21 CFR Part 11 Controls
+
+| Requirement | Implementation |
+|---|---|
+| Computer-generated audit trail | `logActivity()` called server-side on all state-changing actions |
+| Time-stamped records | Supabase server-side `NOW()` timestamps; no client-supplied timestamps |
+| Immutable records | Append-only RLS on `activity_logs`: no UPDATE or DELETE policy exists |
+| Attributable records | `user_name` and `user_initials` TEXT snapshots on every audit row (no FK to `auth.users`) |
+| Access controls | Role-based gates in application code + Row-Level Security enforcement at database layer |
+| Secure unique user IDs | Supabase Auth UUIDs; one active session enforced per user |
+| Audit trail for validation actions | Approved, Rejected, and Archived lot events all logged with actor and timestamp |
+
+### 6.2 Audit Log Immutability Guarantee
+
+The `activity_logs` table has no UPDATE or DELETE RLS policies. No application code path, admin UI, scheduled job, or API endpoint modifies audit rows after insertion. The sole exception is full tenant deletion (lab wipe), which is an administrative operation requiring explicit documentation and is not available to any customer role.
+
+Audit log rows are preserved indefinitely. The configurable `audit_log_retention_years` value (default 3, range 1–10) represents a minimum retention commitment, not a deletion schedule. No automated deletion of audit records is currently implemented.
+
+### 6.3 ALCOA+ Implementation
+
+| Principle | Implementation |
+|---|---|
+| Attributable | `user_name` + `user_initials` TEXT snapshots on every row; immune to user deletion |
+| Legible | Structured relational schema with TypeScript-typed interfaces |
+| Contemporaneous | Server-side timestamps written at the moment of action, after success |
+| Original | Append-only log; no modification after insert |
+| Accurate | Unique constraints, RLS scoping, and state machine guards prevent invalid records |
+| Complete | 10 audit action types covering the full lot lifecycle |
+| Consistent | All queries lab_id-scoped; JWT role claims enforced at both app and DB layer |
+| Enduring | Configurable 1–10 year retention commitment; currently preserved indefinitely |
+| Available | Activity log tab with action-type filters; accessible to authorized lab members |
+
+### 6.4 Multi-Tenant Data Isolation
+
+Row-Level Security (RLS) is enabled on all 16 database tables. Lab-scoped tables carry policies that restrict every row to the authenticated user's `lab_id`. The database-layer policies resolve the user's lab through `get_my_lab_id()`, which reads the `lab_id` claim directly from the signed JWT — it does not query any table, keeping the enforcement check fast and tamper-resistant.
+
+Cross-tenant data access is not possible through any application code path, and — critically — it is enforced at the database layer independently of the application. Even if an application-layer filter were bypassed, RLS would still deny rows belonging to another tenant. Application code additionally scopes queries to the user's lab via `resolveCurrentUserLabId()` (an application helper that reads the `profiles` table) as a first line of defense, but the authoritative enforcement is the database RLS policy.
+
+The `activity_logs` table is additionally append-only: it carries SELECT and INSERT policies but no UPDATE or DELETE policy, so audit rows cannot be altered after insertion (see Section 6.2).
+
+### 6.5 Authentication and Session Security
+
+- TOTP-based two-factor authentication is mandatory for all privileged roles (Managers, Org Admins, Super Admin).
+- Recovery codes (10 per batch, bcrypt-hashed, single-use) provide emergency access when a TOTP device is unavailable. Redemption grants a 60-minute session elevation via a database-row gate (`mfa_recovery_elevations`), not a JWT claim — ensuring the TTL is honored at every gate check.
+- One active session per user is enforced via the `active_sessions` table with a 30-second poll.
+- Idle auto-logout triggers after 10 minutes of inactivity (8-minute idle + 2-minute warning).
+- All privileged routes perform a role and MFA gate check on every page load (`checkSessionAndRole` for `/dashboard`; `resolveMfaGateRedirect` for `/super-admin` and `/org-admin`). These are client-side page-level gates; the authoritative data-access enforcement is the database-layer RLS described in Section 6.4.
+
+---
+
+## 7. Known Limitations
+
+The following limitations are acknowledged and documented. Where a limitation affects compliance-relevant functionality, a mitigation or planned resolution is noted.
+
+| # | Limitation | Risk Level | Mitigation / Resolution Path |
+|---|---|---|---|
+| L-001 | **Limited automated test coverage.** A Node `--test` suite exists but currently covers only narrow unit logic (earliest-expiry comparison); most verification is still manual. | Medium | Phase 8D expands the existing Node-test harness to cover the validation state machine, RLS isolation, and role gates. Manual regression coverage applied to every High-risk change in the interim. |
+| L-002 | **ZXing barcode scanner limitations.** Camera-based scanning cannot reliably decode long GS1-128 or stacked double barcodes. | Low | USB scanners handle these formats correctly. Dynamsoft Barcode Reader migration planned post-first-customer. ZXing package family frozen in Dependabot pending migration. |
+| L-003 | **No PHI handling.** The system is not designed or validated for Protected Health Information. | N/A | Contractually prohibited (ToS §4). Customers acknowledge sole responsibility for ensuring no PHI is uploaded. |
+| L-004 | **Audit log retention is a commitment, not an automated schedule.** Records are currently retained indefinitely; no deletion job runs. | N/A (favorable) | Keeping records longer than committed is always compliant. Automated retention enforcement is a future enhancement; deletion is irreversible and will be tested extensively before enabling. |
+| L-005 | **No formal penetration test conducted.** Security is implemented through standard controls (RLS, MFA, rate limiting, security headers) but has not been independently assessed. | Medium | Formal penetration testing planned before enterprise/high-volume customer onboarding. Snyk + Dependabot provide ongoing CVE monitoring. |
+| L-006 | **Single-developer team.** No mandatory peer code review. | Medium | All compliance-critical logic (state machine, audit log, RLS) is documented with explicit "never break" guardrails in `CLAUDE.md`. Session notes capture rationale for all architectural decisions. |
+| L-007 | **No SLA or uptime guarantee.** The system operates on a "commercially reasonable efforts" basis (ToS §7). | Low | Vercel and Supabase provide commercially operated infrastructure with their own SLAs. Customers are informed of the no-SLA posture at sign-up. |
+| L-008 | **Automated audit log deletion is not implemented.** Future implementation carries irreversibility risk. | Low | When implemented, deletion jobs will be tested against a non-production copy first. Minimum retention commitments will always be honored. A deletion confirmation gate will be required. |
+
+---
+
+## 8. Change Control
+
+### 8.1 Process
+
+All changes to production software follow this process:
+
+1. **Decision and rationale** are documented in the development session (captured in `CLAUDE.md` session notes) before implementation begins.
+2. **Implementation** occurs in a local development environment. Changes touching High-risk functions are implemented incrementally with explicit checkpoints.
+3. **Local verification** is performed against a development instance of Supabase and the local Next.js server.
+4. **Commit** with a descriptive message scoped to the change. Compliance-relevant changes include a rationale note in the commit message or an accompanying CLAUDE.md update.
+5. **Production deployment** via `git push` to `main`, triggering Vercel CI/CD. The Vercel build log is reviewed before the deployment is considered live.
+6. **Production verification** — functional tests repeated against `buddy-lab-tracker.vercel.app` to confirm behavior matches local results.
+7. **Documentation update** — `CLAUDE.md` is updated with session notes capturing what changed, what was verified, and any findings or guardrails identified.
+
+### 8.2 Emergency Changes
+
+In the event a defect requires an immediate production fix:
+
+- The fix is still committed and deployed through the standard pipeline (no direct database edits to application data outside of documented break-glass procedures).
+- Post-fix, the session notes capture the nature of the defect, root cause, and corrective action.
+- Database-level emergency procedures (break-glass scenarios) are documented in `docs/break-glass-runbook.md`.
+
+### 8.3 Dependency Updates
+
+Third-party dependency updates follow the process documented in `CLAUDE.md` under "Dependency Management Conventions":
+
+- Patch/minor: automated Dependabot PRs, merged after Vercel preview build passes.
+- Major: manual review and testing before merge.
+- Security CVEs: reviewed individually against production relevance.
+- Accepted risks: documented in `npm-audit-exceptions.md` with rationale and planned resolution.
+
+### 8.4 Database Schema Changes
+
+Changes to the Supabase database schema (new tables, column additions, RLS policy changes) follow these additional controls:
+
+- New tables always receive explicit `GRANT SELECT` to relevant roles before going live (required since Supabase's May 2024 enforcement change).
+- RLS policies on new tables are verified with SQL queries before application code relying on them is deployed.
+- The custom access token hook (`custom_access_token_hook`) requires all three grants to be re-applied after any `CREATE OR REPLACE` (EXECUTE on the function; SELECT on `profiles`; SELECT on `labs` — all to `supabase_auth_admin`).
+- Schema changes are documented in session notes. Breaking schema changes are avoided on production without a coordinated application deploy.
+
+---
+
+## 9. Document Control
+
+| Field | Value |
+|---|---|
+| Document location | `docs/software-validation-plan.md` (version-controlled in Git) |
+| Review trigger | Any change to compliance-relevant functionality, or annually |
+| Next review date | June 2027 (or upon first paying customer onboarding, whichever is sooner) |
+| Contact | support@yourbuddyapp.com |
+
+Revisions to this document are tracked via Git commit history. A revision table is maintained below.
+
+| Version | Date | Author | Summary of Changes |
+|---|---|---|---|
+| 1.0 | June 16, 2026 | James [Last Name] | Initial release — Phase 8G |
+| 1.1 | June 16, 2026 | James [Last Name] | Corrected automated-test disclosure (limited Node-test suite exists); corrected table count 14 → 16. |

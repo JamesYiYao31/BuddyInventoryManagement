@@ -2,6 +2,52 @@
 
 ## Recent Sessions
 
+### Session: June 16, 2026 (latest) — Doc-Accuracy Corrections: SVP v1.1, Table Count 14→16, RLS Re-verify
+- **SVP corrected to v1.1** (`docs/software-validation-plan.md`). Automated-test
+  disclosure fixed: the doc had claimed NO automated tests exist — FALSE. A limited
+  Node built-in test suite exists (`npm test` → `node --test lib/*.test.ts`), currently
+  covering only earliest-expiry logic (`getEarliestExpiry` in `lib/expiry-utils.ts`;
+  test file `lib/expiry-utils.test.ts` — renamed from `inventory-utils.test.ts` to
+  match what it tests — 6 cases, run via `node --test lib/*.test.ts`). §5.2 and §7
+  L-001 reworded: the gap is BREADTH of coverage, not absence; Phase 8D expands the
+  existing Node-test harness (do NOT describe 8D as "Jest/Vitest from scratch").
+- **Table count corrected 14 → 16** in SVP §6.4 and CLAUDE.md Security Layers. The old
+  "14" omitted `mfa_recovery_codes` and `mfa_recovery_elevations`.
+- **RLS-on-all-16 RE-VERIFIED in Supabase** (James ran
+  `SELECT count(*) FILTER (WHERE rowsecurity), count(*) FROM pg_tables WHERE schemaname='public'`
+  → 16/16). "RLS enabled on all 16 tables" is now a verified claim, not an assumption.
+- **A separate Claude Code doc audit also flagged `api-documentation.md` issues —
+  DEFERRED to a future api-doc cleanup pass (NOT fixed this session):**
+  - Undocumented 6th route `app/api/super-admin/user-email/route.ts` (GET, super_admin
+    only, returns a user's PII email) — the doc claims it covers "all five routes."
+  - Stale §3b "AAL2 leftovers" note: claims two internal strings still carry old
+    aal2/hook wording, but commit 3198381 already cleaned both — the code is clean.
+  - Rate-limiting runs BEFORE auth in every route, so a 429 can precede a 401 — the
+    doc's "401 before rate limiting is applied" claim is backwards.
+  - enroll route header says 10/hr but the live limit is 100/hr (has a revert-TODO).
+  - feedback-notify email also includes the submitter's email address (doc omits it).
+
+### Session: June 16, 2026 (later) — 8G Software Validation Plan WRITTEN
+- **8G COMPLETE — last Phase 8 doc done.** `docs/software-validation-plan.md`
+  written in full (BIM-SVP-001 v1.0). Phase 8 documentation set is now closed.
+- **profiles RLS = ENABLED — VERIFIED LIVE** via
+  `SELECT relname, relrowsecurity FROM pg_class WHERE relname='profiles'` →
+  `true` (June 16, 2026). This SETTLES a contradiction: some context notes
+  claimed profiles RLS "must remain disabled" — that is STALE/WRONG. CLAUDE.md
+  has always said enabled (lines ~614, 657, 659) and is correct. Do NOT disable.
+- SVP accuracy pass also tightened two things vs first draft: (1) DB-layer
+  isolation uses get_my_lab_id() (JWT only, queries no table); the app helper
+  resolveCurrentUserLabId() reads profiles as a secondary layer — RLS is the
+  authoritative enforcement. (2) Privileged-route gates are CLIENT-SIDE
+  page-level checks (no middleware.ts), not server-side route gating.
+- 9.8/10 security score intentionally left out of the SVP.
+
+### STANDING REMINDERS (carried)
+- ✅ **DONE — Pushed 4 commits from June 16 8F session** (f7c5b8b, 44b8a8d, 3198381,
+  + CLAUDE.md amend 7af0151). `main` is in sync with `origin/main` (verified this session).
+- **Regenerate recovery codes (STILL OPEN)** — one was burned testing; saved sheet
+  partially dead. Profile Settings → Security → regenerate → re-save.
+
 ### Session: June 16, 2026 — 8F API Docs + JSDoc, Recovery-Elevation Audit, aal2 Dead-Code Cleanup
 - **8F (API Documentation) COMPLETE.** `docs/api-documentation.md` covers all five
   routes (feedback-notify, mfa/enroll, recovery-codes/generate + redeem,
@@ -499,10 +545,22 @@ Done June 16, 2026.
 - Doc reflects the post-cleanup redeem route (DB-row elevation model, no
   refreshSession flag, grantRecoveryElevation helper) — see June 16 session above.
 
-#### 8G — Software Validation Plan (Pending)
-1-2 page document: intended use, regulatory classification (NOT a
-medical device), SDLC approach, validation strategy, known limitations
-(ZXing barcode limits, no PHI), change control process.
+#### 8G — Software Validation Plan ✅
+Done June 16, 2026. `docs/software-validation-plan.md` (BIM-SVP-001 v1.0) —
+full document, not a skeleton. Covers: intended use, regulatory classification
+(NOT a medical device; supports customer Part 11 compliance but is not itself
+FDA-regulated), SDLC (iterative phase-based, solo founder, Cursor + GitHub +
+Vercel CI/CD), validation strategy (risk-tiered manual testing; 8D automation
+deferred and disclosed as known limitation L-001), 8 known limitations table,
+change control process, and a compliance-implementation section (Part 11,
+ALCOA+, RLS isolation, auth/session security).
+- Accuracy pass corrected an early-draft error: it claimed profiles RLS was
+  "disabled." VERIFIED FALSE — profiles RLS is ENABLED (see Security note below).
+- Self-assessed 9.8/10 security score deliberately OMITTED from the SVP (a
+  self-assigned number has no place in a formal validation doc an auditor reads).
+- Doc is the Git master; a dated/signed PDF is exported on demand for QA
+  reviews or audits (controlled-document fields already seeded in §9).
+- Remaining: fill real last name (Author field + revision table) before export.
 
 #### 8H — Terms of Service & Privacy Policy ✅ (draft + pages shipped)
 - **Entity:** Buddy Technologies LLC (Wyoming) — umbrella LLC, NOT YET FORMED
@@ -648,13 +706,18 @@ accounts. Automated dependency scanning via Dependabot + Snyk with
 documented accepted risks. Remaining 0.2/10 gap requires enterprise
 tooling (formal pen testing, SOC 2).
 
+### Verified Facts
+- profiles RLS: ENABLED (verified June 16, 2026, pg_class.relrowsecurity = true).
+  Public-schema tables: 16 total, RLS enabled on all (verified June 16, 2026 in
+  Supabase). Never disable. Supersedes any note claiming it should be disabled.
+
 ### Security Layers
 | Layer | Implementation |
 |-------|---------------|
 | Passwords | Supabase Auth bcrypt, min 8 chars, mixed case + digits + symbols |
 | Password reset | Email-based flow via /reset-password |
 | Session enforcement | One active session per user (30s poll) |
-| Database isolation | RLS on all 14 tables (activity_logs append-only) |
+| Database isolation | RLS on all 16 tables (activity_logs append-only) |
 | Data scoping | JWT-based get_my_lab_id() + get_my_org_id() |
 | Profile security | RLS enabled, email column removed |
 | Transport | HTTPS via HSTS |
@@ -1019,6 +1082,38 @@ created_at (timestamptz, default now())
 - RLS enabled — user_id = auth.uid()
 - One row per user (PK), upsert on login
 - Voluntary sign out deletes row; replaced sign out preserves new row
+
+### mfa_recovery_codes
+```
+id (uuid PK),
+user_id (uuid → auth.users ON DELETE CASCADE),
+code_hash (text, not null) — bcrypt hash of normalized code,
+batch_id (uuid) — shared across all codes in one generated batch,
+used_at (timestamptz, nullable) — single-use marker; NULL = unused,
+created_at (timestamptz, default now())
+```
+- RLS enabled — written/read by service role only (MFA API routes)
+- 10 codes per batch, `XXXX-XXXX` format, ambiguous chars excluded (no 0/O/1/I/L)
+- Plaintext returned ONCE at generation; only the bcrypt `code_hash` is stored
+- Regenerate is destructive: all prior rows for the user are deleted before insert
+- Generated via `/api/mfa/recovery-codes/generate`; consumed via `/redeem`
+  (`used_at` set, guarded by `.is("used_at", null)` to prevent double-spend)
+
+### mfa_recovery_elevations
+```
+id (uuid PK),
+user_id (uuid → auth.users ON DELETE CASCADE),
+session_id (uuid, not null) — JWT session the elevation is bound to,
+expires_at (timestamptz, not null) — created_at + 60 min,
+created_at (timestamptz, default now())
+```
+- RLS enabled — written/read by service role only
+- One active row per user: a new redeem deletes any prior row before inserting
+- 60-min TTL = lifetime of the recovery ELEVATION (session trust), not the codes
+- Gates check live via `expires_at > NOW()` (TTL honored by query, not deletion);
+  expired rows linger inert until the next redeem replaces them
+- This DB row — NOT an `aal` change — is what authorizes an aal1 recovery session
+  (checked by `/api/mfa/recovery-elevation-status`)
 
 ### Storage bucket: coa-documents (private)
 Path: `{lab_id}/{lot_id}/{timestamp}_{filename}`

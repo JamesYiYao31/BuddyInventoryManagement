@@ -41,7 +41,7 @@ before the next customer invite goes out.
 
 ## 3. Multi-Tenancy & RLS Verification  `(8I · core arch)`
 
-- [ ] **RLS enabled on all 14 tables** — spot-check in Supabase that no table had RLS disabled during debugging and left off. (`profiles` RLS stays enabled.)
+- [ ] **RLS enabled on all 16 tables** — spot-check in Supabase that no table had RLS disabled during debugging and left off. (`profiles` RLS stays enabled.)
 - [ ] **Cross-tenant isolation confirmed** — log in as an Oakwood manager and verify you see only Oakwood data; no other lab's inventory, lots, or logs are reachable.
 - [ ] **Super_admin scoping correct** — super_admin has `lab_id = NULL` AND `org_id = NULL`, can reach `/super-admin` only, and is correctly blocked from `/dashboard`.
 - [ ] **JWT claims minting correctly** — decode a fresh production token (full sign-out → clear `buddylab-auth` localStorage → fresh login) and confirm `lab_id`, `org_id`, `user_role` are all correct. (Stale-token lesson from June 7 — only a re-minted token reflects reality.)
