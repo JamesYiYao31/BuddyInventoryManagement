@@ -790,6 +790,7 @@ export type ActivityActionType =
 
 export interface ActivityLogEntry {
   id: string
+  createdAt: string
   date: string
   time: string
   user: string
@@ -1223,9 +1224,41 @@ export const updateUserRole = async (
   return { success: true }
 }
 
+export function formatActivityLogTimestamp(
+  createdAt: string,
+  labTimezone: string = "UTC"
+): { date: string; time: string } {
+  const tz = labTimezone || "UTC"
+  const d = new Date(createdAt)
+  const date = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  }).format(d)
+  const timeBase = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  }).format(d)
+  const tzAbbr =
+    new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "short" })
+      .format(d)
+      .split(", ")[1]
+      ?.split(" ")
+      .pop() ?? tz
+  const time = `${timeBase} ${tzAbbr}`
+  return { date, time }
+}
+
 export const fetchLogsFromSupabase = async (): Promise<ActivityLogEntry[]> => {
   const labId = await resolveCurrentUserLabId()
   if (!labId) return []
+
+  const { labTimezone } = await fetchLabSettings()
+  const tz = labTimezone || "UTC"
 
   const { data, error } = await supabase
     .from("activity_logs")
@@ -1238,17 +1271,21 @@ export const fetchLogsFromSupabase = async (): Promise<ActivityLogEntry[]> => {
     return []
   }
 
-  return data.map((log: any) => ({
-    id: log.id,
-    date: new Date(log.created_at).toLocaleDateString(),
-    time: new Date(log.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-    user: log.user_name,
-    userInitials: log.user_initials,
-    actionType: log.action_type,
-    itemName: log.item_name,
-    lotNumber: log.lot_number,
-    details: log.details,
-  }))
+  return data.map((log: any) => {
+    const { date, time } = formatActivityLogTimestamp(log.created_at, tz)
+    return {
+      id: log.id,
+      createdAt: log.created_at,
+      date,
+      time,
+      user: log.user_name,
+      userInitials: log.user_initials,
+      actionType: log.action_type,
+      itemName: log.item_name,
+      lotNumber: log.lot_number,
+      details: log.details,
+    }
+  })
 }
 
 function formatInTimeZoneParts(timeZone: string, date: Date): Record<string, number> {

@@ -34,6 +34,15 @@ export default function ActivityLogTab({
 }: ActivityLogTabProps) {
   const reportLabName = labName || labSettings?.labName || "My Lab"
   const printUserName = (currentUserName || "Unknown User").toUpperCase()
+  const labTimezone = labSettings?.labTimezone ?? "UTC"
+
+  const formatGroupDateHeader = (createdAt: string) =>
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: labTimezone,
+      weekday: "long",
+      month: "short",
+      day: "numeric",
+    }).format(new Date(createdAt))
 
   const hasUserFilter = !!(filterUser && filterUser !== "all")
   const hasActionFilter = !!filterAction
@@ -52,7 +61,11 @@ export default function ActivityLogTab({
   }
 
   const groupedLogs = groupLogsByDate(logs)
-  const sortedDates = Object.keys(groupedLogs).sort((a, b) => new Date(b).getTime() - new Date(a).getTime())
+  const sortedDates = Object.keys(groupedLogs).sort((a, b) => {
+    const aLatest = Math.max(...groupedLogs[a].map((log) => new Date(log.createdAt).getTime()))
+    const bLatest = Math.max(...groupedLogs[b].map((log) => new Date(log.createdAt).getTime()))
+    return bLatest - aLatest
+  })
   const printRows = sortedDates.flatMap((date) => groupedLogs[date].map((log) => ({ date, log })))
 
   const handlePrint = () => window.print()
@@ -163,7 +176,7 @@ export default function ActivityLogTab({
               <div className="sticky top-0 z-10 py-2">
                 <div className="inline-flex items-center gap-3 px-6 py-2 bg-background border-2 border-border rounded-full shadow-sm">
                   <span className="text-sm font-black text-foreground uppercase tracking-widest">
-                    {new Date(date).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
+                    {formatGroupDateHeader(groupedLogs[date][0].createdAt)}
                   </span>
                 </div>
               </div>

@@ -202,6 +202,7 @@ The following limitations are acknowledged and documented. Where a limitation af
 | L-006 | **Single-developer team.** No mandatory peer code review. | Medium | All compliance-critical logic (state machine, audit log, RLS) is documented with explicit "never break" guardrails in `CLAUDE.md`. Session notes capture rationale for all architectural decisions. |
 | L-007 | **No SLA or uptime guarantee.** The system operates on a "commercially reasonable efforts" basis (ToS §7). | Low | Vercel and Supabase provide commercially operated infrastructure with their own SLAs. Customers are informed of the no-SLA posture at sign-up. |
 | L-008 | **Automated audit log deletion is not implemented.** Future implementation carries irreversibility risk. | Low | When implemented, deletion jobs will be tested against a non-production copy first. Minimum retention commitments will always be honored. A deletion confirmation gate will be required. |
+| L-009 | **Audit writes are non-atomic with mutations.** Client-side audit calls run after the mutation in a separate request. A network failure between the two can result in a data change with no audit record. Affects: lot open, lot use, validation state changes, delete. | Medium | Accepted — inherent to client-side two-call design. Server-side audit co-location planned for a future phase. Residual risk documented. |
 
 ---
 
