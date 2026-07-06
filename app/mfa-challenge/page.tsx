@@ -7,13 +7,8 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { Loader2, Shield } from "lucide-react"
 import { getMfaEnrollmentStatus, redeemMfaRecoveryCode, verifyTotpChallenge } from "@/lib/mfa"
 import { normalizeRecoveryCode } from "@/lib/recovery-code-format"
+import { isSafeReturnTo } from "@/lib/safe-redirect"
 import { supabase } from "@/lib/supabase"
-
-const isSafeReturnTo = (path: string | null): boolean => {
-  if (!path) return false
-  // Must start with / but NOT // (protocol-relative URLs are external)
-  return path.startsWith("/") && !path.startsWith("//")
-}
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
   const parts = token.split(".")

@@ -1228,8 +1228,13 @@ export function formatActivityLogTimestamp(
   createdAt: string,
   labTimezone: string = "UTC"
 ): { date: string; time: string } {
-  const tz = labTimezone || "UTC"
+  let tz = labTimezone || "UTC"
   const d = new Date(createdAt)
+  try {
+    Intl.DateTimeFormat("en-US", { timeZone: tz }).format(new Date())
+  } catch {
+    tz = "UTC"
+  }
   const date = new Intl.DateTimeFormat("en-US", {
     timeZone: tz,
     year: "numeric",

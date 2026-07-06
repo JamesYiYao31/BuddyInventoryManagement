@@ -36,13 +36,20 @@ export default function ActivityLogTab({
   const printUserName = (currentUserName || "Unknown User").toUpperCase()
   const labTimezone = labSettings?.labTimezone ?? "UTC"
 
-  const formatGroupDateHeader = (createdAt: string) =>
-    new Intl.DateTimeFormat("en-US", {
-      timeZone: labTimezone,
+  const formatGroupDateHeader = (createdAt: string) => {
+    let tz = labTimezone || "UTC"
+    try {
+      Intl.DateTimeFormat("en-US", { timeZone: tz }).format(new Date())
+    } catch {
+      tz = "UTC"
+    }
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
       weekday: "long",
       month: "short",
       day: "numeric",
     }).format(new Date(createdAt))
+  }
 
   const hasUserFilter = !!(filterUser && filterUser !== "all")
   const hasActionFilter = !!filterAction

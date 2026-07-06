@@ -14,6 +14,9 @@ import { supabase } from "@/lib/supabase"
 import {
   approveLot,
   archiveLotToHistory,
+  fetchLabSettings,
+  formatActivityLogTimestamp,
+  LabSettings,
   rejectLot,
   resolveCurrentUserLabId,
   ValidationQueueEntry,
@@ -24,6 +27,7 @@ import { useToast } from "@/hooks/use-toast"
 interface ValidationTabProps {
   userRole: "manager" | "technician"
   refreshData: () => Promise<void> | void
+  labSettings?: LabSettings
 }
 
 const COA_DOCUMENTS_BUCKET = "coa-documents"
@@ -112,7 +116,7 @@ function ValidationBadge({ status }: { status: ValidationStatus }) {
   return <span className={`inline-flex px-3 py-1 rounded-full text-[10px] font-bold ${s.color}`}>{s.label}</span>
 }
 
-export default function ValidationTab({ userRole, refreshData }: ValidationTabProps) {
+export default function ValidationTab({ userRole, refreshData, labSettings: labSettingsProp }: ValidationTabProps) {
   const { toast } = useToast()
   const [queue, setQueue] = useState<ValidationQueueEntry[]>([])
   const [queueDetails, setQueueDetails] = useState<Record<string, QueueReviewDetails>>({})
@@ -122,6 +126,15 @@ export default function ValidationTab({ userRole, refreshData }: ValidationTabPr
   const [historySearch, setHistorySearch] = useState("")
   const [debouncedHistorySearch, setDebouncedHistorySearch] = useState("")
   const [openingFileKey, setOpeningFileKey] = useState<string | null>(null)
+  const [fetchedLabSettings, setFetchedLabSettings] = useState<LabSettings | undefined>()
+
+  useEffect(() => {
+    if (labSettingsProp) return
+    void fetchLabSettings().then(setFetchedLabSettings)
+  }, [labSettingsProp])
+
+  const labSettings = labSettingsProp ?? fetchedLabSettings
+  const labTimezone = labSettings?.labTimezone ?? "UTC"
 
   // Reject Modal
   const [showRejectModal, setShowRejectModal] = useState<ValidationQueueEntry | null>(null)
@@ -479,7 +492,10 @@ export default function ValidationTab({ userRole, refreshData }: ValidationTabPr
                     <p className="font-bold text-lg text-foreground">{entry.itemName}</p>
                     <p className="text-sm font-mono text-primary">Lot: {entry.lotNumber}</p>
                     <p className="text-xs text-muted-foreground">
-                      Submitted: {detail?.submittedBy || "—"} {detail?.submittedAt ? `· ${new Date(detail.submittedAt).toLocaleDateString()}` : ""}
+                      Submitted: {detail?.submittedBy || "—"}{detail?.submittedAt ? (() => {
+                        const { date, time } = formatActivityLogTimestamp(detail.submittedAt, labTimezone)
+                        return ` · ${date} ${time}`
+                      })() : ""}
                     </p>
                   </div>
                   <ValidationBadge status={entry.validationStatus} />
@@ -617,10 +633,10 @@ export default function ValidationTab({ userRole, refreshData }: ValidationTabPr
           <div className="space-y-4">
             {filteredArchivedLots.map(entry => {
               const archivedLabel = entry.validationArchivedAt
-                ? new Date(entry.validationArchivedAt).toLocaleString(undefined, {
-                    dateStyle: "medium",
-                    timeStyle: "short",
-                  })
+                ? (() => {
+                    const { date, time } = formatActivityLogTimestamp(entry.validationArchivedAt, labTimezone)
+                    return `${date} ${time}`
+                  })()
                 : "— (date not recorded)"
               const showCoaBtn = Boolean(entry.coaFileUrl || entry.coaFileName)
               const showValBtn = Boolean(entry.validationFileUrl || entry.validationFileName)
