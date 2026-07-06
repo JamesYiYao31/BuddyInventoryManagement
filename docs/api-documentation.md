@@ -294,7 +294,7 @@ or
 | `200` | `{ "elevated": true }` | A valid, unexpired elevation row exists for this session |
 | `200` | `{ "elevated": false }` | No session id, no valid row, or any internal error (fail-closed to not-elevated) |
 
-This route **always returns `200`.** It never returns `401`. If the Bearer auth fails, `authenticateBearerRequest()` returns its own response; otherwise every other path (no `sessionId`, query error, no matching row, unexpected exception) resolves to `{ "elevated": false }`. There is no `expiresAt` field in the response.
+This route always returns `200` for an authenticated caller (fail-closed to `{ "elevated": false }`, no `500`); missing or invalid bearer token → `401`. Every other path after auth (no `sessionId`, query error, no matching row, unexpected exception) resolves to `{ "elevated": false }`. There is no `expiresAt` field in the response.
 
 ### Server-side flow
 

@@ -33,8 +33,8 @@
 - **profiles RLS = ENABLED — VERIFIED LIVE** via
   `SELECT relname, relrowsecurity FROM pg_class WHERE relname='profiles'` →
   `true` (June 16, 2026). This SETTLES a contradiction: some context notes
-  claimed profiles RLS "must remain disabled" — that is STALE/WRONG. CLAUDE.md
-  has always said enabled (lines ~614, 657, 659) and is correct. Do NOT disable.
+  claimed profiles RLS "must remain disabled" — that is STALE/WRONG.
+  profiles RLS = ENABLED, verified live June 16 2026 — do NOT disable.
 - SVP accuracy pass also tightened two things vs first draft: (1) DB-layer
   isolation uses get_my_lab_id() (JWT only, queries no table); the app helper
   resolveCurrentUserLabId() reads profiles as a secondary layer — RLS is the
@@ -45,20 +45,22 @@
 ### STANDING REMINDERS (carried)
 - ✅ **DONE — Pushed 4 commits from June 16 8F session** (f7c5b8b, 44b8a8d, 3198381,
   + CLAUDE.md amend 7af0151). `main` is in sync with `origin/main` (verified this session).
-- **Regenerate recovery codes (STILL OPEN)** — one was burned testing; saved sheet
-  partially dead. Profile Settings → Security → regenerate → re-save.
+- ✅ **DONE — Recovery codes regenerated and re-saved (June 16, 2026).**
 
 ### Session: June 16, 2026 — 8F API Docs + JSDoc, Recovery-Elevation Audit, aal2 Dead-Code Cleanup
-- **8F (API Documentation) COMPLETE.** `docs/api-documentation.md` covers all five
-  routes (feedback-notify, mfa/enroll, recovery-codes/generate + redeem,
-  recovery-elevation-status); JSDoc added on the three most auditor-scrutinized
+- **8F (API Documentation) COMPLETE.** `docs/api-documentation.md` covers 5 of 6
+  routes (feedback-notify, mfa/enroll, recovery-codes/generate,
+  recovery-codes/redeem, recovery-elevation-status); super-admin/user-email
+  route deferred — tracked in api-doc cleanup pass; JSDoc added on the three most
+  auditor-scrutinized
   functions in `lib/inventory-utils.ts` (`parseSmartBarcode()`, `logActivity()`,
   `resolveCurrentUserLabId()`).
 - **Doc-accuracy corrections vs. earlier drafts:** two SEPARATE recovery-codes
   routes (generate + redeem), redeem rate limit is **20/hr** (generate 10/hr);
   generate requires a verified TOTP factor first and returns `{ codes, batchId }`;
-  recovery-elevation-status returns `{ elevated: boolean }` and **always 200**
-  (fail-closed to `false`, no 401/500), no `expiresAt` field.
+  recovery-elevation-status returns `{ elevated: boolean }` — always 200 for an
+  authenticated caller (fail-closed to `{ elevated: false }`, no 500); missing or
+  invalid bearer token → 401; no `expiresAt` field.
 - **`resolveCurrentUserLabId()` JSDoc fix:** the function QUERIES the `profiles`
   table for role + lab_id — it does NOT read `lab_id` from the JWT. JSDoc now states
   that, and points at the JWT-side DB equivalent `get_my_lab_id()` used by RLS.
@@ -87,8 +89,9 @@
   remaining stale strings (the inline comment and the audit-log detail text on the
   elevation-failure branch — both now describe the DB-row model, not a hook dependency),
   and removed two stray untracked scratch files (root `api-documentation.md` duplicate
-  and `jsdoc-blocks.md`). The redeem route now contains no "aal2"/hook-dependency
-  wording anywhere — code, comments, and audit-log text are fully consistent. Both login
+  and `jsdoc-blocks.md`). The redeem route now contains no incorrect aal2/hook-dependency
+  wording; remaining aal2 references correctly explain that the hook cannot set it
+  and Supabase overwrites it. Both login
   paths (native TOTP and recovery code) verified working end-to-end in dev after all edits.
 
 ### Session: June 13, 2026 — Doc 8H: ToS + Privacy Policy DRAFTED + Pages SHIPPED
@@ -152,8 +155,9 @@
   subprocessor table is a real `<table className="legal-table">`). Pasted
   marker-to-marker into both pages. `lastUpdated` set to publish date and
   bumped ONLY on real text changes (decided AGAINST auto `new Date()` — an
-  always-today date is legally meaningless and looks buggy). Source files:
-  `terms-of-service.md` / `privacy-policy.md` (full drafts retained).
+  always-today date is legally meaningless and looks buggy). Full drafts
+  retained on local machine (not committed to repo); live content is in
+  app/terms/page.tsx and app/privacy/page.tsx.
 - **Watch-items on paste:** if build warns `react/no-unescaped-entities`, add
   `/* eslint-disable react/no-unescaped-entities */` per page (or escape with
   `&apos;`); if subprocessor table looks unstyled, add table CSS to
@@ -323,8 +327,10 @@
     hook never sets aal2). The stale "aal2-via-hook" leftovers in the redeem route
     were cleaned up that session — see the June 16 session entry at the top.
 - **HOOK LOCKOUT root cause + permanent guardrail:** hook runs as
-  supabase_auth_admin (rolbypassrls = FALSE). It needs BOTH (a) GRANT SELECT
-  on every table it reads (profiles AND labs), AND (b) an RLS policy
+  supabase_auth_admin (rolbypassrls = FALSE). It reads only profiles (the
+  GRANT SELECT on labs is applied defensively but the current hook body does
+  not query labs). It needs BOTH (a) GRANT SELECT on every table it reads,
+  AND (b) an RLS policy
   permitting supabase_auth_admin (existing "Allow auth admin to read
   profiles" USING true). Missing GRANT → "permission denied" → TOTAL
   LOCKOUT. Missing/blocking policy → reads return EMPTY (no error) → corrupt
@@ -505,7 +511,9 @@ Seed requirements:
 - REQ-010: COA documents retained 3 years
 
 #### 8D — Automated Testing (High Priority — Pending)
-- Set up Jest or Vitest + Supabase test client
+- Expand the existing Node built-in test harness (`node --test`) beyond expiry
+  logic — do NOT describe this as setting up Jest/Vitest from scratch; the
+  harness already exists (`npm test` → `node --test lib/*.test.ts`)
 - Integration tests for validation state machine (all 8 transitions)
 - Integration tests for RLS scoping (cross-lab isolation, role gates)
 - Unit tests for parseSmartBarcode() edge cases
@@ -546,7 +554,7 @@ Done June 16, 2026.
   refreshSession flag, grantRecoveryElevation helper) — see June 16 session above.
 
 #### 8G — Software Validation Plan ✅
-Done June 16, 2026. `docs/software-validation-plan.md` (BIM-SVP-001 v1.0) —
+Done June 16, 2026. `docs/software-validation-plan.md` (BIM-SVP-001 v1.1) —
 full document, not a skeleton. Covers: intended use, regulatory classification
 (NOT a medical device; supports customer Part 11 compliance but is not itself
 FDA-regulated), SDLC (iterative phase-based, solo founder, Cursor + GitHub +
@@ -565,7 +573,8 @@ ALCOA+, RLS isolation, auth/session security).
 #### 8H — Terms of Service & Privacy Policy ✅ (draft + pages shipped)
 - **Entity:** Buddy Technologies LLC (Wyoming) — umbrella LLC, NOT YET FORMED
 - **Published at:** `/terms` and `/privacy` (static, no auth); login footer links
-- **Source drafts:** `terms-of-service.md`, `privacy-policy.md` (full drafts retained)
+- **Source drafts:** Full drafts retained on local machine (not committed to repo);
+  live content is in `app/terms/page.tsx` and `app/privacy/page.tsx`
 - **Live JSX:** `app/terms/page.tsx`, `app/privacy/page.tsx` (marker blocks)
 - **Layout:** `components/legal-page.tsx` — 720px prose, manual `lastUpdated`
 - **ToS highlights:** no PHI / no BAA (§4); compliance support ≠ guarantee (§6.2);
@@ -689,11 +698,11 @@ If a user's role/lab changes, they must log out and back in for new
 JWT claims to take effect.
 
 **When recreating custom_access_token_hook with CREATE OR REPLACE:**
-```sql
-GRANT EXECUTE ON FUNCTION public.custom_access_token_hook TO supabase_auth_admin;
-GRANT USAGE ON SCHEMA public TO supabase_auth_admin;
-REVOKE EXECUTE ON FUNCTION public.custom_access_token_hook FROM authenticated, anon, public;
-```
+After any CREATE OR REPLACE, re-apply all three grants (stripped on replace):
+1. GRANT EXECUTE on the function to supabase_auth_admin
+2. GRANT SELECT ON profiles to supabase_auth_admin
+3. GRANT SELECT ON labs to supabase_auth_admin
+Source of record: docs/custom-access-token-hook.sql
 
 ---
 
@@ -1376,7 +1385,7 @@ orderedNotReceived, benchExpiring, outOfStock, totalCount, isLoading.
 - Never expose service role key with NEXT_PUBLIC_ prefix
 - Email change blocked for technicians by design (security anchor —
   prevents account hijacking via compromised email access)
-- Rate limiting must stay on all API routes (Upstash pattern)
+- Rate limiting must stay on all API routes (Upstash pattern) (exception: recovery-elevation-status has no limiter by design — it is called on every gate evaluation; super-admin/user-email now has a 20/hr limiter added July 2026)
 - Labs RLS policies must use JWT claims only — never profiles subquery
 - Super admins must not access /dashboard — /super-admin only
 - Org admins have no lab_id — never scope to inventory queries
@@ -1492,7 +1501,7 @@ validation expectations from regulated customers.
 | Contemporaneous | Server-side timestamps on all inserts | ✅ |
 | Original | Append-only audit log (RLS no UPDATE/DELETE) | ✅ |
 | Accurate | Unique constraints, RLS, duplicate prevention | ✅ |
-| Complete | 10 audit action types cover full lot lifecycle | ✅ |
+| Complete | 10+ audit action types covering the full lot lifecycle, plus MFA recovery events (MFA Recovery Code Redeemed / Redeem Failed) written by logMfaRecoveryActivity() — pending separation into a dedicated security log | ✅ |
 | Consistent | All queries lab_id scoped, JWT role gates | ✅ |
 | Enduring | COA 3yr, audit log configurable 1-10yr (default 3), records preserved indefinitely | ✅ |
 | Available | Activity log tab with action type filters | ✅ |
@@ -1525,7 +1534,7 @@ Allowlist for open-to-bench (NEVER use blocklist):
 - Everything else → BLOCKED
 
 ### Software Validation Plan
-- Document: docs/software-validation-plan.md (skeleton — not yet written)
+- Document: docs/software-validation-plan.md (BIM-SVP-001 v1.1 — COMPLETE)
 - Covers: intended use, SDLC, validation strategy, known limits
 - Classification: NOT a medical device
 
@@ -1545,9 +1554,11 @@ NOT deployed from Git; it lives in the Supabase DB).
 
 - Injects lab_id / org_id / user_role into JWT claims. Does NOT touch aal
   (Supabase reserves aal; hook-set values are overwritten).
-- After any CREATE OR REPLACE, RE-APPLY all three grants (they are stripped):
-  EXECUTE on the function, SELECT on profiles, SELECT on labs — all to
-  supabase_auth_admin.
+- After any CREATE OR REPLACE, re-apply all three grants (stripped on replace):
+  1. GRANT EXECUTE on the function to supabase_auth_admin
+  2. GRANT SELECT ON profiles to supabase_auth_admin
+  3. GRANT SELECT ON labs to supabase_auth_admin
+  Source of record: docs/custom-access-token-hook.sql
 - GUARDRAIL: any NEW table the hook reads needs (a) GRANT SELECT to
   supabase_auth_admin (rolbypassrls=false) AND (b) an RLS policy permitting
   that role. Miss either → lockout or silent corrupt claims.
