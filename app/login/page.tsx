@@ -160,7 +160,6 @@ function LoginContent() {
           role,
           lab_id: labId,
           full_name: fn,
-          email: em,
         })
         .eq("id", newUserId)
 
