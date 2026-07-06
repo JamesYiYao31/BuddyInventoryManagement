@@ -11,7 +11,7 @@ import {
 export async function resolveMfaGateRedirect(returnTo: string): Promise<string | null> {
   const { enrolled } = await getMfaEnrollmentStatus()
   if (!enrolled) {
-    return `/mfa-setup?returnTo=${returnTo}`
+    return `/mfa-setup?returnTo=${encodeURIComponent(returnTo)}`
   }
 
   const level = await getAssuranceLevel()
@@ -24,7 +24,7 @@ export async function resolveMfaGateRedirect(returnTo: string): Promise<string |
     if (recovered) {
       return null
     }
-    return `/mfa-challenge?returnTo=${returnTo}`
+    return `/mfa-challenge?returnTo=${encodeURIComponent(returnTo)}`
   }
 
   return null

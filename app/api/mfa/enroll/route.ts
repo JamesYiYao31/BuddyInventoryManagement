@@ -5,13 +5,15 @@ import { NextRequest, NextResponse } from 'next/server'
 
 const ratelimit = new Ratelimit({
   redis: Redis.fromEnv(),
-  // TODO: revert to 10 before production
-  limiter: Ratelimit.slidingWindow(100, '1 h'),
+  limiter: Ratelimit.slidingWindow(10, '1 h'),
   analytics: true,
 })
 
 export async function POST(request: NextRequest) {
-  const ip = request.headers.get('x-forwarded-for') ?? 'anonymous'
+  const ip =
+    request.headers.get('x-real-ip') ??
+    request.headers.get('x-forwarded-for')?.split(',')[0].trim() ??
+    'anonymous'
   const { success, limit, reset, remaining } = await ratelimit.limit(ip)
 
   if (!success) {

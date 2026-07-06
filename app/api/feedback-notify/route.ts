@@ -197,7 +197,10 @@ const appendFeedbackToSheet = async (record: FeedbackRecord, submitter: Submitte
 
 export async function POST(request: NextRequest) {
   // Rate limiting — 10 requests per hour per IP
-  const ip = request.headers.get('x-forwarded-for') ?? 'anonymous'
+  const ip =
+    request.headers.get('x-real-ip') ??
+    request.headers.get('x-forwarded-for')?.split(',')[0].trim() ??
+    'anonymous'
   const { success, limit, reset, remaining } = await ratelimit.limit(ip)
 
   if (!success) {

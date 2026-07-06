@@ -9,6 +9,12 @@ import { getMfaEnrollmentStatus, redeemMfaRecoveryCode, verifyTotpChallenge } fr
 import { normalizeRecoveryCode } from "@/lib/recovery-code-format"
 import { supabase } from "@/lib/supabase"
 
+const isSafeReturnTo = (path: string | null): boolean => {
+  if (!path) return false
+  // Must start with / but NOT // (protocol-relative URLs are external)
+  return path.startsWith("/") && !path.startsWith("//")
+}
+
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
   const parts = token.split(".")
   if (parts.length !== 3) return null
@@ -54,7 +60,7 @@ function MfaChallengeContent() {
 
   const resolvePostChallengeRedirect = useCallback(async () => {
     const returnTo = searchParams.get("returnTo")
-    if (returnTo) return returnTo
+    if (isSafeReturnTo(returnTo)) return returnTo!
 
     const {
       data: { session },

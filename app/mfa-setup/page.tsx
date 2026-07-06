@@ -8,6 +8,12 @@ import { Loader2, Shield, Smartphone, QrCode, KeyRound } from "lucide-react"
 import { enrollTotp, generateMfaRecoveryCodes, getMfaEnrollmentStatus, verifyTotpEnrollment } from "@/lib/mfa"
 import { RecoveryCodesDisplay, RecoveryCodesLoading } from "@/components/mfa/recovery-codes-display"
 
+const isSafeReturnTo = (path: string | null): boolean => {
+  if (!path) return false
+  // Must start with / but NOT // (protocol-relative URLs are external)
+  return path.startsWith("/") && !path.startsWith("//")
+}
+
 function MfaSetupContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -23,7 +29,7 @@ function MfaSetupContent() {
 
   const postSetupRedirect = useCallback(() => {
     const returnTo = searchParams.get("returnTo")
-    router.replace(returnTo ?? "/dashboard")
+    router.replace(isSafeReturnTo(returnTo) ? returnTo! : "/dashboard")
   }, [searchParams, router])
 
   useEffect(() => {

@@ -16,7 +16,10 @@ const adminClient = createClient(
 )
 
 export async function GET(request: NextRequest) {
-  const ip = request.headers.get("x-forwarded-for") ?? "anonymous"
+  const ip =
+    request.headers.get("x-real-ip") ??
+    request.headers.get("x-forwarded-for")?.split(",")[0].trim() ??
+    "anonymous"
   const { success, limit, reset, remaining } = await ratelimit.limit(ip)
 
   if (!success) {

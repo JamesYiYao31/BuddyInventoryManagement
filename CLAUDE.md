@@ -26,6 +26,11 @@
     doc's "401 before rate limiting is applied" claim is backwards.
   - enroll route header says 10/hr but the live limit is 100/hr (has a revert-TODO).
   - feedback-notify email also includes the submitter's email address (doc omits it).
+  - super_admin / org_admin recovery-code redemptions produce no audit
+    record — logMfaRecoveryActivity() exits early when lab_id is null.
+    Fix requires a non-lab-scoped security_logs table (planned). Deferred
+    until security log split is implemented. Flagged by security audit
+    July 2026.
 
 ### Session: June 16, 2026 (later) — 8G Software Validation Plan WRITTEN
 - **8G COMPLETE — last Phase 8 doc done.** `docs/software-validation-plan.md`
