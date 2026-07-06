@@ -542,10 +542,11 @@ Seed requirements:
 
 #### 8F — API Documentation ✅
 Done June 16, 2026.
-- `docs/api-documentation.md` documents all five API routes (feedback-notify,
-  mfa/enroll, recovery-codes/generate, recovery-codes/redeem,
-  recovery-elevation-status): purpose, caller, auth, rate limit, request/response
-  shapes, status codes, server-side flow, and security notes per route.
+- `docs/api-documentation.md` documents 5 of the 6 API routes
+  (feedback-notify, mfa/enroll, recovery-codes/generate,
+  recovery-codes/redeem, recovery-elevation-status): purpose, caller,
+  auth, rate limit, request/response.
+  super-admin/user-email route deferred — tracked in api-doc cleanup pass.
 - JSDoc added on the three most auditor-scrutinized functions in
   `lib/inventory-utils.ts`: parseSmartBarcode(), logActivity(),
   resolveCurrentUserLabId(). The resolveCurrentUserLabId() block was corrected to
@@ -731,7 +732,7 @@ tooling (formal pen testing, SOC 2).
 | Profile security | RLS enabled, email column removed |
 | Transport | HTTPS via HSTS |
 | Browser attacks | 6 security headers via vercel.json |
-| API abuse | Upstash rate limiting (10 req/hr/IP) |
+| API abuse | Upstash rate limiting (per-route limits; see Security Rules section) |
 | Preview URLs | Vercel Authentication enabled |
 | Account security | 2FA on Supabase + Vercel admin accounts |
 | Webhook | x-webhook-secret header validation |
