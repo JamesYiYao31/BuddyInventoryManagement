@@ -2,7 +2,96 @@
 
 ## Recent Sessions
 
-### Session: June 16, 2026 (latest) — Doc-Accuracy Corrections: SVP v1.1, Table Count 14→16, RLS Re-verify
+### Session: July 7, 2026 (latest) — Full Documentation Accuracy Sweep + Security & Compliance Audit
+- **Headline:** Full documentation accuracy sweep (all findings from dual Claude
+  Code audit resolved) followed by a complete security and compliance audit
+  pass. Eleven actionable findings fixed across CLAUDE.md, four docs, six API
+  routes, three auth pages, and three UI components. No critical issues found.
+- **Documentation fixes (Claude Code audit — 10 findings, all resolved):**
+  - S-1: SVP "skeleton" label corrected to BIM-SVP-001 v1.1 — COMPLETE
+  - M-1: False "never returns 401" claim corrected in both CLAUDE.md and
+    docs/api-documentation.md — authenticated callers get 200 (fail-closed),
+    unauthenticated get 401
+  - C-1: Two conflicting hook re-apply checklists unified into one canonical
+    3-item numbered list in both sections, pointing to the SQL file as source
+    of record
+  - C-2: Rate limit security rule annotated with exception for
+    recovery-elevation-status (no limiter by design) and user-email (20/hr
+    added July 2026)
+  - C-3: 8F section corrected to "5 of 6 routes" in both the session entry and
+    the phase checklist section; formatting cleaned up
+  - C-4: 8D section no longer mentions Jest/Vitest — correctly describes
+    expanding the existing node --test harness
+  - C-5: Audit action count updated to "10+" with MFA recovery events noted,
+    pending security log split
+  - C-6: Stale line-number references removed from the profiles RLS note
+  - M-2: Hook lockout guardrail correctly states the hook reads profiles
+    only; labs GRANT noted as defensive/unused
+  - M-4: ToS/Privacy source correctly described as local machine, not repo
+  - S-2: 8G section consistently says v1.1
+  - S-3: aal2 cleanup note accurately worded
+- **Security and compliance fixes (Fable extended-thinking audit — 7 findings + 3 follow-up):**
+  - High — Fixed: Technician registration `profiles.update()` was writing
+    `email: em` to a column that no longer exists. Verified in Supabase (6
+    columns confirmed, no email). Removed `email: em` — only `role`,
+    `lab_id`, `full_name` now written.
+  - Medium — Fixed: `returnTo` open redirect — `isSafeReturnTo()` validation
+    added to mfa-setup/page.tsx and mfa-challenge/page.tsx;
+    `encodeURIComponent()` added in lib/mfa-gate.ts
+  - Medium — Fixed: XFF rate-limit key spoofing — all 5 API routes now use
+    x-real-ip first, falling back to leftmost XFF value only
+  - Medium — Fixed: Audit timestamps rendered in lab timezone
+    (Intl.DateTimeFormat with labTimezone) via new
+    `formatActivityLogTimestamp()` helper in lib/inventory-utils.ts; group
+    headers in activity-log-table.tsx also fixed
+  - Medium — Documented: Non-atomic audit writes added to SVP
+    known-limitations table as L-009 (Medium risk, accepted, server-side
+    co-location planned)
+  - Medium — Deferred: super_admin recovery-code redemptions produce no
+    audit record (`logMfaRecoveryActivity()` exits early when lab_id is
+    null). Requires a non-lab-scoped security_logs table.
+  - Low — Fixed: Enroll rate limit reverted from 100/hr to 10/hr; TODO
+    comment removed
+  - Low — Fixed: `isSafeReturnTo` extracted to lib/safe-redirect.ts (shared
+    util, no duplication); backslash variant guard added (/\evil.com)
+  - Low — Fixed: Invalid IANA timezone string now guarded with try/catch +
+    UTC fallback in formatActivityLogTimestamp() and formatGroupDateHeader
+  - Low — Fixed: Two compliance timestamps in validation-tab.tsx
+    (submittedAt ~line 496, validationArchivedAt ~line 633) now render in
+    lab timezone via formatActivityLogTimestamp()
+  - Informational — Deferred: Enroll route still inlines bearer auth instead
+    of using shared authenticateBearerRequest() (F-5, carried)
+  - M-3 (security — rate limit on PII endpoint):
+    super-admin/user-email/route.ts — Upstash 20/hr sliding window added,
+    runs before auth, uses the x-real-ip pattern consistent with all other
+    routes
+- Two full Claude Code re-audits run. Second pass confirmed all 7 primary
+  fixes clean. Third pass (follow-up) confirmed all 10 fixes clean with no
+  regressions introduced.
+- **Files changed this session:** CLAUDE.md, docs/api-documentation.md,
+  docs/software-validation-plan.md, app/login/page.tsx,
+  app/mfa-setup/page.tsx, app/mfa-challenge/page.tsx, lib/mfa-gate.ts,
+  lib/safe-redirect.ts (new), lib/inventory-utils.ts,
+  app/api/mfa/enroll/route.ts, app/api/mfa/recovery-codes/redeem/route.ts,
+  app/api/mfa/recovery-codes/generate/route.ts,
+  app/api/feedback-notify/route.ts,
+  app/api/super-admin/user-email/route.ts,
+  components/dashboard/activity-log-table.tsx,
+  components/dashboard/validation-tab.tsx
+- **Parked for future passes (not this session):**
+  - super_admin / org_admin recovery audit → requires security_logs table
+    (non-lab-scoped)
+  - api-documentation.md cleanup pass (6th route, rate-limit ordering, stale
+    AAL2 language) — still deferred
+  - validation-tab.tsx → wire labSettings as prop from
+    app/dashboard/page.tsx instead of internal fetchLabSettings() fetch (low
+    priority, not a bug)
+  - Enroll route auth consolidation onto authenticateBearerRequest() (F-5)
+  - Pre-existing TypeScript errors in
+    app/super-admin/orgs/[id]/page.tsx, components/dashboard/header.tsx,
+    hooks/use-bell-alerts.ts — not touched, still open
+
+### Session: June 16, 2026 — Doc-Accuracy Corrections: SVP v1.1, Table Count 14→16, RLS Re-verify
 - **SVP corrected to v1.1** (`docs/software-validation-plan.md`). Automated-test
   disclosure fixed: the doc had claimed NO automated tests exist — FALSE. A limited
   Node built-in test suite exists (`npm test` → `node --test lib/*.test.ts`), currently
@@ -24,7 +113,6 @@
     aal2/hook wording, but commit 3198381 already cleaned both — the code is clean.
   - Rate-limiting runs BEFORE auth in every route, so a 429 can precede a 401 — the
     doc's "401 before rate limiting is applied" claim is backwards.
-  - enroll route header says 10/hr but the live limit is 100/hr (has a revert-TODO).
   - feedback-notify email also includes the submitter's email address (doc omits it).
   - super_admin / org_admin recovery-code redemptions produce no audit
     record — logMfaRecoveryActivity() exits early when lab_id is null.
