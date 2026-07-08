@@ -85,7 +85,7 @@ x-webhook-secret: <SUPABASE_WEBHOOK_SECRET>
 
 **Caller:** `lib/mfa.ts` → `enrollTotp()` → called from `/mfa-setup` page  
 **Auth:** `Authorization: Bearer <access_token>` (user's current Supabase session token)  
-**Rate limit:** 10 requests / hour / IP (temporarily raised during development — verify before production hardening)
+**Rate limit:** 10 requests / hour / IP
 
 ### Request
 
@@ -343,7 +343,7 @@ The route uses the admin (service-role) client to read `mfa_recovery_elevations`
 All routes validate the caller's identity before any business logic runs. For webhook routes, this is the `x-webhook-secret` header. For user-facing routes, this is a `Bearer` token validated against Supabase's admin client. An expired or missing token always returns `401` before rate limiting is applied.
 
 ### 429 Too Many Requests
-Rate-limited routes use Upstash Redis sliding-window limiting, with per-route limits: feedback-notify 10/hr, mfa/enroll 10/hr (temporarily 100/hr in development — see route note), recovery-codes/generate 10/hr, recovery-codes/redeem 20/hr. The recovery-elevation-status route has no rate limit. Response headers on limited routes include `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset`.
+Rate-limited routes use Upstash Redis sliding-window limiting, with per-route limits: feedback-notify 10/hr, mfa/enroll 10/hr, recovery-codes/generate 10/hr, recovery-codes/redeem 20/hr. The recovery-elevation-status route has no rate limit. Response headers on limited routes include `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset`.
 
 ### 500 Internal Server Error
 Most routes catch unexpected errors and return an error JSON body (feedback-notify includes a `details` message string — never a stack trace). The recovery-elevation-status route is the exception: it never returns 500, instead failing closed to `{ "elevated": false }` on any error. All server errors are logged to Vercel's server-side log stream.
