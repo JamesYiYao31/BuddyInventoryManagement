@@ -2,7 +2,15 @@
 
 ## Recent Sessions
 
-### Session: July 7, 2026 (latest) — Full Documentation Accuracy Sweep + Security & Compliance Audit
+### Session: July 9, 2026 (latest) — API Doc Enroll Rate-Limit Cleanup
+- **api-documentation.md:** Removed stale dev-era parentheticals on mfa/enroll rate
+  limit (route header line 88 and §429 summary line 346). Code has been 10/hr since
+  the July 7 session (`app/api/mfa/enroll/route.ts`); doc now matches live route.
+  Resolves the last remaining enroll-limit doc drift flagged during the July 7
+  Fable re-check (code was already correct; only the doc parentheticals were stale).
+- **Files changed this session:** docs/api-documentation.md
+
+### Session: July 7, 2026 — Full Documentation Accuracy Sweep + Security & Compliance Audit
 - **Headline:** Full documentation accuracy sweep (all findings from dual Claude
   Code audit resolved) followed by a complete security and compliance audit
   pass. Eleven actionable findings fixed across CLAUDE.md, four docs, six API
