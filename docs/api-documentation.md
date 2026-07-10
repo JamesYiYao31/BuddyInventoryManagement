@@ -234,14 +234,14 @@ Elevation takes effect via the `mfa_recovery_elevations` DB row alone (see secti
 1. Validates the Bearer token; derives `user.id` and `sessionId`.
 2. Parses the body and normalizes the code (`normalizeRecoveryCode()`); rejects with `400` if not exactly 8 characters.
 3. Fetches all of the user's unused codes (`used_at IS NULL`) and bcrypt-verifies the submitted code against each hash (`verifyRecoveryCode()`).
-4. **On no match:** writes a `"MFA Recovery Code Redeem Failed"` activity entry and returns `401` with `remainingCount`.
+4. **On no match:** writes a `security_logs` event (`event_type = "recovery_code_redeemed"`, `outcome = "failure"`) and returns `401` with `remainingCount`.
 5. **On match:** marks that code's `used_at` (single-use enforcement, guarded by `.is("used_at", null)` to prevent double-spend).
 6. Calls `grantRecoveryElevation()`: deletes any prior elevation row for the user and inserts a fresh `mfa_recovery_elevations` row keyed to `session_id`, with `expires_at = NOW() + 60 minutes`. This DB row — not any `aal` change — is what authorizes the session.
-7. Writes a `"MFA Recovery Code Redeemed"` activity entry and returns `success: true` with `remainingCount`.
+7. Writes a `security_logs` event (`event_type = "recovery_code_redeemed"`, `outcome = "success"`) and returns `success: true` with `remainingCount`.
 
 ### Failed-redeem and successful-redeem are both logged
 
-Every redeem attempt writes to the MFA activity log via `logMfaRecoveryActivity()` — both failures (`"MFA Recovery Code Redeem Failed"`) and successes (`"MFA Recovery Code Redeemed"`). This is the audit evidence for brute-force attempts against the recovery path.
+Every redeem attempt writes to `security_logs` via `logSecurityEvent()` — both failures (`event_type = "recovery_code_redeemed", outcome = "failure"`) and successes (`event_type = "recovery_code_redeemed", outcome = "success"`). This is the audit evidence for brute-force attempts against the recovery path.
 
 ### Architecture note — recovery login uses a DB-row elevation model (aal2 leftovers cleaned up June 2026)
 
@@ -255,7 +255,7 @@ This route authorizes recovery login via the **live DB-row elevation model**. A 
 - The inert `refreshSession: true` field was removed from the success response (no client ever read it).
 - The elevation-failure response string no longer implies a hook dependency: it now reads `"Recovery elevation could not be recorded (missing session_id)."`
 
-Two internal strings still reference the old "AAL2"/"hook" wording and were intentionally left in place: one inline code comment, and the detail text of the `logMfaRecoveryActivity()` audit-log call on the elevation-failure branch. The audit-log detail is the wording an auditor would see on that event, so it was left out of scope for this cosmetic cleanup and can be revised deliberately later.
+The old `logMfaRecoveryActivity()` helper is deleted; recovery logging now writes directly to `security_logs` from the redeem route via `logSecurityEvent()`.
 
 ---
 

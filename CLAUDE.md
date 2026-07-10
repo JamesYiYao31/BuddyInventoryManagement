@@ -2,7 +2,37 @@
 
 ## Recent Sessions
 
-### Session: July 9, 2026 (latest) — API Doc Enroll Rate-Limit Cleanup
+### Session: July 10, 2026 (latest) — Security Logs Parts A–E + Domain Cutover Verification
+- **Domain cutover complete and verified:** remaining `buddy-lab-tracker.vercel.app`
+  references replaced with `yourbuddyapp.com` in active docs; production
+  verification confirmed.
+- **Security logs (Parts A–E) shipped end-to-end:** `security_logs` migration,
+  server write helper, client login/logout route wiring, recovery
+  generate/redeem server-side logging, and documentation closeout all completed,
+  committed, pushed, and production-verified.
+- **Super_admin/org_admin audit gap closed and verified in production:** recovery
+  events now persist with `lab_id = NULL` rows in `security_logs` (no silent
+  drop for non-lab-scoped roles).
+- **Identity and attribution hardening:** shared
+  `resolveSecurityLogIdentity()` now resolves role via profile → JWT
+  `user_role` claim → lowest-privilege fallback and appends
+  ` [role unverified — attribution fallback]` to row details when fallback is used.
+- **Dead code removal + attribution consistency:** deleted
+  `lib/log-mfa-activity-server.ts` (zero remaining imports) and extracted shared
+  initials logic to `lib/user-initials.ts` for both activity and security logs.
+- **Files changed this session:** `.gitignore`, `CLAUDE.md`,
+  `docs/api-documentation.md`, `database-scripts/security-logs.sql`,
+  `lib/log-security-event-server.ts`, `lib/security-log.ts`,
+  `lib/user-initials.ts`, `lib/inventory-utils.ts`,
+  `app/api/security-log/route.ts`,
+  `app/api/mfa/recovery-codes/generate/route.ts`,
+  `app/api/mfa/recovery-codes/redeem/route.ts`,
+  `app/login/page.tsx`, `components/dashboard/header.tsx`,
+  `app/dashboard/page.tsx`, `app/org-admin/page.tsx`,
+  `app/super-admin/page.tsx`, `lib/active-session.ts`,
+  `docs/pre-customer-checklist.md`.
+
+### Session: July 9, 2026 — API Doc Enroll Rate-Limit Cleanup
 - **api-documentation.md:** Removed stale dev-era parentheticals on mfa/enroll rate
   limit (route header line 88 and §429 summary line 346). Code has been 10/hr since
   the July 7 session (`app/api/mfa/enroll/route.ts`); doc now matches live route.
@@ -89,6 +119,8 @@
 - **Parked for future passes (not this session):**
   - super_admin / org_admin recovery audit → requires security_logs table
     (non-lab-scoped)
+  - security_logs viewer UI — deferred; RLS Option B already supports
+    manager/org_admin lab-scoped reads when built
   - api-documentation.md cleanup pass (6th route, rate-limit ordering, stale
     AAL2 language) — still deferred
   - validation-tab.tsx → wire labSettings as prop from
@@ -298,6 +330,13 @@
   (Form 5472 + pro-forma 1120 if foreign-owned — $25k penalty if missed).
 
 ### Carried Into Next Session — DECIDED, ready to build
+- ✅ **SHIPPED July 10, 2026 (Parts A–E):** separate `security_logs` access-control
+  trail is live (append-only, service-role writes, production-verified including
+  super_admin/org_admin `lab_id = NULL` rows).
+- **Security-log sub-scope still deferred (explicit):**
+  - 2FA enable/replace events
+  - role-change events
+  - deactivate/reactivate events (to land with the user-deactivation build)
 - **TWO separate logs, split by event TYPE (not by actor).** James decided:
   - `activity_logs` (existing) = DATA-INTEGRITY / ALCOA+ trail ONLY. Lab "stuff":
     lot validations, inventory changes, COA actions. Stays clean/focused so an
@@ -329,10 +368,8 @@
     must honor ToS §3.3 (30-day export window) + §5.3 (post-termination
     retention; audit log NOT necessarily wiped — immutability + retention
     minimums apply). These are workflows, not buttons. Defer.
-- **Also verify (future):** recovery-code REDEEM route is rate-limited (Upstash),
-  not just the login route — failed-redeem log lines in the screenshot are
-  correct behavior, but brute-force should be stopped at the rate limiter well
-  before it generates log volume.
+- ✅ **Verified July 10, 2026:** recovery-code REDEEM route is rate-limited
+  (Upstash, 20/hr sliding window), confirmed in the July 10 audit.
 
 ### Session: June 10, 2026 — Super_Admin + Org_Admin Mandatory 2FA ENFORCED
 - **Super_admin mandatory 2FA gate COMPLETE and verified in production.**
@@ -396,6 +433,10 @@
   Test tenants (TestLab, TestLab123, TestOrg, TestLabinOrg) ARCHIVED, not
   wiped — true tenant wipe (cascades inventory/audit) deferred to 8I
   pre-customer pass; verify lab_id FK cascade chain before ever running it.
+  July 10 cascade mapping note: `activity_logs` uses CASCADE (correct for test
+  tenants), `security_logs` uses SET NULL (survives wipe). Real-customer
+  offboarding remains a separate future workflow per ToS §3.3 / §5.3; any wipe
+  runbook must allow-list the four test tenants only.
   Note: deleting tonight's org_admin tester means re-testing the org-admin
   gate requires provisioning a fresh org + org_admin via invite flow.
 - **Recovery codes regenerated** post-testing (gate tests burned several) —
@@ -1148,6 +1189,44 @@ action_type, item_name, lot_number, details
 - INSERT: lab_id = get_my_lab_id()
 - 21 CFR Part 11 compliant — DB-level immutability
 
+### security_logs
+```
+id, created_at, user_id (nullable), user_name, user_initials, user_role,
+lab_id (nullable), event_type, outcome, details, ip_address
+```
+- Purpose: append-only ACCESS-CONTROL audit trail, separate from
+  `activity_logs` (ALCOA+ data-integrity/lab-operations trail stays pure).
+- Schema essentials:
+  - `lab_id` is nullable to preserve non-lab-scoped events (super_admin /
+    org_admin) and close the historical null-lab drop gap.
+  - `user_id` is nullable for forensic join convenience and is NOT the primary
+    attribution anchor.
+  - Attribution snapshots are `user_name` + `user_initials`; initials are
+    derived through shared helper `lib/user-initials.ts`.
+  - DB constraint enforces valid `event_type` / `outcome` pairings
+    (including reserved `('login','failure')` for future failed-login logging).
+- RLS (Option B):
+  - SELECT: super_admin sees all rows.
+  - SELECT: manager/org_admin see own-lab rows only.
+  - `lab_id IS NULL` rows are super_admin-only.
+  - No UPDATE/DELETE policies (append-only).
+  - Writes are service-role only; there is no client INSERT path.
+- Write paths:
+  - `POST /api/security-log` for client-side login/logout events only
+    (bearer-authenticated, 60/hr Upstash limiter).
+  - Recovery routes (`/api/mfa/recovery-codes/generate` and `/redeem`) write
+    `logSecurityEvent()` directly server-side.
+- Identity resolution for security rows:
+  - `profiles.role` → JWT `user_role` claim → `technician` fallback.
+  - Fallback rows append detail suffix:
+    ` [role unverified — attribution fallback]`.
+- Deliberate exclusions (intentional scope, not oversight):
+  - Forced/system sign-outs (archived-lab gate and missing-profile poll paths)
+  - Signup-rollback cleanups
+  - `lib/supabase.ts` refresh-failure signout
+  - Malformed recovery-code `400` requests
+  - Failed logins are future work (DB pairing reserved now)
+
 ### requests
 ```
 id, lab_id, item_id (nullable), item_name, vendor, catalog_number,
@@ -1603,7 +1682,7 @@ validation expectations from regulated customers.
 | Contemporaneous | Server-side timestamps on all inserts | ✅ |
 | Original | Append-only audit log (RLS no UPDATE/DELETE) | ✅ |
 | Accurate | Unique constraints, RLS, duplicate prevention | ✅ |
-| Complete | 10+ audit action types covering the full lot lifecycle, plus MFA recovery events (MFA Recovery Code Redeemed / Redeem Failed) written by logMfaRecoveryActivity() — pending separation into a dedicated security log | ✅ |
+| Complete | 10+ audit action types covering the full lot lifecycle. MFA recovery events are now written to `security_logs`; `activity_logs` entries `MFA Recovery Code Redeemed` / `MFA Recovery Code Redeem Failed` are legacy historical rows written before July 10, 2026 and are no longer produced (must remain visible, not deleted/hidden). | ✅ |
 | Consistent | All queries lab_id scoped, JWT role gates | ✅ |
 | Enduring | COA 3yr, audit log configurable 1-10yr (default 3), records preserved indefinitely | ✅ |
 | Available | Activity log tab with action type filters | ✅ |
