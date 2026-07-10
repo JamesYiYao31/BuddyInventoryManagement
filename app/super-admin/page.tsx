@@ -24,6 +24,7 @@ import type { User } from "@supabase/supabase-js"
 import { supabase } from "@/lib/supabase"
 import { voluntarySignOut } from "@/lib/active-session"
 import { resolveMfaGateRedirect } from "@/lib/mfa-gate"
+import { recordSecurityEvent } from "@/lib/security-log"
 import { ProfileSettingsDialog } from "@/components/dashboard/profile-settings-dialog"
 
 type OrganizationRow = {
@@ -704,6 +705,7 @@ export default function SuperAdminPage() {
   const handleSignOut = async () => {
     if (signingOut) return
     setSigningOut(true)
+    await recordSecurityEvent("logout", "success")
     await voluntarySignOut(authUser?.id)
     router.replace("/login")
   }

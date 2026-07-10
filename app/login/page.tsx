@@ -5,6 +5,7 @@ import { Loader2, Key } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { persistNewActiveSession, voluntarySignOut } from "@/lib/active-session"
 import { getMfaEnrollmentStatus } from "@/lib/mfa"
+import { recordSecurityEvent } from "@/lib/security-log"
 import { useRouter, useSearchParams } from "next/navigation"
 import Image from "next/image"
 import Link from "next/link"
@@ -49,6 +50,7 @@ function LoginContent() {
       const userId = signInData.user?.id
       if (userId) {
         await persistNewActiveSession(userId)
+        await recordSecurityEvent("login", "success")
         const { data: profile } = await supabase
           .from("profiles")
           .select("role, lab_id")

@@ -21,6 +21,7 @@ import {
   voluntarySignOut,
 } from "@/lib/active-session"
 import { resolveMfaGateRedirect } from "@/lib/mfa-gate"
+import { recordSecurityEvent } from "@/lib/security-log"
 import { ProfileSettingsDialog } from "@/components/dashboard/profile-settings-dialog"
 
 type LabRow = {
@@ -300,6 +301,7 @@ export default function OrgAdminPage() {
     const {
       data: { session },
     } = await supabase.auth.getSession()
+    await recordSecurityEvent("logout", "success")
     await voluntarySignOut(session?.user?.id)
     router.replace("/login")
   }

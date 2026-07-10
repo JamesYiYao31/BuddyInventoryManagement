@@ -1,5 +1,6 @@
 import type { AuthError } from "@supabase/supabase-js"
 import { supabase } from "@/lib/supabase"
+import { recordSecurityEvent } from "@/lib/security-log"
 
 /** Client-only session token for single-active-session enforcement (not sent via cookies). */
 export const BUDDY_SESSION_TOKEN_KEY = "buddy_session_token"
@@ -69,6 +70,11 @@ export async function sessionReplacedSignOut(router: { replace: (path: string) =
   if (typeof window !== "undefined") {
     localStorage.removeItem(BUDDY_SESSION_TOKEN_KEY)
   }
+  await recordSecurityEvent(
+    "logout",
+    "success",
+    "Session replaced by new login on another device",
+  )
   await supabase.auth.signOut()
   router.replace("/login?reason=session_replaced")
 }

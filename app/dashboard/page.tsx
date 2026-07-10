@@ -11,6 +11,7 @@ import {
   voluntarySignOut,
 } from "@/lib/active-session"
 import { getMfaEnrollmentStatus, getAssuranceLevel, checkRecoveryElevation } from "@/lib/mfa"
+import { recordSecurityEvent } from "@/lib/security-log"
 
 // Utilities & Types
 import { 
@@ -317,11 +318,12 @@ function DashboardPageContent() {
     }
   }, [])
 
-  const handleSignOut = useCallback(async () => {
+  const handleSignOut = useCallback(async (details?: string) => {
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
     if (warningTimerRef.current) clearTimeout(warningTimerRef.current)
     if (warningCountdownRef.current) clearInterval(warningCountdownRef.current)
     setShowIdleWarning(false)
+    await recordSecurityEvent("logout", "success", details)
     await voluntarySignOut(user?.id)
     router.replace("/login")
   }, [router, user?.id])
@@ -343,7 +345,7 @@ function DashboardPageContent() {
       }, 1000)
 
       warningTimerRef.current = setTimeout(() => {
-        void handleSignOut()
+        void handleSignOut("Idle timeout")
       }, IDLE_WARNING_MS)
     }, IDLE_BEFORE_WARNING_MS)
   }, [handleSignOut])

@@ -14,6 +14,7 @@ import {
 } from "@/lib/inventory-utils"
 import { useBellAlerts, type BellAlertCategory, type BellAlertRow } from "@/hooks/use-bell-alerts"
 import { voluntarySignOut } from "@/lib/active-session"
+import { recordSecurityEvent } from "@/lib/security-log"
 import { useToast } from "@/hooks/use-toast"
 import {
   DropdownMenu,
@@ -118,6 +119,7 @@ export function DashboardHeader({
   const handleSignOut = async () => {
     if (signingOut) return
     setSigningOut(true)
+    await recordSecurityEvent("logout", "success")
     const { error } = await voluntarySignOut(user?.id)
     if (error) {
       setSigningOut(false)
