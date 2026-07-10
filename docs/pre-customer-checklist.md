@@ -74,7 +74,11 @@ before the next customer invite goes out.
 
 - [ ] **Resend sending from verified `noreply@yourbuddyapp.com`** — test a real invite/reset email lands and renders branded.
 - [ ] **Branded email templates render correctly** — invite, password reset, security alerts all look right in a real inbox (not just preview).
-- [ ] **Domain decision made** — confirm whether the customer is given `buddy-lab-tracker.vercel.app` or `yourbuddyapp.com` for go-live, and that whichever URL resolves correctly. (Routing `yourbuddyapp.com` → Vercel is currently deferred; decide before inviting.)
+- [x] **Domain cutover complete** — `www.yourbuddyapp.com` is verified and serving
+  production traffic on Vercel; apex `yourbuddyapp.com` 308-redirects to `www`
+  (confirmed via Vercel dashboard and direct browser test). End-to-end smoke test
+  passed on the live domain: login, password-reset email link, invite-link
+  generation, and MFA/recovery redirect all confirmed working on `yourbuddyapp.com`.
 
 ## 8. Customer-Facing Surfaces  `(8F · 8H · onboarding)`
 
