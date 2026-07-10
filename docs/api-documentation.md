@@ -2,7 +2,7 @@
 
 **Version:** Phase 8F  
 **Last updated:** June 16, 2026  
-**Base URL:** `https://buddy-lab-tracker.vercel.app`  
+**Base URL:** `https://yourbuddyapp.com`  
 **Auth model:** Supabase JWT (`Authorization: Bearer <access_token>`) unless noted
 
 All routes are Next.js Route Handlers (`app/api/*/route.ts`).  

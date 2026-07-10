@@ -251,7 +251,7 @@
   - `app/login/page.tsx` — Terms · Privacy footer links added.
   - Verified logged-out: `/terms` + `/privacy` reachable, `/login` footer renders,
     login still works, protected routes still gate. Build passes. Production
-    verified at buddy-lab-tracker.vercel.app.
+    verified at yourbuddyapp.com.
 - **Content:** drafted in markdown, converted to hand-built JSX (no new deps;
   subprocessor table is a real `<table className="legal-table">`). Pasted
   marker-to-marker into both pages. `lastUpdated` set to publish date and
@@ -509,7 +509,7 @@ expand into more products — keep components modular and reusable.
 - **Database & Auth:** Supabase (US region)
 - **UI Generation:** v0
 - **Editor:** Cursor with Claude Code
-- **Deployment:** Vercel (buddy-lab-tracker.vercel.app)
+- **Deployment:** Vercel (yourbuddyapp.com)
 - **Email:** Resend (noreply@yourbuddyapp.com — verified ✅)
 - **Domain:** yourbuddyapp.com (Cloudflare DNS, Resend verified)
 - **Rate Limiting:** Upstash Redis (US-East-1)

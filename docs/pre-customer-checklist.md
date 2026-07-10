@@ -6,7 +6,7 @@ of test artifacts — without touching the one piece of real data that must surv
 
 **How to use:** Run top to bottom in a single sitting. Check each box only after
 you've personally verified it on the **production** deployment
-(`buddy-lab-tracker.vercel.app`), not localhost. Anything that fails gets fixed
+(`yourbuddyapp.com`), not localhost. Anything that fails gets fixed
 before the next customer invite goes out.
 
 > 📌 **KEEP — Oakwood Lab:** Oakwood is the demo/dogfooding lab kept in production
