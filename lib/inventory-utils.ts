@@ -1,4 +1,5 @@
 import { supabase, signOutLocalOnRefreshFailure } from "./supabase"
+import { initialsFromDisplayName } from "./user-initials"
 import { getEarliestExpiry } from "./expiry-utils.ts"
 
 export { getEarliestExpiry }
@@ -910,13 +911,7 @@ export const resolveCurrentUserIdentity = async (): Promise<{
     name = "Unknown User"
   }
 
-  const initials = name
-    .split(/\s+/)
-    .filter(Boolean)
-    .map(s => s[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase() || name.slice(0, 2).toUpperCase()
+  const initials = initialsFromDisplayName(name)
 
   return { userId: user.id, name, initials, email }
 }
