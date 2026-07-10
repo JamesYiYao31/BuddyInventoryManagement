@@ -3,6 +3,7 @@ import { Ratelimit } from "@upstash/ratelimit"
 import { Redis } from "@upstash/redis"
 import { NextRequest, NextResponse } from "next/server"
 import { authenticateBearerRequest, createAdminClient } from "@/lib/mfa-api-auth"
+import { appendSecurityLogDetails, logSecurityEvent, resolveSecurityLogIdentity } from "@/lib/log-security-event-server"
 import { generateRecoveryCodes, hashRecoveryCode } from "@/lib/recovery-codes"
 
 const ratelimit = new Ratelimit({
@@ -12,11 +13,12 @@ const ratelimit = new Ratelimit({
 })
 
 export async function POST(request: NextRequest) {
-  const ip =
+  const logIp =
     request.headers.get("x-real-ip") ??
     request.headers.get("x-forwarded-for")?.split(",")[0].trim() ??
-    "anonymous"
-  const { success, limit, reset, remaining } = await ratelimit.limit(`mfa-recovery-gen:${ip}`)
+    null
+  const rateLimitKey = logIp ?? "anonymous"
+  const { success, limit, reset, remaining } = await ratelimit.limit(`mfa-recovery-gen:${rateLimitKey}`)
 
   if (!success) {
     return new Response(JSON.stringify({ error: "Too many requests" }), {
@@ -34,7 +36,7 @@ export async function POST(request: NextRequest) {
     const auth = await authenticateBearerRequest(request.headers.get("Authorization"))
     if (!auth.ok) return auth.response
 
-    const { user } = auth
+    const { user, accessToken } = auth
     const admin = createAdminClient()
 
     const { data: factorsData } = await admin.auth.admin.mfa.listFactors({ userId: user.id })
@@ -74,6 +76,15 @@ export async function POST(request: NextRequest) {
       console.error("MFA recovery codes insert failed:", insertError.message)
       return NextResponse.json({ error: "Could not generate recovery codes." }, { status: 500 })
     }
+
+    const { detailsSuffix, ...identity } = await resolveSecurityLogIdentity(admin, user, accessToken)
+    await logSecurityEvent(admin, {
+      ...identity,
+      eventType: "recovery_codes_generated",
+      outcome: "success",
+      details: appendSecurityLogDetails(`${plaintextCodes.length} codes generated`, detailsSuffix),
+      ipAddress: logIp,
+    })
 
     return NextResponse.json({ codes: plaintextCodes, batchId })
   } catch (error) {

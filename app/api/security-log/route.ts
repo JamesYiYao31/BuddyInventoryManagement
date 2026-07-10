@@ -2,8 +2,7 @@ import { Ratelimit } from "@upstash/ratelimit"
 import { Redis } from "@upstash/redis"
 import { NextRequest, NextResponse } from "next/server"
 import { authenticateBearerRequest, createAdminClient } from "@/lib/mfa-api-auth"
-import { logSecurityEvent } from "@/lib/log-security-event-server"
-import { initialsFromDisplayName } from "@/lib/user-initials"
+import { appendSecurityLogDetails, logSecurityEvent, resolveSecurityLogIdentity } from "@/lib/log-security-event-server"
 
 const ratelimit = new Ratelimit({
   redis: Redis.fromEnv(),
@@ -13,7 +12,6 @@ const ratelimit = new Ratelimit({
 
 const ALLOWED_EVENT_TYPES = new Set(["login", "logout"])
 const ALLOWED_OUTCOMES = new Set(["success", "failure"])
-const ALLOWED_ROLES = new Set(["super_admin", "org_admin", "manager", "technician"])
 
 export async function POST(request: NextRequest) {
   const ip =
@@ -39,7 +37,7 @@ export async function POST(request: NextRequest) {
     const auth = await authenticateBearerRequest(request.headers.get("Authorization"))
     if (!auth.ok) return auth.response
 
-    const { user } = auth
+    const { user, accessToken } = auth
     const admin = createAdminClient()
 
     let body: { eventType?: string; outcome?: string; details?: string }
@@ -51,8 +49,7 @@ export async function POST(request: NextRequest) {
 
     const eventType = typeof body.eventType === "string" ? body.eventType.trim() : ""
     const outcome = typeof body.outcome === "string" ? body.outcome.trim() : ""
-    const details =
-      typeof body.details === "string" ? body.details.trim().slice(0, 500) || null : null
+    const rawDetails = typeof body.details === "string" ? body.details.trim() : ""
 
     if (!ALLOWED_EVENT_TYPES.has(eventType)) {
       return NextResponse.json({ error: "Invalid event type." }, { status: 400 })
@@ -67,31 +64,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid outcome for event type." }, { status: 400 })
     }
 
-    const { data: profile } = await admin
-      .from("profiles")
-      .select("full_name, role, lab_id")
-      .eq("id", user.id)
-      .maybeSingle()
-
-    if (!profile?.role || !ALLOWED_ROLES.has(profile.role)) {
-      return NextResponse.json({ error: "Could not resolve user profile." }, { status: 400 })
-    }
-
-    let userName = profile.full_name?.trim() ?? ""
-    if (!userName) {
-      const email = user.email ?? ""
-      userName = email ? email.split("@")[0] : "Unknown User"
-    }
+    const { detailsSuffix, ...identity } = await resolveSecurityLogIdentity(admin, user, accessToken)
+    const detailsCap = detailsSuffix ? 500 - detailsSuffix.length : 500
+    const details = rawDetails ? rawDetails.slice(0, detailsCap) : null
 
     await logSecurityEvent(admin, {
-      userId: user.id,
-      userName,
-      userInitials: initialsFromDisplayName(userName),
-      userRole: profile.role,
-      labId: profile.lab_id ?? null,
+      ...identity,
       eventType,
       outcome,
-      details,
+      details: appendSecurityLogDetails(details, detailsSuffix),
       ipAddress: ip,
     })
 

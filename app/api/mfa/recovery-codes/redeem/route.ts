@@ -2,7 +2,7 @@ import { Ratelimit } from "@upstash/ratelimit"
 import { Redis } from "@upstash/redis"
 import { NextRequest, NextResponse } from "next/server"
 import { authenticateBearerRequest, createAdminClient } from "@/lib/mfa-api-auth"
-import { logMfaRecoveryActivity } from "@/lib/log-mfa-activity-server"
+import { appendSecurityLogDetails, logSecurityEvent, resolveSecurityLogIdentity } from "@/lib/log-security-event-server"
 import { normalizeRecoveryCode, verifyRecoveryCode } from "@/lib/recovery-codes"
 
 const ratelimit = new Ratelimit({
@@ -60,12 +60,32 @@ async function grantRecoveryElevation(
   return true
 }
 
+async function logRecoveryRedeemSecurityEvent(
+  admin: ReturnType<typeof createAdminClient>,
+  user: { id: string; email?: string },
+  accessToken: string,
+  logIp: string | null,
+  outcome: "success" | "failure",
+  details: string,
+): Promise<void> {
+  const { detailsSuffix, ...identity } = await resolveSecurityLogIdentity(admin, user, accessToken)
+
+  await logSecurityEvent(admin, {
+    ...identity,
+    eventType: "recovery_code_redeemed",
+    outcome,
+    details: appendSecurityLogDetails(details, detailsSuffix),
+    ipAddress: logIp,
+  })
+}
+
 export async function POST(request: NextRequest) {
-  const ip =
+  const logIp =
     request.headers.get("x-real-ip") ??
     request.headers.get("x-forwarded-for")?.split(",")[0].trim() ??
-    "anonymous"
-  const { success, limit, reset, remaining } = await ratelimit.limit(`mfa-recovery-redeem:${ip}`)
+    null
+  const rateLimitKey = logIp ?? "anonymous"
+  const { success, limit, reset, remaining } = await ratelimit.limit(`mfa-recovery-redeem:${rateLimitKey}`)
 
   if (!success) {
     return new Response(JSON.stringify({ error: "Too many requests" }), {
@@ -83,7 +103,7 @@ export async function POST(request: NextRequest) {
     const auth = await authenticateBearerRequest(request.headers.get("Authorization"))
     if (!auth.ok) return auth.response
 
-    const { user, sessionId } = auth
+    const { user, sessionId, accessToken } = auth
     const admin = createAdminClient()
 
     let body: { code?: string }
@@ -123,10 +143,12 @@ export async function POST(request: NextRequest) {
     }
 
     if (!matchedId) {
-      await logMfaRecoveryActivity(
+      await logRecoveryRedeemSecurityEvent(
         admin,
-        user.id,
-        "MFA Recovery Code Redeem Failed",
+        user,
+        accessToken,
+        logIp,
+        "failure",
         "Invalid recovery code submitted during MFA challenge.",
       )
       return NextResponse.json(
@@ -151,10 +173,12 @@ export async function POST(request: NextRequest) {
     if (!elevationGranted) {
       // Code already consumed above; the mfa_recovery_elevations row could not be
       // recorded (missing session_id or a DB error), so the user must sign in again.
-      await logMfaRecoveryActivity(
+      await logRecoveryRedeemSecurityEvent(
         admin,
-        user.id,
-        "MFA Recovery Code Redeemed",
+        user,
+        accessToken,
+        logIp,
+        "success",
         "Recovery code redeemed but elevation could not be recorded (missing session_id).",
       )
       return NextResponse.json(
@@ -166,10 +190,12 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    await logMfaRecoveryActivity(
+    await logRecoveryRedeemSecurityEvent(
       admin,
-      user.id,
-      "MFA Recovery Code Redeemed",
+      user,
+      accessToken,
+      logIp,
+      "success",
       `Recovery code redeemed successfully. ${remainingBefore - 1} unused code(s) remain.`,
     )
 
