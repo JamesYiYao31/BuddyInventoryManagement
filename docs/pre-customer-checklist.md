@@ -21,8 +21,13 @@ before the next customer invite goes out.
 
 ## 1. Test Data Hygiene  `(8I)`
 
-- [ ] **Test labs removed** — every lab created for testing is deleted **except Oakwood Lab**. Confirm the exact `lab_id` of each lab before deleting; a wrong delete cascades through inventory, lots, and audit rows.
-- [ ] **Orphaned profiles cleaned** — no `profiles` rows pointing at deleted labs. Run a check for `lab_id` values that no longer exist in `labs` (excluding super_admin's intentional `NULL`).
+- [x] **Test labs removed** — four archived test tenants wiped July 10, 2026
+  (TestLab, TestLab123, TestLabinOrg, TestOrg — UUIDs in CLAUDE.md). Oakwood Lab
+  verified intact and operational post-wipe (July 11): login, inventory, activity
+  log, and members all confirmed working.
+- [x] **Orphaned profiles / child rows cleaned** — zero orphan rows confirmed for
+  all four wiped tenant UUIDs across child tables (July 11 re-run). No `profiles`
+  rows pointing at deleted labs.
 - [ ] **Test invites cleared** — no unused or expired invite rows from testing sit in the invites table.
 - [ ] **Test inventory / lots removed** — any seed inventory, lots, or COA records created during testing are gone (Oakwood's legitimate test data may stay if you want a live demo lab).
 - [ ] **Test feedback rows reviewed** — feedback submitted during testing is cleared from Supabase and the Google Sheet, so the first real feedback isn't buried under noise.
@@ -36,7 +41,10 @@ before the next customer invite goes out.
 
 - [ ] **`activity_logs` still has NO UPDATE policy and NO DELETE policy** — verify in Supabase. This is the immutability guarantee; if a policy crept in during testing, remove it.
 - [ ] **Do NOT delete test audit rows individually** — the only sanctioned way to remove audit history is a full lab/tenant wipe (which cascades). Per-row audit deletion is forbidden even for test data.
-- [ ] **If a test lab was deleted, document the tenant wipe** — note the lab name, `lab_id`, and date in your records, since a tenant wipe is the one documented exception to audit immutability.
+- [x] **If a test lab was deleted, document the tenant wipe** — July 10 wipe documented in
+  CLAUDE.md (four UUIDs + method). `security_logs` SET NULL survival verified
+  behaviorally via rollback-transaction FK test (July 11) — structural FK
+  introspection July 10, behavioral proof July 11.
 - [ ] **Retention commitment is documented** — confirm the audit-log retention language is captured in ToS/Privacy Policy (Phase 8H) before go-live. Reminder: retention is a stored *commitment*; no automated deletion runs today.
 
 ## 3. Multi-Tenancy & RLS Verification  `(8I · core arch)`
@@ -92,7 +100,8 @@ before the next customer invite goes out.
 ## Final Sign-Off
 
 - [ ] Every box above is checked on **production**.
-- [ ] Oakwood demo lab is intact (or intentionally removed — your call).
+- [x] Oakwood demo lab is intact and operational post-wipe (July 11) — login,
+  inventory, activity log, members confirmed.
 - [ ] A fresh token decode confirms clean claims.
 - [ ] You can personally log in, hit the 2FA challenge, and reach `/super-admin`.
 

@@ -2,7 +2,72 @@
 
 ## Recent Sessions
 
-### Session: July 10, 2026 (latest) — Security Logs Parts A–E + Domain Cutover Verification
+### Session: July 10, 2026 (latest) — Tenant Wipe EXECUTED (four test tenants)
+- **Wipe executed and verified in production:** TestLab
+  (beea89ce-abc4-4e9a-b6ab-210253a40641), TestLab123
+  (1c78c34a-609c-406c-8645-f79116c00ecc), TestLabinOrg
+  (98cfff3c-77eb-48df-8cc3-e2379cd0c820), and TestOrg
+  (3fb26e5e-5ac4-44e7-8c8d-6ec42e74593c) deleted. Post-wipe query confirms
+  Oakwood Lab is the only remaining lab; organizations table is empty.
+  This is the documented tenant-wipe exception to audit-log immutability
+  (activity_logs rows for these labs removed via CASCADE, per rule).
+- **Method (template for future real-customer offboarding, ToS §3.3/§5.3):**
+  1. Live FK introspection via pg_constraint FIRST (never trust repo SQL or
+     docs for ON DELETE behavior — introspection corrected two doc-derived
+     assumptions).
+  2. Read-only dry-run: resolve names → UUIDs, snapshot attached users,
+     safety checks, per-table row-count preview.
+  3. Destructive script with UUID literals (no name lookups at destruction
+     time), allow-list guards (RAISE EXCEPTION on any UUID/name mismatch),
+     re-check of dry-run assumptions at execution time, per-step row-count
+     assertions, single transaction (any failure = full rollback).
+- **Dry-run findings:** zero profiles referenced any target tenant (June
+  archival had already stripped users); zero operational rows in all
+  lab-scoped tables; only 3 lab_settings rows (auto-created), cascaded away.
+  Zero coa_records → no storage purge needed for this wipe.
+- **Live FK findings (schema facts, now verified — matter for offboarding):**
+  - `profiles.org_id → organizations` is ON DELETE **RESTRICT** — creates a
+    circular block with `organizations.created_by` (NO ACTION) if an org's
+    creator belongs to it. Break by deleting target profile rows BEFORE the
+    org. Deliberate production guard: an org with attached users cannot be
+    deleted. Do not change.
+  - `labs.owner_id → auth.users` is ON DELETE **SET NULL** — deleting a user
+    who owns a non-target lab silently nulls that lab's owner. Offboarding
+    runbook must check owner_id references before any user delete.
+  - `lab_invites` cascades with its lab AND its org; only
+    created_by/revoked_by (NO ACTION) block user deletes.
+  - `requests.item_id` NO ACTION confirmed live — harmless in whole-lab
+    deletes (same-statement cascade), blocks item-level deletes only.
+  - `coa_records` + `lot_validation_records`: CASCADE on both lab_id and
+    lot_id (previously unverified).
+  - Full delete order used: labs → profiles (n/a this time) → org →
+    auth.users (n/a this time). security_logs rows survive via SET NULL.
+- **Storage rule (recorded for offboarding):** Supabase Storage objects are
+  NOT relational — DB row deletion never removes bucket files. Purge must go
+  through Storage API/dashboard (`storage.from(bucket).remove()`), never SQL
+  on storage.objects (orphans billed files). Separate non-transactional step.
+- **Post-wipe state:** Oakwood is a standalone lab (org_id NULL). Nothing in
+  production exercises the org layer anymore.
+- **Orphan check PASSED:** zero auth.users rows without a profiles row —
+  no dangling accounts from prior test cleanups. Database fully clean
+  post-wipe.
+- **Post-wipe verification (July 11 — all three passed):**
+  - Oakwood Lab intact and fully operational — login, inventory,
+    activity log, members all confirmed working post-wipe
+  - security_logs lab_id FK ON DELETE SET NULL behaviorally verified:
+    rollback-transaction test in Supabase SQL editor (throwaway lab +
+    security row → lab deleted → row survived with lab_id = NULL →
+    intentional rollback, zero data persisted). Method: DO block with
+    verdict embedded in the terminating exception message, since the
+    Supabase editor suppresses RAISE NOTICE output. The 5 pre-existing
+    null-lab rows are all super_admin test events from July 10; the wipe
+    itself had no security rows to nullify (test-tenant users predated
+    the table).
+  - Orphan check re-run for all four wiped tenant UUIDs across child
+    tables: zero rows returned.
+- **No code changes this session** — SQL-editor only. Files changed: CLAUDE.md.
+
+### Session: July 10, 2026 — Security Logs Parts A–E + Domain Cutover Verification
 - **Domain cutover complete and verified:** remaining `buddy-lab-tracker.vercel.app`
   references replaced with `yourbuddyapp.com` in active docs; production
   verification confirmed.
@@ -368,6 +433,15 @@
     must honor ToS §3.3 (30-day export window) + §5.3 (post-termination
     retention; audit log NOT necessarily wiped — immutability + retention
     minimums apply). These are workflows, not buttons. Defer.
+    Offboarding test plan must include a live (non-rollback) SET NULL
+    survival test: throwaway lab + user, one login, wipe, confirm the
+    security row survives with lab_id nulled.
+- **Deferred:** Regenerate `database-scripts/supabase-copy.sql` from live
+  schema or mark its header DEPRECATED — HISTORICAL ONLY. It has now
+  drifted twice from production (stale RLS policies; `labs.manager_key`
+  column no longer exists — live labs columns verified July 11: id, name,
+  tech_key, is_archived, archived_at, created_at, owner_id, org_id,
+  trial_starts_at, trial_ends_at).
 - ✅ **Verified July 10, 2026:** recovery-code REDEEM route is rate-limited
   (Upstash, 20/hr sliding window), confirmed in the July 10 audit.
 
@@ -430,15 +504,10 @@
 - **Test data cleanup:** 3 test users deleted (TestLab manager, TestLab1234
   manager, JamesonL org_admin) after pre-clearing feedback/lab_invites
   references. Remaining users: James (super_admin) + Oakwood's two.
-  Test tenants (TestLab, TestLab123, TestOrg, TestLabinOrg) ARCHIVED, not
-  wiped — true tenant wipe (cascades inventory/audit) deferred to 8I
-  pre-customer pass; verify lab_id FK cascade chain before ever running it.
-  July 10 cascade mapping note: `activity_logs` uses CASCADE (correct for test
-  tenants), `security_logs` uses SET NULL (survives wipe). Real-customer
-  offboarding remains a separate future workflow per ToS §3.3 / §5.3; any wipe
-  runbook must allow-list the four test tenants only.
-  Note: deleting tonight's org_admin tester means re-testing the org-admin
-  gate requires provisioning a fresh org + org_admin via invite flow.
+  Test tenants (TestLab, TestLab123, TestOrg, TestLabinOrg) were ARCHIVED
+  here; **wiped July 10, 2026** (see latest session — four UUIDs deleted,
+  Oakwood only lab left, organizations empty). Real-customer offboarding
+  remains a separate future workflow per ToS §3.3 / §5.3.
 - **Recovery codes regenerated** post-testing (gate tests burned several) —
   fresh batch of 10 saved, old sheet discarded. Old downloaded sheets
   become PARTIALLY DEAD after any code use — always regenerate + re-save
@@ -572,6 +641,9 @@ Organizations table + org_admin role + org-level invites.
 JWT injects org_id alongside lab_id and user_role.
 /super-admin and /org-admin dashboards built (provisioning, invites,
 role management, billing overview).
+Post–July 10 tenant wipe: production has zero organizations; Oakwood is
+standalone (org_id NULL). Org layer code remains but is not exercised in prod
+until the next org customer is provisioned.
 - [ ] Stripe + billing (org-level, 3-month trial, 7-day grace)
 - [ ] Marketing website (yourbuddyapp.com)
 
@@ -740,6 +812,10 @@ ALCOA+, RLS isolation, auth/session security).
 - Oakwood = synthetic-data demo lab, kept for demo continuity
   (deletable any time; excluded from wipe steps by default)
 - Verification steps run against PRODUCTION, not localhost
+- ✅ **July 10, 2026:** four archived test tenants wiped in production
+  (TestLab, TestLab123, TestLabinOrg, TestOrg — UUIDs in latest session).
+  Oakwood is the only remaining lab; tenant-wipe method documented there for
+  future real-customer offboarding (ToS §3.3/§5.3).
 
 #### 8J — Two-Factor Authentication ✅
 - TOTP via Supabase MFA (max 1 factor per user)
@@ -1092,6 +1168,8 @@ archived = manager clicked "Move to History"
 - Used for both COA and Lot Validation
 - Signed URLs generated lazily on click (1 hour TTL)
 - Records retained 3 years from archived date
+- Tenant wipe / offboarding: DB CASCADE does not delete bucket files — see
+  Tenant Wipe & Offboarding section
 
 ---
 
@@ -1106,6 +1184,10 @@ created_at, created_by (uuid → auth.users)
 ```
 - RLS enabled — super admin full access, org admin sees own org
 - plan: 'trial' | 'starter' | 'pro' | 'enterprise' (Stripe later)
+- `created_by` → auth.users ON DELETE **NO ACTION** (blocks user delete until
+  org row removed or created_by reassigned)
+- `profiles.org_id` → organizations ON DELETE **RESTRICT** (org cannot be
+  deleted while profiles still reference it — delete target profiles first)
 
 ### labs
 ```
@@ -1115,7 +1197,9 @@ trial_starts_at (timestamptz, default now()),
 trial_ends_at (timestamptz, default now() + 90 days)
 ```
 - org_id NULL = single-lab customer; uuid = belongs to org
-- ON DELETE RESTRICT on org_id (can't delete org with active labs)
+- `org_id` → organizations ON DELETE **RESTRICT** (can't delete org with labs)
+- `owner_id` → auth.users ON DELETE **SET NULL** (user delete nulls owner on
+  any lab they own — check before offboarding user deletes)
 - Trial columns drive single-lab billing tab UI
 
 ### inventory_lots
@@ -1156,6 +1240,9 @@ quantity_left, status
 id, lab_id, lot_id, file_url, file_name, lot_number,
 expiry_date, result, uploaded_by, uploaded_at, notes
 ```
+- `lab_id` → labs ON DELETE **CASCADE**; `lot_id` → inventory_lots ON DELETE
+  **CASCADE** (verified live July 2026)
+- DB cascade does NOT delete Storage bucket objects — purge separately
 
 ### lot_validation_records
 ```
@@ -1163,6 +1250,8 @@ id, lab_id, lot_id, previous_lot_number, result,
 file_url, file_name, submitted_by, submitted_at,
 approved_by, approved_at, rejection_reason, notes
 ```
+- `lab_id` → labs ON DELETE **CASCADE**; `lot_id` → inventory_lots ON DELETE
+  **CASCADE** (verified live July 2026)
 
 ### lab_settings
 ```
@@ -1187,6 +1276,8 @@ action_type, item_name, lot_number, details
 - RLS enabled — APPEND-ONLY (no UPDATE, no DELETE policies)
 - SELECT: lab-scoped + super admin sees all
 - INSERT: lab_id = get_my_lab_id()
+- `lab_id` → labs ON DELETE **CASCADE** (tenant wipe removes rows — documented
+  exception to immutability; see Tenant Wipe & Offboarding section)
 - 21 CFR Part 11 compliant — DB-level immutability
 
 ### security_logs
@@ -1199,6 +1290,8 @@ lab_id (nullable), event_type, outcome, details, ip_address
 - Schema essentials:
   - `lab_id` is nullable to preserve non-lab-scoped events (super_admin /
     org_admin) and close the historical null-lab drop gap.
+  - `lab_id` → labs ON DELETE **SET NULL** (tenant wipe preserves rows;
+    lab_id nulled — verified live July 2026)
   - `user_id` is nullable for forensic join convenience and is NOT the primary
     attribution anchor.
   - Attribution snapshots are `user_name` + `user_initials`; initials are
@@ -1232,6 +1325,9 @@ lab_id (nullable), event_type, outcome, details, ip_address
 id, lab_id, item_id (nullable), item_name, vendor, catalog_number,
 order_qty, unit_price, total_price, status, notes, date_requested
 ```
+- `lab_id` → labs ON DELETE **CASCADE**
+- `item_id` → items ON DELETE **NO ACTION** (blocks item-only deletes; harmless
+  in whole-lab delete because lab CASCADE removes requests in same transaction)
 
 ### profiles
 ```
@@ -1242,6 +1338,9 @@ created_at (timestamptz, default now())
 - email column removed — stored in auth.users only
 - RLS enabled
 - Never query email from profiles — use `admin.auth.admin.getUserById()`
+- `id` → auth.users ON DELETE **CASCADE**
+- `lab_id` → labs ON DELETE **SET NULL**
+- `org_id` → organizations ON DELETE **RESTRICT** (delete profiles before org)
 
 ### lab_invites
 ```
@@ -1256,12 +1355,17 @@ revoked_by (uuid, nullable → auth.users)
 - Unique index: one active invite per lab (used=false AND revoked_at IS NULL)
 - org_admin invites: lab_id NULL, org_id uuid
 - manager invites: lab_id uuid, org_id nullable
+- `lab_id` / `org_id` → CASCADE with parent lab/org delete
+- `created_by` / `revoked_by` → auth.users ON DELETE **NO ACTION** (pre-clear
+  or delete invites before user delete)
 
 ### feedback
 ```
 id, user_id, lab_id, type ('bug' | 'support' | 'feedback'),
 title, description, created_at
 ```
+- `lab_id` → labs ON DELETE **CASCADE**
+- `user_id` → auth.users ON DELETE **NO ACTION** (pre-clear before user delete)
 
 ### active_sessions
 ```
@@ -1307,6 +1411,52 @@ created_at (timestamptz, default now())
 
 ### Storage bucket: coa-documents (private)
 Path: `{lab_id}/{lot_id}/{timestamp}_{filename}`
+- **Not relational:** deleting `coa_records` / `lot_validation_records` / labs
+  does NOT remove bucket objects. Offboarding purge via Storage API
+  (`storage.from('coa-documents').remove([...])`) or dashboard — never SQL on
+  `storage.objects`. Separate non-transactional step after DB wipe.
+
+---
+
+## Tenant Wipe & Offboarding
+
+**Scope distinction:** test-tenant wipe (July 10, 2026 — four archived tenants)
+is complete. Real-customer offboarding is a future workflow governed by ToS
+§3.3 (30-day export) and §5.3 (retention minimums); `security_logs` may
+survive even when `activity_logs` CASCADE away.
+
+### Mandatory method (never skip steps)
+1. **Live FK introspection** (`pg_constraint`) — source of truth for ON DELETE;
+   repo SQL and even CLAUDE.md can drift.
+2. **Read-only dry-run:** name → UUID resolution, attached-user snapshot,
+   allow-list safety checks, per-table row-count preview.
+3. **Destructive script:** UUID literals only at destruction time; allow-list
+   guards (`RAISE EXCEPTION` on UUID/name mismatch); re-check dry-run
+   assumptions; per-step row-count assertions; **single transaction** (failure
+   = full rollback).
+
+### Verified delete order (lab + org tenant)
+1. Delete **labs** (CASCADE: inventory, activity_logs, coa_records, etc.)
+2. Delete **profiles** tied to target org/labs (required before org — RESTRICT)
+3. Delete **organization** (after labs gone — RESTRICT on labs.org_id)
+4. Delete **auth.users** (only after NO ACTION refs cleared: feedback,
+   lab_invites created_by/revoked_by, organizations.created_by; check
+   labs.owner_id SET NULL side effects on non-target labs)
+
+### What survives a lab delete
+- **security_logs:** `lab_id` ON DELETE SET NULL — rows persist, lab_id nulled
+- **Storage objects:** persist unless explicitly purged (see Storage bucket)
+
+### July 10 test-tenant wipe record
+| Name | UUID | Type |
+|------|------|------|
+| TestLab | beea89ce-abc4-4e9a-b6ab-210253a40641 | lab |
+| TestLab123 | 1c78c34a-609c-406c-8645-f79116c00ecc | lab |
+| TestLabinOrg | 98cfff3c-77eb-48df-8cc3-e2379cd0c820 | lab |
+| TestOrg | 3fb26e5e-5ac4-44e7-8c8d-6ec42e74593c | org |
+
+Post-wipe: Oakwood Lab only; organizations empty; zero auth.users without
+profiles (orphan check passed).
 
 ---
 
@@ -1701,7 +1851,10 @@ validation expectations from regulated customers.
 ### Audit Log Rules (Never Break)
 - activity_logs must NEVER have UPDATE or DELETE policy
 - No admin UI button, scheduled job, or API may modify audit rows
-- Only exception: full lab deletion (tenant wipe — must be documented)
+- Only exception: **full lab/tenant deletion** — `activity_logs.lab_id` CASCADE
+  removes rows when the lab row is deleted (documented tenant-wipe exception;
+  July 10 test tenants wiped this way). `security_logs` survives (SET NULL).
+  Real-customer offboarding must document wipe date + lab_id per tenant.
 - logActivity() must include: user_name, user_initials, lab_id, action, item context, timestamp
 - Audit rows written AFTER action succeeds, never speculatively
 
