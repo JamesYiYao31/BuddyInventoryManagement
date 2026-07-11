@@ -4,7 +4,7 @@
 **Document ID:** BIM-SVP-001  
 **Version:** 1.1  
 **Effective Date:** June 16, 2026  
-**Author:** James [Last Name], Founder — Buddy Technologies LLC  
+**Author:** James Cheong, Founder — Buddy Technologies LLC  
 **Status:** Active
 
 ---
@@ -261,5 +261,5 @@ Revisions to this document are tracked via Git commit history. A revision table 
 
 | Version | Date | Author | Summary of Changes |
 |---|---|---|---|
-| 1.0 | June 16, 2026 | James [Last Name] | Initial release — Phase 8G |
-| 1.1 | June 16, 2026 | James [Last Name] | Corrected automated-test disclosure (limited Node-test suite exists); corrected table count 14 → 16. |
+| 1.0 | June 2026 | James Cheong | Initial release |
+| 1.1 | June 16, 2026 | James Cheong | Accuracy corrections (automated-test disclosure, table count 14→16, profiles RLS) |

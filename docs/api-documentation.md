@@ -1,7 +1,7 @@
 # Buddy Inventory Management — API Documentation
 
 **Version:** Phase 8F  
-**Last updated:** June 16, 2026  
+**Last updated:** July 11, 2026  
 **Base URL:** `https://yourbuddyapp.com`  
 **Auth model:** Supabase JWT (`Authorization: Bearer <access_token>`) unless noted
 
@@ -18,6 +18,7 @@ No route accepts or returns PHI. No route is accessible without HTTPS.
 3a. [POST /api/mfa/recovery-codes/generate](#3a-post-apimfarecovery-codesgenerate)
 3b. [POST /api/mfa/recovery-codes/redeem](#3b-post-apimfarecovery-codesredeem)
 4. [GET /api/mfa/recovery-elevation-status](#4-get-apimfarecovery-elevation-status)
+5. [GET /api/super-admin/user-email](#5-get-apisuper-adminuser-email)
 
 ---
 
@@ -73,7 +74,7 @@ x-webhook-secret: <SUPABASE_WEBHOOK_SECRET>
 
 ### Side effects
 
-1. Sends email to `yiyao3112@gmail.com` via Resend with feedback type, title, description, lab name, submitter name, and timestamp.
+1. Sends email to `yiyao3112@gmail.com` via Resend with feedback type, title, description, lab name, submitter name, **submitter email address**, and timestamp. The submitter email is included intentionally so the product owner can reply to the feedback.
 2. Appends one row to the configured Google Sheet (`GOOGLE_SHEET_ID`, range `Log!A:G`) with columns: Date, Type, Title, Description, Lab Name, Submitted By, Status.
 
 ---
@@ -241,21 +242,13 @@ Elevation takes effect via the `mfa_recovery_elevations` DB row alone (see secti
 
 ### Failed-redeem and successful-redeem are both logged
 
-Every redeem attempt writes to `security_logs` via `logSecurityEvent()` — both failures (`event_type = "recovery_code_redeemed", outcome = "failure"`) and successes (`event_type = "recovery_code_redeemed", outcome = "success"`). This is the audit evidence for brute-force attempts against the recovery path.
+Every redeem attempt writes to `security_logs` via `logSecurityEvent()` — both failures (`event_type = "recovery_code_redeemed", outcome = "failure"`) and successes (`event_type = "recovery_code_redeemed", outcome = "success"`). This is the audit evidence for brute-force attempts against the recovery path. Super_admin and org_admin redemptions are also persisted, written to `security_logs` with `lab_id = NULL` (non-lab-scoped roles do not silently drop; in effect since July 10, 2026).
 
-### Architecture note — recovery login uses a DB-row elevation model (aal2 leftovers cleaned up June 2026)
+### Architecture note — Recovery elevation model (DB-row gate, not JWT aal)
 
-This route authorizes recovery login via the **live DB-row elevation model**. A full read-only codebase audit (June 2026) confirmed the model is sound and self-contained, and the dead naming/comment/flag debt from an abandoned "aal2-via-hook" design was removed in the same session.
+This route authorizes recovery login via the **live DB-row elevation model**. Redeeming a code inserts a row into `mfa_recovery_elevations` (60-min TTL). The session stays at `aal1` — it never reaches `aal2`. Both gates (`lib/mfa-gate.ts` and the dashboard gate in `app/dashboard/page.tsx`) authorize the session by checking that DB row live via `GET /api/mfa/recovery-elevation-status` (section 4). Native `aal2` is only ever produced by a genuine TOTP code entry, never by recovery codes. The `custom_access_token_hook` sets only `lab_id`, `org_id`, and `user_role` — it does not touch `aal` (Supabase reserves that claim).
 
-**How recovery login actually authorizes (the live model):** Redeeming a code inserts a row into `mfa_recovery_elevations` (60-min TTL). The session stays at `aal1` — it never reaches `aal2`. Both gates (`lib/mfa-gate.ts` and the dashboard gate in `app/dashboard/page.tsx`) authorize the session by checking that DB row live via `GET /api/mfa/recovery-elevation-status` (section 4). Native `aal2` is only ever produced by a genuine TOTP code entry, never by recovery codes. The `custom_access_token_hook` sets only `lab_id`, `org_id`, and `user_role` — it does not touch `aal` (Supabase reserves that claim).
-
-**Cleanup applied to this route (cosmetic, no behavior change):**
-- The top-of-file comment now describes the DB-row model accurately (it previously, and wrongly, claimed the hook sets `aal = aal2` and that the client "MUST call `refreshSession()`").
-- The elevation helper was renamed `grantPendingAal2Elevation()` → `grantRecoveryElevation()` — it writes a DB row; it does not grant an aal2 elevation.
-- The inert `refreshSession: true` field was removed from the success response (no client ever read it).
-- The elevation-failure response string no longer implies a hook dependency: it now reads `"Recovery elevation could not be recorded (missing session_id)."`
-
-The old `logMfaRecoveryActivity()` helper is deleted; recovery logging now writes directly to `security_logs` from the redeem route via `logSecurityEvent()`.
+Recovery logging writes directly to `security_logs` from the redeem route via `logSecurityEvent()` (access-control trail; not `activity_logs`).
 
 ---
 
@@ -318,6 +311,65 @@ The check is **live on every gate evaluation** — it is not cached in the brows
 
 The route uses the admin (service-role) client to read `mfa_recovery_elevations`, but `user_id` and `session_id` are both derived from the validated token — never from the request — so one user cannot probe another user's elevation state.
 
+---
+
+## 5. GET /api/super-admin/user-email
+
+**File:** `app/api/super-admin/user-email/route.ts`  
+**Purpose:** Returns a single user's email address from `auth.users` for super-admin UI surfaces that need to display or contact a user. Email is not stored on `profiles` (removed by design), so this route is the only app path that surfaces it.
+
+**Caller:** Super-admin pages that need to display a user's email (PII lookup by `userId`)  
+**Auth:** `Authorization: Bearer <access_token>` — caller must have `profiles.role = 'super_admin'`; all other roles receive `403`  
+**Rate limit:** 20 requests / hour / IP (Upstash sliding window)
+
+**PII note:** The response contains a user's email address. Access is restricted to `super_admin` for that reason. Do not broaden the role gate without a separate privacy review.
+
+### Request
+
+```
+GET /api/super-admin/user-email?userId=<uuid>
+Authorization: Bearer <access_token>
+```
+
+| Query param | Required | Meaning |
+|-------------|----------|---------|
+| `userId` | Yes | Target `auth.users` id whose email to return |
+
+### Response
+
+**Success (`200`):**
+
+```json
+{
+  "email": "user@example.com"
+}
+```
+
+| Status | Body | Meaning |
+|--------|------|---------|
+| `200` | `{ "email": "..." }` | Email found (empty string if the auth user has no email) |
+| `400` | `{ "error": "Missing userId" }` | Query param omitted |
+| `401` | `{ "error": "Unauthorized" }` | Missing/invalid/expired Bearer token |
+| `403` | `{ "error": "Forbidden" }` | Authenticated but not `super_admin` |
+| `404` | `{ "error": "User not found" }` | No auth user for `userId` |
+| `429` | `{ "error": "Too many requests" }` | Rate limit exceeded |
+
+### Server-side flow
+
+1. Applies Upstash rate limiting (20/hr) **before** auth.
+2. Validates the Bearer token via `admin.auth.getUser(token)`.
+3. Loads the caller's `profiles.role` and requires `super_admin`.
+4. Reads `userId` from the query string; rejects with `400` if missing.
+5. Looks up the target via `admin.auth.admin.getUserById(userId)` and returns `{ email }`.
+
+### Security notes
+
+- Rate limiting runs before authentication, so an unauthenticated caller hammering this endpoint can receive `429` without ever receiving `401`.
+- The target email is never accepted from the client body — only looked up server-side by id.
+- Technicians, managers, and org_admins cannot call this route.
+
+---
+
 ## Environment Variables Referenced
 
 | Variable | Used By | Scope |
@@ -340,10 +392,12 @@ The route uses the admin (service-role) client to read `mfa_recovery_elevations`
 ## Common Error Patterns
 
 ### 401 Unauthorized
-All routes validate the caller's identity before any business logic runs. For webhook routes, this is the `x-webhook-secret` header. For user-facing routes, this is a `Bearer` token validated against Supabase's admin client. An expired or missing token always returns `401` before rate limiting is applied.
+All routes validate the caller's identity before any business logic runs. For webhook routes, this is the `x-webhook-secret` header. For user-facing routes, this is a `Bearer` token validated against Supabase's admin client (or, for `/api/super-admin/user-email`, against the admin client plus a `profiles.role = super_admin` check).
+
+**Ordering vs rate limits:** On every rate-limited route, the Upstash check runs **before** auth. An unauthenticated (or invalid-token) caller who exceeds the limit receives `429` and may never see `401`. Only after the limiter allows the request does auth run and potentially return `401`/`403`. Exception: `GET /api/mfa/recovery-elevation-status` has no rate limiter by design (called on every gate evaluation), so auth is always the first gate on that route.
 
 ### 429 Too Many Requests
-Rate-limited routes use Upstash Redis sliding-window limiting, with per-route limits: feedback-notify 10/hr, mfa/enroll 10/hr, recovery-codes/generate 10/hr, recovery-codes/redeem 20/hr. The recovery-elevation-status route has no rate limit. Response headers on limited routes include `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset`.
+Rate-limited routes use Upstash Redis sliding-window limiting, with per-route limits: feedback-notify 10/hr, mfa/enroll 10/hr, recovery-codes/generate 10/hr, recovery-codes/redeem 20/hr, super-admin/user-email 20/hr. The recovery-elevation-status route has no rate limit. Response headers on limited routes include `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset`.
 
 ### 500 Internal Server Error
 Most routes catch unexpected errors and return an error JSON body (feedback-notify includes a `details` message string — never a stack trace). The recovery-elevation-status route is the exception: it never returns 500, instead failing closed to `{ "elevated": false }` on any error. All server errors are logged to Vercel's server-side log stream.

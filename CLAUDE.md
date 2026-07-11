@@ -2,7 +2,33 @@
 
 ## Recent Sessions
 
-### Session: July 10, 2026 (latest) — Tenant Wipe EXECUTED (four test tenants)
+### Session: July 11, 2026 (latest) — API Doc Cleanup + SVP Controlled-Document Fields
+- **docs/api-documentation.md cleanup pass COMPLETE** (doc-only; no route code
+  touched). Closes the June 16 deferred api-doc findings:
+  - Documented 6th route `GET /api/super-admin/user-email` (super_admin-only,
+    returns PII email, 20/hr Upstash; rate limit before auth).
+  - Rate-limit ordering corrected: Upstash runs BEFORE auth on limited routes
+    (429 can precede 401). recovery-elevation-status remains unlimited by design.
+  - feedback-notify side effects now include submitter email (intentional,
+    for reply).
+  - Redeem section: explicit sentence that super_admin/org_admin redemptions
+    write to `security_logs` with `lab_id = NULL` (July 10).
+  - §3b architecture note retitled to present-tense DB-row model; historical
+    "cleanup applied" changelog bullets removed.
+- **June 16 §3b finding — accuracy note for the record:** By execution time
+  the deferred claim that "two internal strings still carry old aal2/hook
+  wording" was already partially stale (those strings were gone; only a
+  changelog-style leftovers note remained). FIX 2 removed that remaining
+  changelog content and left present-tense architecture docs only. Closes
+  the loop on the June 16 deferred item accurately.
+- **docs/software-validation-plan.md:** §9 Author set to James Cheong;
+  revision table completed (v1.0 June 2026 initial; v1.1 June 16, 2026
+  accuracy corrections). Version number not bumped (controlled-document
+  fields only).
+- **Files changed:** `docs/api-documentation.md`,
+  `docs/software-validation-plan.md`, `CLAUDE.md`.
+
+### Session: July 10, 2026 — Tenant Wipe EXECUTED (four test tenants)
 - **Wipe executed and verified in production:** TestLab
   (beea89ce-abc4-4e9a-b6ab-210253a40641), TestLab123
   (1c78c34a-609c-406c-8645-f79116c00ecc), TestLabinOrg
@@ -188,12 +214,11 @@
   components/dashboard/activity-log-table.tsx,
   components/dashboard/validation-tab.tsx
 - **Parked for future passes (not this session):**
-  - super_admin / org_admin recovery audit → requires security_logs table
-    (non-lab-scoped)
   - security_logs viewer UI — deferred; RLS Option B already supports
     manager/org_admin lab-scoped reads when built
-  - api-documentation.md cleanup pass (6th route, rate-limit ordering, stale
-    AAL2 language) — still deferred
+  - ✅ **DONE July 11, 2026:** api-documentation.md cleanup pass (6th route,
+    rate-limit ordering, §3b leftovers note → present-tense architecture,
+    feedback email, privileged-role security_logs sentence)
   - validation-tab.tsx → wire labSettings as prop from
     app/dashboard/page.tsx instead of internal fetchLabSettings() fetch (low
     priority, not a bug)
@@ -230,6 +255,12 @@
     Fix requires a non-lab-scoped security_logs table (planned). Deferred
     until security log split is implemented. Flagged by security audit
     July 2026.
+  - ✅ **RESOLVED July 11, 2026** (api-doc cleanup pass — see latest session).
+    Note on the §3b item: by execution time the "two internal strings still
+    carry old wording" claim was already partially stale (strings gone; only
+    a changelog-style leftovers note remained). That remaining note was
+    converted to present-tense architecture docs. Privileged-role recovery
+    audit gap closed earlier via `security_logs` (July 10).
 
 ### Session: June 16, 2026 (later) — 8G Software Validation Plan WRITTEN
 - **8G COMPLETE — last Phase 8 doc done.** `docs/software-validation-plan.md`
@@ -761,18 +792,17 @@ Seed requirements:
   deliberate testing)
 
 #### 8F — API Documentation ✅
-Done June 16, 2026.
-- `docs/api-documentation.md` documents 5 of the 6 API routes
+Done June 16, 2026; cleanup pass July 11, 2026.
+- `docs/api-documentation.md` documents all 6 API routes
   (feedback-notify, mfa/enroll, recovery-codes/generate,
-  recovery-codes/redeem, recovery-elevation-status): purpose, caller,
-  auth, rate limit, request/response.
-  super-admin/user-email route deferred — tracked in api-doc cleanup pass.
+  recovery-codes/redeem, recovery-elevation-status, super-admin/user-email):
+  purpose, caller, auth, rate limit, request/response.
 - JSDoc added on the three most auditor-scrutinized functions in
   `lib/inventory-utils.ts`: parseSmartBarcode(), logActivity(),
   resolveCurrentUserLabId(). The resolveCurrentUserLabId() block was corrected to
   state it queries `profiles` (not the JWT) and cross-references get_my_lab_id().
-- Doc reflects the post-cleanup redeem route (DB-row elevation model, no
-  refreshSession flag, grantRecoveryElevation helper) — see June 16 session above.
+- Doc reflects the DB-row recovery elevation model and `security_logs` writes
+  for redeem (including super_admin/org_admin with `lab_id = NULL`).
 
 #### 8G — Software Validation Plan ✅
 Done June 16, 2026. `docs/software-validation-plan.md` (BIM-SVP-001 v1.1) —
@@ -789,7 +819,8 @@ ALCOA+, RLS isolation, auth/session security).
   self-assigned number has no place in a formal validation doc an auditor reads).
 - Doc is the Git master; a dated/signed PDF is exported on demand for QA
   reviews or audits (controlled-document fields already seeded in §9).
-- Remaining: fill real last name (Author field + revision table) before export.
+- ✅ **July 11, 2026:** Author field + revision table filled (James Cheong;
+  v1.0 / v1.1 rows). Version not bumped — controlled-document fields only.
 
 #### 8H — Terms of Service & Privacy Policy ✅ (draft + pages shipped)
 - **Entity:** Buddy Technologies LLC (Wyoming) — umbrella LLC, NOT YET FORMED
