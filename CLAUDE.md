@@ -65,6 +65,12 @@
     the table).
   - Orphan check re-run for all four wiped tenant UUIDs across child
     tables: zero rows returned.
+- **Deferred at session close (non-blocking):**
+  - Demo strategy: leaning toward a dedicated seeded demo lab separate
+    from Oakwood — decision + seeding deferred. If adopted, update the
+    8I line that frames Oakwood as the demo lab.
+  - Optional code sweep: only to confirm storage path conventions for
+    the future offboarding runbook; nothing current depends on it.
 - **No code changes this session** — SQL-editor only. Files changed: CLAUDE.md.
 
 ### Session: July 10, 2026 — Security Logs Parts A–E + Domain Cutover Verification
