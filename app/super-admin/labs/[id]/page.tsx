@@ -9,6 +9,7 @@ import {
   ChevronRight,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { deactivatedSignOut } from "@/lib/active-session"
 import { resolveMfaGateRedirect } from "@/lib/mfa-gate"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -238,11 +239,16 @@ export default function LabDetailPage() {
 
       const { data: profile } = await supabase
         .from("profiles")
-        .select("role")
+        .select("role, is_active")
         .eq("id", session.user.id)
         .maybeSingle()
 
       if (cancelled) return
+
+      if (profile?.is_active === false) {
+        await deactivatedSignOut(router, session.user.id)
+        return
+      }
 
       if (profile?.role !== "super_admin") {
         router.replace("/dashboard")

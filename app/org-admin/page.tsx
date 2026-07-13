@@ -16,6 +16,7 @@ import {
 import type { User } from "@supabase/supabase-js"
 import { supabase } from "@/lib/supabase"
 import {
+  deactivatedSignOut,
   sessionReplacedSignOut,
   verifyActiveSessionForUser,
   voluntarySignOut,
@@ -192,7 +193,7 @@ export default function OrgAdminPage() {
 
       const { data: profile, error: profileErr } = await supabase
         .from("profiles")
-        .select("role, org_id")
+        .select("role, org_id, is_active")
         .eq("id", session.user.id)
         .maybeSingle()
 
@@ -200,6 +201,11 @@ export default function OrgAdminPage() {
 
       if (profileErr || !profile) {
         router.replace("/login")
+        return
+      }
+
+      if (profile.is_active === false) {
+        await deactivatedSignOut(router, session.user.id)
         return
       }
 

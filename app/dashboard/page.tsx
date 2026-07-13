@@ -6,6 +6,7 @@ import { Search, CalendarClock, CalendarDays, CheckCircle2, User, Scan, Minus, P
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts"
 import { supabase } from "@/lib/supabase"
 import {
+  deactivatedSignOut,
   sessionReplacedSignOut,
   verifyActiveSessionForUser,
   voluntarySignOut,
@@ -434,9 +435,14 @@ function DashboardPageContent() {
         
         const { data: profile } = await supabase
           .from('profiles')
-          .select('role, full_name, lab_id')
+          .select('role, full_name, lab_id, is_active')
           .eq('id', session.user.id)
           .single()
+
+        if (profile?.is_active === false) {
+          await deactivatedSignOut(router, session.user.id)
+          return
+        }
 
         if (profile?.full_name) {
           setProfileFullName(profile.full_name)

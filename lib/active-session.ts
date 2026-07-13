@@ -78,3 +78,17 @@ export async function sessionReplacedSignOut(router: { replace: (path: string) =
   await supabase.auth.signOut()
   router.replace("/login?reason=session_replaced")
 }
+
+/**
+ * Gate denial when profiles.is_active === false: clean up session then land on login.
+ * Deliberately does NOT call recordSecurityEvent — gate denials are forced/system
+ * sign-outs, a documented security_logs exclusion (same class as archived-lab /
+ * missing-profile poll paths). Deactivate/reactivate audit events land in Phase D.
+ */
+export async function deactivatedSignOut(
+  router: { replace: (path: string) => void },
+  userId: string,
+): Promise<void> {
+  await voluntarySignOut(userId)
+  router.replace("/login?reason=account_deactivated")
+}

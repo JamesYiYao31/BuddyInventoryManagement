@@ -22,7 +22,7 @@ import {
 } from "lucide-react"
 import type { User } from "@supabase/supabase-js"
 import { supabase } from "@/lib/supabase"
-import { voluntarySignOut } from "@/lib/active-session"
+import { voluntarySignOut, deactivatedSignOut } from "@/lib/active-session"
 import { resolveMfaGateRedirect } from "@/lib/mfa-gate"
 import { recordSecurityEvent } from "@/lib/security-log"
 import { ProfileSettingsDialog } from "@/components/dashboard/profile-settings-dialog"
@@ -214,11 +214,16 @@ export default function SuperAdminPage() {
 
       const { data: profile, error: profileError } = await supabase
         .from("profiles")
-        .select("role")
+        .select("role, is_active")
         .eq("id", session.user.id)
         .maybeSingle()
 
       if (cancelled) return
+
+      if (profile?.is_active === false) {
+        await deactivatedSignOut(router, session.user.id)
+        return
+      }
 
       if (profileError || profile?.role !== "super_admin") {
         router.replace("/dashboard")

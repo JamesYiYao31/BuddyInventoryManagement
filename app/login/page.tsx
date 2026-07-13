@@ -17,6 +17,10 @@ function LoginContent() {
     () => searchParams.get("reason") === "session_replaced",
     [searchParams]
   )
+  const accountDeactivatedReason = useMemo(
+    () => searchParams.get("reason") === "account_deactivated",
+    [searchParams]
+  )
 
   const [isRegistering, setIsRegistering] = useState(false)
 
@@ -53,9 +57,16 @@ function LoginContent() {
         await recordSecurityEvent("login", "success")
         const { data: profile } = await supabase
           .from("profiles")
-          .select("role, lab_id")
+          .select("role, lab_id, is_active")
           .eq("id", userId)
           .maybeSingle()
+
+        if (profile?.is_active === false) {
+          await voluntarySignOut(userId)
+          setError("This account has been deactivated. Contact your lab administrator.")
+          setIsLoading(false)
+          return
+        }
 
         const role = profile?.role
 
@@ -308,6 +319,15 @@ function LoginContent() {
                     className="p-4 bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-100 font-semibold rounded-2xl text-center text-sm"
                   >
                     You were signed out because your account was logged in from another device.
+                  </div>
+                ) : null}
+
+                {accountDeactivatedReason && !isRegistering ? (
+                  <div
+                    role="alert"
+                    className="p-4 bg-red-500/10 border border-red-500/20 text-red-500 font-bold rounded-2xl text-center text-sm"
+                  >
+                    This account has been deactivated. Contact your lab administrator.
                   </div>
                 ) : null}
 
