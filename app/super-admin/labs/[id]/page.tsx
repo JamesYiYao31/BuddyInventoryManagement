@@ -12,6 +12,7 @@ import { supabase } from "@/lib/supabase"
 import { deactivatedSignOut } from "@/lib/active-session"
 import { resolveMfaGateRedirect } from "@/lib/mfa-gate"
 import { setUserActiveStatus, setUserActiveErrorMessage } from "@/lib/set-user-active"
+import { setUserRole, setUserRoleErrorMessage } from "@/lib/set-user-role"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -415,15 +416,13 @@ export default function LabDetailPage() {
 
   const handleEditRoleConfirm = useCallback(async () => {
     if (!editRoleMember || !editRoleValue) return
+    if (editRoleValue !== "manager" && editRoleValue !== "technician") return
     setEditRoleBusy(true)
-    const { error } = await supabase
-      .from("profiles")
-      .update({ role: editRoleValue })
-      .eq("id", editRoleMember.id)
+    const result = await setUserRole(editRoleMember.id, editRoleValue)
     setEditRoleBusy(false)
 
-    if (error) {
-      showToast("error", error.message)
+    if (!result.ok) {
+      showToast("error", setUserRoleErrorMessage(result.errorCode))
       return
     }
     setEditRoleMember(null)
@@ -1180,6 +1179,23 @@ export default function LabDetailPage() {
             <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-xs text-amber-800 dark:text-amber-400 font-medium">
               This change takes effect the next time the user logs in. Their current session will not be updated.
             </div>
+
+            {/* Viewer here is super_admin, whom the RPC deliberately exempts
+                from the last-manager demotion guard (offboarding/restructure
+                override) — so the last-active-manager demote is a WARNING, not
+                a disabled control. On the dashboard and /org-admin, manager/
+                org_admin actors ARE blocked by the guard, so those surfaces
+                keep the disabled state. */}
+            {editRoleMember.role === "manager" &&
+            editRoleValue === "technician" &&
+            editRoleMember.is_active !== false &&
+            members.filter(
+              (x) => x.role === "manager" && x.is_active !== false && x.id !== editRoleMember.id
+            ).length === 0 ? (
+              <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-xs text-amber-800 dark:text-amber-400 font-medium">
+                This is the lab&apos;s last active manager. After demotion, this lab will have no active admin.
+              </div>
+            ) : null}
 
             <div className="space-y-2">
               <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">

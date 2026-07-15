@@ -1,6 +1,7 @@
 import { supabase, signOutLocalOnRefreshFailure } from "./supabase"
 import { initialsFromDisplayName } from "./user-initials"
 import { getEarliestExpiry } from "./expiry-utils.ts"
+import { setUserRole, setUserRoleErrorMessage } from "./set-user-role"
 
 export { getEarliestExpiry }
 
@@ -1207,20 +1208,10 @@ export const updateUserRole = async (
     return { success: false, error: "Cannot modify a super administrator." }
   }
 
-  const { error } = await supabase
-    .from("profiles")
-    .update({ role: newRole })
-    .eq("id", userId)
-    .eq("lab_id", labId)
-
-  if (error) {
-    console.error("[updateUserRole] Failed:", {
-      message: error?.message,
-      details: error?.details,
-      hint: error?.hint,
-      code: error?.code,
-    })
-    return { success: false, error: error.message }
+  // Role column is locked from client UPDATE; governed via /api/users/set-role.
+  const result = await setUserRole(userId, newRole)
+  if (!result.ok) {
+    return { success: false, error: setUserRoleErrorMessage(result.errorCode) }
   }
   return { success: true }
 }

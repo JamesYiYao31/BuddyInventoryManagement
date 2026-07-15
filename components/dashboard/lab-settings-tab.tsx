@@ -669,10 +669,20 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
                         p.role === "manager" ? "text-primary" : "text-muted-foreground"
                       }`}
                     >
-                      <option value="technician">Technician</option>
+                      {/* Viewer is manager: last-manager demotion is blocked by the
+                          RPC (same as deactivate last-admin). Disable the option
+                          client-side; super_admin surfaces warn instead. */}
+                      <option value="technician" disabled={lastAdminBlocked}>
+                        Technician
+                      </option>
                       <option value="manager">Manager</option>
                     </select>
                     {updatingUserId === p.id && <Loader2 className="size-3.5 text-muted-foreground animate-spin" />}
+                    {lastAdminBlocked && p.role === "manager" ? (
+                      <p className="text-[10px] text-muted-foreground leading-tight max-w-[180px] w-full basis-full">
+                        Last active manager — demoting them leaves the lab without an admin.
+                      </p>
+                    ) : null}
                     {p.isActive ? (
                       <div className="flex flex-col gap-1">
                         <button

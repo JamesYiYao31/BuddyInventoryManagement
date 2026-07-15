@@ -170,7 +170,6 @@ function LoginContent() {
       const { error: profileErr } = await supabase
         .from("profiles")
         .update({
-          role,
           lab_id: labId,
           full_name: fn,
         })

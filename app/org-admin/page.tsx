@@ -24,6 +24,7 @@ import {
 import { resolveMfaGateRedirect } from "@/lib/mfa-gate"
 import { recordSecurityEvent } from "@/lib/security-log"
 import { setUserActiveStatus, setUserActiveErrorMessage } from "@/lib/set-user-active"
+import { setUserRole, setUserRoleErrorMessage } from "@/lib/set-user-role"
 import { ProfileSettingsDialog } from "@/components/dashboard/profile-settings-dialog"
 
 type LabRow = {
@@ -408,14 +409,11 @@ export default function OrgAdminPage() {
     if (!modal) return
     setPageError(null)
     setRoleBusyId(modal.memberId)
-    const { error } = await supabase
-      .from("profiles")
-      .update({ role: modal.targetRole })
-      .eq("id", modal.memberId)
+    const result = await setUserRole(modal.memberId, modal.targetRole)
     setRoleBusyId(null)
 
-    if (error) {
-      setPageError(error.message)
+    if (!result.ok) {
+      setPageError(setUserRoleErrorMessage(result.errorCode))
       return
     }
 
@@ -633,21 +631,31 @@ export default function OrgAdminPage() {
                               </div>
                               <div className="flex flex-wrap gap-2 shrink-0">
                                 {m.role === "manager" ? (
-                                  <button
-                                    type="button"
-                                    disabled={roleBusyId === m.id}
-                                    onClick={() =>
-                                      setRoleModal({
-                                        memberId: m.id,
-                                        memberName: m.full_name || "Member",
-                                        labName: lab.name,
-                                        targetRole: "technician",
-                                      })
-                                    }
-                                    className="h-9 px-3 rounded-lg border border-border text-xs font-bold hover:bg-muted/50 disabled:opacity-50"
-                                  >
-                                    Make Technician
-                                  </button>
+                                  <div className="flex flex-col gap-1">
+                                    <button
+                                      type="button"
+                                      disabled={roleBusyId === m.id || lastAdminBlocked}
+                                      onClick={() =>
+                                        setRoleModal({
+                                          memberId: m.id,
+                                          memberName: m.full_name || "Member",
+                                          labName: lab.name,
+                                          targetRole: "technician",
+                                        })
+                                      }
+                                      className="h-9 px-3 rounded-lg border border-border text-xs font-bold hover:bg-muted/50 disabled:opacity-50 disabled:pointer-events-none"
+                                    >
+                                      Make Technician
+                                    </button>
+                                    {/* Viewer is org_admin: last-manager demotion is
+                                        blocked by the RPC — disable client-side.
+                                        Super_admin surfaces warn instead. */}
+                                    {lastAdminBlocked ? (
+                                      <p className="text-[10px] text-muted-foreground leading-tight max-w-[160px]">
+                                        Last active manager — demoting them leaves the lab without an admin.
+                                      </p>
+                                    ) : null}
+                                  </div>
                                 ) : null}
                                 {m.role === "technician" ? (
                                   <button

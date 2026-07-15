@@ -211,7 +211,6 @@ function RegisterLabContent() {
         const { error: profileErr } = await supabase
           .from("profiles")
           .update({
-            role: "org_admin",
             org_id: orgId,
             lab_id: null,
             full_name: fullName,
@@ -324,12 +323,10 @@ function RegisterLabContent() {
         }
 
         const profileUpdate: {
-          role: string
           lab_id: string
           org_id: string | null
           full_name: string
         } = {
-          role: "manager",
           lab_id: labId,
           org_id: inviteRow.org_id,
           full_name: fullName,
@@ -454,12 +451,10 @@ function RegisterLabContent() {
       }
 
       const profileUpdate: {
-        role: string
         lab_id: string
         org_id: string | null
         full_name: string
       } = {
-        role: "manager",
         lab_id: labId,
         org_id: inviteRow.org_id,
         full_name: fullName,
