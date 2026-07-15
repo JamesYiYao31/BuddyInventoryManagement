@@ -6,7 +6,7 @@ import { FlaskConical, Loader2, Copy, Check, CheckCircle2, Shield } from "lucide
 import Image from "next/image"
 import { supabase } from "@/lib/supabase"
 import { TIMEZONES } from "@/lib/timezones"
-import { getMfaEnrollmentStatus, enrollTotp, verifyTotpEnrollment } from "@/lib/mfa"
+import { completeEnrollmentLog, getMfaEnrollmentStatus, enrollTotp, verifyTotpEnrollment } from "@/lib/mfa"
 
 type WelcomeSettings = {
   lab_timezone: string
@@ -231,6 +231,8 @@ function WelcomeContent() {
       setMfaVerifying(false)
       return
     }
+    // Fire-and-forget — onboarding is always first enrollment; do not await.
+    void completeEnrollmentLog(false)
     setStep(5)
   }
 

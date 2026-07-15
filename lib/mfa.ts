@@ -50,6 +50,27 @@ export async function verifyTotpEnrollment(
   return { success: true }
 }
 
+/** Fire-and-forget security_logs write after verify succeeds. Never throws. */
+export async function completeEnrollmentLog(replaced: boolean): Promise<void> {
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+    if (!session?.access_token) return
+
+    await fetch("/api/mfa/enroll-complete", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ replaced }),
+    })
+  } catch (err) {
+    console.error("[completeEnrollmentLog] Failed:", err)
+  }
+}
+
 export async function verifyTotpChallenge(
   factorId: string,
   code: string,

@@ -1,9 +1,10 @@
 -- security_logs: append-only access-control audit trail (login, logout, recovery codes).
 -- Separate from activity_logs (data-integrity / ALCOA+). Run in Supabase SQL editor after review.
 --
--- NOTE: event/outcome constraints extended by user-deactivation.sql (July 2026).
--- Do not run this file standalone against production; constraints here reflect
--- the July 10 initial state.
+-- NOTE: event/outcome constraints extended by user-deactivation.sql (July 2026)
+-- and again by security-events-extension.sql (July 2026 — MFA enroll/replace +
+-- reserved role_changed). Do not run this file standalone against production;
+-- constraints here reflect the July 10 initial state.
 --
 -- lab_id FK uses ON DELETE SET NULL (not CASCADE): a tenant wipe must not delete the
 -- security record — the event happened and must survive for compliance forensics.

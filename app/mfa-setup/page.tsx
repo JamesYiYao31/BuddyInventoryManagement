@@ -5,7 +5,7 @@ import Image from "next/image"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Loader2, Shield, Smartphone, QrCode, KeyRound } from "lucide-react"
-import { enrollTotp, generateMfaRecoveryCodes, getMfaEnrollmentStatus, verifyTotpEnrollment } from "@/lib/mfa"
+import { completeEnrollmentLog, enrollTotp, generateMfaRecoveryCodes, getMfaEnrollmentStatus, verifyTotpEnrollment } from "@/lib/mfa"
 import { isSafeReturnTo } from "@/lib/safe-redirect"
 import { RecoveryCodesDisplay, RecoveryCodesLoading } from "@/components/mfa/recovery-codes-display"
 
@@ -54,6 +54,8 @@ function MfaSetupContent() {
       setVerifying(false)
       return
     }
+    // Fire-and-forget — must not delay or gate recovery-code generation.
+    void completeEnrollmentLog(searchParams.get("mode") === "replace")
     setVerifying(false)
     setGeneratingRecoveryCodes(true)
     const generated = await generateMfaRecoveryCodes()
@@ -64,7 +66,7 @@ function MfaSetupContent() {
       return
     }
     setRecoveryCodes(generated.codes)
-  }, [enrollData, code, verifying, postSetupRedirect])
+  }, [enrollData, code, verifying, postSetupRedirect, searchParams])
 
   const handleRecoveryCodesDismiss = useCallback(() => {
     postSetupRedirect()

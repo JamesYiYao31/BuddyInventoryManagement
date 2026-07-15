@@ -216,7 +216,7 @@ export function ProfileSettingsDialog({
         return
       }
       onOpenChange(false)
-      router.push(`/mfa-setup?returnTo=${resolvedMfaReturnTo}`)
+      router.push(`/mfa-setup?mode=replace&returnTo=${resolvedMfaReturnTo}`)
     } catch {
       setMfaError("Could not remove existing 2FA. Please try again.")
       setShowRegenerateConfirm(false)
