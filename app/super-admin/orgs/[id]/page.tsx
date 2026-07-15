@@ -315,7 +315,7 @@ export default function OrgDetailPage() {
 
     // 6. Fetch invites — two queries, deduplicate by id
     setInvitesLoading(true)
-    const inviteQueries: Promise<InviteRow[]>[] = []
+    const inviteQueries: PromiseLike<InviteRow[]>[] = []
 
     inviteQueries.push(
       supabase
@@ -363,7 +363,7 @@ export default function OrgDetailPage() {
 
   // ── Actions ────────────────────────────────────────────────────────────────
 
-  const handleEditRoleConfirm = async () => {
+  const handleEditRoleConfirm = useCallback(async () => {
     if (!editRoleMember || !editRoleValue) return
     setEditRoleBusy(true)
     const { error } = await supabase
@@ -379,7 +379,7 @@ export default function OrgDetailPage() {
     setEditRoleMember(null)
     showToast("success", "Role updated. Change takes effect on next login.")
     await fetchAll()
-  }
+  }, [editRoleMember, editRoleValue, fetchAll])
 
   const handleSetActive = useCallback(async (member: MemberRow, nextActive: boolean) => {
     setActiveBusyId(member.id)
@@ -438,7 +438,7 @@ export default function OrgDetailPage() {
     }
   }, [deactivateMember, confirmDeactivate])
 
-  const handleRevokeConfirm = async () => {
+  const handleRevokeConfirm = useCallback(async () => {
     if (!revokeInvite || !currentUserId) return
     setRevokeBusy(true)
     const { error } = await supabase
@@ -454,7 +454,58 @@ export default function OrgDetailPage() {
     setRevokeInvite(null)
     showToast("success", "Invite revoked.")
     await fetchAll()
-  }
+  }, [revokeInvite, currentUserId, fetchAll])
+
+  // Edit Role modal: Enter submits (textarea-guarded), ESC closes,
+  // Android back closes via pushState/popstate (established modal conventions).
+  useEffect(() => {
+    if (!editRoleMember) return
+    const isTextareaFocused = () => document.activeElement?.tagName === "TEXTAREA"
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setEditRoleMember(null)
+    }
+    const handleEnter = (e: KeyboardEvent) => {
+      if (e.key === "Enter" && !isTextareaFocused()) {
+        e.preventDefault()
+        void handleEditRoleConfirm()
+      }
+    }
+    window.history.pushState(null, "", window.location.href)
+    const handlePopState = () => setEditRoleMember(null)
+    document.addEventListener("keydown", handleEsc)
+    document.addEventListener("keydown", handleEnter)
+    window.addEventListener("popstate", handlePopState)
+    return () => {
+      document.removeEventListener("keydown", handleEsc)
+      document.removeEventListener("keydown", handleEnter)
+      window.removeEventListener("popstate", handlePopState)
+    }
+  }, [editRoleMember, handleEditRoleConfirm])
+
+  // Revoke Invite modal: same conventions as Edit Role / requests-table.
+  useEffect(() => {
+    if (!revokeInvite) return
+    const isTextareaFocused = () => document.activeElement?.tagName === "TEXTAREA"
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setRevokeInvite(null)
+    }
+    const handleEnter = (e: KeyboardEvent) => {
+      if (e.key === "Enter" && !isTextareaFocused()) {
+        e.preventDefault()
+        void handleRevokeConfirm()
+      }
+    }
+    window.history.pushState(null, "", window.location.href)
+    const handlePopState = () => setRevokeInvite(null)
+    document.addEventListener("keydown", handleEsc)
+    document.addEventListener("keydown", handleEnter)
+    window.addEventListener("popstate", handlePopState)
+    return () => {
+      document.removeEventListener("keydown", handleEsc)
+      document.removeEventListener("keydown", handleEnter)
+      window.removeEventListener("popstate", handlePopState)
+    }
+  }, [revokeInvite, handleRevokeConfirm])
 
   const handleExtendTrial = async (days: number) => {
     if (!org) return

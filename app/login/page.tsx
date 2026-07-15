@@ -467,7 +467,7 @@ function LoginContent() {
               <Image src="/buddy-logo.png" alt="Logo" width={48} height={48} className="h-12 w-auto drop-shadow-md" />
               <h2 className="text-2xl font-black tracking-tight text-foreground">Reset your password</h2>
               <p className="text-sm text-muted-foreground font-medium">
-                Enter your email and we'll send you a reset link.
+                Enter your email and we&apos;ll send you a reset link.
               </p>
             </div>
 
@@ -479,7 +479,7 @@ function LoginContent() {
 
             {forgotPasswordSent ? (
               <div className="p-4 bg-green-500/10 border border-green-500/20 text-green-700 dark:text-green-400 font-bold rounded-2xl text-center text-sm">
-                If an account exists for that email, we've sent a password reset link. Check your inbox.
+                If an account exists for that email, we&apos;ve sent a password reset link. Check your inbox.
               </div>
             ) : (
               <div className="space-y-2">

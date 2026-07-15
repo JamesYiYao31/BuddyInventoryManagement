@@ -39,7 +39,9 @@ const EMPTY_GROUPS: BellAlertGroups = {
   isLoading: true,
 }
 
-export function useBellAlerts(userRole: "manager" | "technician" | undefined) {
+export function useBellAlerts(
+  userRole: "manager" | "technician" | "org_admin" | "super_admin" | undefined,
+) {
   const [groups, setGroups] = useState<BellAlertGroups>(EMPTY_GROUPS)
 
   const fetchAlerts = useCallback(async () => {
@@ -68,7 +70,7 @@ export function useBellAlerts(userRole: "manager" | "technician" | undefined) {
     const benchExpiring: BellAlertRow[] = []
     const outOfStock: BellAlertRow[] = []
 
-    const fetches: Promise<void>[] = []
+    const fetches: PromiseLike<void>[] = []
 
     // ── Manager-only queries ─────────────────────────────────────────────────
     if (userRole === "manager") {
@@ -80,7 +82,8 @@ export function useBellAlerts(userRole: "manager" | "technician" | undefined) {
           .in("validation_status", ["pending_approval", "pending_coa"])
           .then(({ data }) => {
             for (const lot of data ?? []) {
-              const itemName = (lot.items as { name: string } | null)?.name ?? "Unknown Item"
+              const item = Array.isArray(lot.items) ? lot.items[0] : lot.items
+              const itemName = item?.name ?? "Unknown Item"
               pendingApprovals.push({
                 id: `pa-${lot.id}`,
                 message: `${itemName} — Pending Approval`,
@@ -140,7 +143,8 @@ export function useBellAlerts(userRole: "manager" | "technician" | undefined) {
         .lte("working_expiry_date", tomorrowStr)
         .then(({ data }) => {
           for (const lot of data ?? []) {
-            const itemName = (lot.items as { name: string } | null)?.name ?? "Unknown"
+            const item = Array.isArray(lot.items) ? lot.items[0] : lot.items
+            const itemName = item?.name ?? "Unknown"
             const isToday = (lot.working_expiry_date as string)?.startsWith(todayStr)
             benchExpiring.push({
               id: `be-${lot.id}`,

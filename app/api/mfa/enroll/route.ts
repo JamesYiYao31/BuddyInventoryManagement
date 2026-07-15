@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import { Ratelimit } from '@upstash/ratelimit'
 import { Redis } from '@upstash/redis'
 import { NextRequest, NextResponse } from 'next/server'
+import { authenticateBearerRequest, createAdminClient } from '@/lib/mfa-api-auth'
 
 const ratelimit = new Ratelimit({
   redis: Redis.fromEnv(),
@@ -30,22 +31,11 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const authHeader = request.headers.get('Authorization')
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
-    }
-    const accessToken = authHeader.replace('Bearer ', '')
+    const auth = await authenticateBearerRequest(request.headers.get('Authorization'))
+    if (!auth.ok) return auth.response
 
-    const admin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-      { auth: { autoRefreshToken: false, persistSession: false } }
-    )
-
-    const { data: { user }, error: userError } = await admin.auth.getUser(accessToken)
-    if (userError || !user) {
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
-    }
+    const { user, accessToken } = auth
+    const admin = createAdminClient()
 
     const { data: factorsData } = await admin.auth.admin.mfa.listFactors({ userId: user.id })
     for (const factor of factorsData?.factors ?? []) {
