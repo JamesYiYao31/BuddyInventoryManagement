@@ -2,7 +2,176 @@
 
 ## Recent Sessions
 
-### Session: July 13–14, 2026 (latest) — Week 2: User Deactivation Phases A–E Shipped
+### Session: July 15, 2026 (latest) — Pre-Stripe Audit + MFA/Role Security Events + LIVE PRIVILEGE-ESCALATION FIX
+- **Headline:** A full pre-Stripe integrity audit surfaced a CONFIRMED live
+  privilege-escalation vulnerability — a technician could promote themselves
+  to manager via a direct client-side profiles.update({role}) write (RLS
+  permitted it; no column constraint). Verified exploitable against production
+  (REST PATCH as technician returned 200, self-promoted to manager), then
+  CLOSED and re-verified (same attack now returns 403). This was caught the
+  week before Stripe — exactly what the pre-integration audit was for.
+- **Context:** This session followed the Week 2 user-deactivation build
+  (Phases A–F, shipped and verified — see prior session records). Sequence
+  here: (1) pre-Stripe audit, (2) hygiene fix pass, (3) MFA security events
+  (Batch 2 Phase 1a), (4) role-change governance + the escalation fix (Batch 2
+  Phase 1b). Batch 2 Phase 2 (security-log viewer UI) deferred — feature
+  completeness, not security; better built after Stripe adds its own
+  security-relevant events.
+- **Commit note:** These passes span four commits — e25cc01 (deactivation
+  Phases E–F closeout, bundled with the audit's rate-limit/doc fixes),
+  2444b9c (hygiene), 7902bc4 (Phase 1a), 1894d5e (Phase 1b), plus
+  be916f4 (follow-up syncing role-column-lockdown.sql to its deployed form).
+  Fix pass 1 was not a standalone commit — it shared e25cc01 with E–F.
+
+- **Pre-Stripe integrity audit (read-only, Cursor + live SQL) — GO verdict:**
+  Zero HIGH findings in the deactivation stack itself (all Part 2 checks green;
+  prosrc of set_user_active_status verified IDENTICAL to repo, byte-for-byte in
+  substance). Four MEDIUM + three LOW, all documentation/hygiene, all fixed:
+  - Rate-limit key collision: enroll, user-email, feedback-notify keyed on bare
+    IP (shared Upstash bucket per IP). Fixed — all limited routes now prefixed
+    (mfa-enroll:, user-email:, feedback-notify:).
+  - `/api/security-log` (shipped July 10) was undocumented. Now documented as
+    route; canonical API route count corrected to **8** everywhere (then 1a/1b
+    added enroll-complete + set-role → **10**).
+  - CLAUDE.md profiles schema block updated with the three deactivation columns
+    + both CHECK names; SVP references bumped to v1.2; profiles table count
+    confirmed 17 throughout.
+  - `supabase-copy.sql` finally stamped DEPRECATED (long-deferred item closed
+    via the deprecate path).
+  - REQ-011 added to traceability matrix; deactivation line added to
+    pre-customer checklist.
+  - Two stray "16 tables" refs (pre-customer-checklist, traceability-matrix)
+    corrected to 17.
+
+- **Hygiene fix pass — tsc --noEmit at ZERO for the first time in project history:**
+  - Fixed the three long-standing pre-existing TS errors (orgs/[id] invite
+    PromiseLike, use-bell-alerts role union + PromiseLike + array-
+    embed cast). Widened useBellAlerts's role union so header's role prop
+    type-checks — header.tsx itself was untouched. The bell-alerts embed fix
+    is Array.isArray-aware (approved runtime change: array case goes from
+    silently-broken to correct).
+  - Two react/no-unescaped-entities lint hits escaped (login + labs copy).
+  - Enroll route auth consolidated onto authenticateBearerRequest (verified
+    zero behavioral difference before consolidating).
+  - Edit Role / Revoke Invite overlays retrofitted with the modal conventions
+    (Enter/ESC/Android-back).
+
+- **Batch 2 Phase 1a — MFA security events (SHIPPED, verified):**
+  - security_logs event/outcome constraints extended (both layers) with
+    `mfa_factor_enrolled`, `mfa_factor_replaced`, `role_changed` (role_changed
+    reserved here, written in 1b).
+  - New route `POST /api/mfa/enroll-complete` (10/hr, mfa-enroll-complete:${ip}):
+    server-side fact-check that a VERIFIED totp factor actually exists before
+    logging (409 no_verified_factor otherwise) — event attests to real server
+    state; only the enrolled-vs-replaced label trusts a client flag (low-stakes).
+  - Verify completes CLIENT-SIDE (supabase.auth.mfa.challengeAndVerify in
+    lib/mfa.ts), NOT in /api/mfa/enroll — hence the separate completion route.
+    completeEnrollmentLog is fire-and-forget (never blocks/delays enrollment UX
+    or the recovery-code step).
+  - Regenerate pushes /mfa-setup?mode=replace. Verified live: mfa_factor_replaced
+    and mfa_factor_enrolled rows landed, self-attributed; 409 guard confirmed
+    for the factorless case.
+
+- **Batch 2 Phase 1b — role-change governance + PRIVILEGE-ESCALATION FIX
+  (SHIPPED, verified):**
+  - **The hole:** profiles_update_own_or_super WITH CHECK was
+    (id = auth.uid() OR super_admin) with NO role constraint. An active
+    technician could UPDATE their own row's role to manager. RLS restrictive
+    policy (Phase B) blocks deactivated users but checks is_active, not role —
+    active users sailed through. Confirmed exploitable (200 → self-promoted).
+  - **The fix — column-level privilege, not policy logic (stronger; no
+    expression to misconfigure):** The live handle_new_user trigger already
+    assigns role from signup meta for ALL four roles (incl. org_admin), so
+    client-side role writes in registration were redundant. Removed `role` from
+    all four registration profiles.update calls (signup options.data still feeds
+    the trigger). Then:
+      REVOKE UPDATE ON public.profiles FROM authenticated, anon;
+      GRANT UPDATE (full_name, lab_id, org_id) ON public.profiles TO authenticated;
+    NOTE — a plain `REVOKE UPDATE (role)` is a NO-OP: Supabase grants
+    table-level UPDATE, which implicitly covers every column; a column-level
+    REVOKE cannot remove a table-level grant. Must revoke the table grant and
+    re-grant only the permitted columns. role, is_active, and the deactivation
+    columns are deliberately NOT re-granted (all RPC-only now).
+  - **set_user_role RPC + POST /api/users/set-role** (mirrors set-active
+    exactly): actor-from-token, hierarchy check, FOR UPDATE last-manager
+    DEMOTION guard (manager→technician that would leave a lab adminless is
+    blocked; super_admin actor exempt for restructure/offboarding), atomic
+    role update (NO session kill — JWT role stale until re-login, UI says so),
+    role_changed audit-after-action with true ACTOR attribution + old→new in
+    details. Four Edit Role surfaces rewired to lib/set-user-role.ts helper;
+    last-manager demote disabled on dashboard + org-admin, amber warning on
+    super-admin labs/orgs (same viewer-role split as deactivation Phase E).
+  - **Verified live:** escalation snippet 200 → 403 (hole closed with the
+    attack itself); registration still produces technician correctly;
+    role_changed rows land with actor attribution + transition; last-manager
+    amber warning fires.
+
+- **DEPLOYMENT-ORDER LESSON (matters for Stripe):** When two changes are
+  interdependent, order inside the pair is set by which side fails safe.
+  Here: new-client (stops writing role) + old-DB works fine; old-client +
+  new-DB (REVOKE applied) breaks registration. So CLIENT DEPLOYS FIRST, then
+  the DB lockdown. Cursor's initial deploy note had this backwards ("run SQL
+  then deploy in same release") — corrected to app-code-first. Same principle
+  will apply to Stripe webhook auth vs enforcement ordering.
+
+- **Parked notes / known properties (added this session):**
+  - `role-column-lockdown.sql` in the repo must contain the table-revoke +
+    column-regrant form, NOT the ineffective REVOKE UPDATE (role). Repo file
+    synced to production via a follow-up Cursor edit (drift-prevention, per the
+    July 10 production-is-authoritative rule).
+  - MFA regenerate deletes the OLD factor before the NEW one is verified — a
+    user who abandons mid-regenerate is left factorless, and a manager then
+    hits the MFA gate on next login. Pre-existing behavior; documented, not
+    fixed this batch.
+  - active_sessions poll (verifyActiveSessionForUser) fails OPEN on query error
+    (returns "ok") — deliberate availability choice; transient DB errors never
+    evict. Documented, not changed.
+  - Offboarding practice: rotate the lab tech_key when deactivating staff —
+    deactivation blocks the account but not re-registration with a remembered
+    key.
+  - A completed enrollment after an abandoned regenerate logs mfa_factor_enrolled
+    (the mode=replace flag doesn't survive the abandon-and-resume path).
+    Acceptable — both events mean "a factor became active."
+
+- **Deferred (unchanged / newly noted):**
+  - Batch 2 Phase 2: security-log VIEWER UI (manager/org_admin/super_admin tab,
+    hidden from technicians). Discovery done. **RLS gap to fix in that phase:**
+    security_logs_select_scoped gives org_admin effectively NO read access
+    (their JWT lab_id is null; policy checks lab_id = get_my_lab_id()). Needs an
+    org-scoped read branch (via the org's lab IDs) before the org-admin viewer
+    works. Managers + super_admin read fine as-is. New sidebar tab pattern
+    mirrors the Validation manager-only tab + activity-log fetch/filter/date-group.
+  - Still deferred from before: 2FA disable events (N/A — no disable exists),
+    role-change events now SHIPPED, enroll route already consolidated this
+    session. supabase-copy.sql now DEPRECATED (closed).
+
+- **Files changed this session (across all four passes):**
+  Audit fixes (in e25cc01, alongside E–F): app/api/mfa/enroll/route.ts,
+  app/api/super-admin/user-email/route.ts, app/api/feedback-notify/route.ts,
+  docs/api-documentation.md, CLAUDE.md, docs/software-validation-plan.md,
+  database-scripts/security-logs.sql, database-scripts/supabase-copy.sql,
+  docs/traceability-matrix.md, docs/pre-customer-checklist.md.
+  Hygiene pass: app/super-admin/orgs/[id]/page.tsx,
+  app/super-admin/labs/[id]/page.tsx, hooks/use-bell-alerts.ts,
+  app/login/page.tsx (lint escape), app/api/mfa/enroll/route.ts.
+  Phase 1a: database-scripts/security-events-extension.sql,
+  database-scripts/security-logs.sql,
+  app/api/mfa/enroll-complete/route.ts, lib/mfa.ts,
+  components/dashboard/profile-settings-dialog.tsx, app/mfa-setup/page.tsx,
+  app/welcome/page.tsx.
+  Phase 1b: database-scripts/role-column-lockdown.sql,
+  database-scripts/set-user-role-rpc.sql, app/api/users/set-role/route.ts,
+  lib/set-user-role.ts, lib/inventory-utils.ts, app/org-admin/page.tsx,
+  app/super-admin/labs/[id]/page.tsx, app/super-admin/orgs/[id]/page.tsx,
+  components/dashboard/lab-settings-tab.tsx, app/register-lab/page.tsx,
+  app/login/page.tsx (registration role-drop).
+
+- **Current state:** All Batch 2 security work complete and production-verified.
+  tsc at ZERO. Both role gaps closed (self-escalation + unguarded demotion),
+  role_changed + MFA events live, pre-Stripe audit GO. Only the security-log
+  viewer (Phase 2) remains from Batch 2 — deferred. Week 3 opens on Stripe.
+
+### Session: July 13–14, 2026 — Week 2: User Deactivation Phases A–E Shipped
 - **User deactivation shipped end-to-end (Phases A–E) + docs closeout (Phase F).**
   Deactivation is the decided user-lifecycle model (reversible, no FK-cascade
   risk); hard deletion / tenant offboarding remain separate future workflows.
@@ -520,12 +689,18 @@
 - ✅ **SHIPPED July 10, 2026 (Parts A–E):** separate `security_logs` access-control
   trail is live (append-only, service-role writes, production-verified including
   super_admin/org_admin `lab_id = NULL` rows).
-- **Security-log sub-scope still deferred (explicit):**
-  - 2FA enable/replace events
-  - role-change events
+- **Security-log sub-scope:**
+  - ✅ **SHIPPED July 15, 2026:** MFA enroll/replace events
+    (`mfa_factor_enrolled` / `mfa_factor_replaced` via `/api/mfa/enroll-complete`)
+  - ✅ **SHIPPED July 15, 2026:** role-change events
+    (`role_changed` via `/api/users/set-role` + `set_user_role` RPC;
+    profiles.role client-immutable via table-revoke + column re-grant)
   - ✅ **SHIPPED July 14, 2026:** deactivate/reactivate events
     (`user_deactivated` / `user_reactivated`, written by
-    `/api/users/set-active` on success only — see latest session)
+    `/api/users/set-active` on success only)
+  - **Still deferred:** security-log VIEWER UI (Batch 2 Phase 2). Discovery
+    done July 15 — org_admin needs an org-scoped SELECT branch before that
+    surface works; managers + super_admin read fine under existing RLS.
 - **TWO separate logs, split by event TYPE (not by actor).** James decided:
   - `activity_logs` (existing) = DATA-INTEGRITY / ALCOA+ trail ONLY. Lab "stuff":
     lot validations, inventory changes, COA actions. Stays clean/focused so an
@@ -876,11 +1051,11 @@ Seed requirements:
   deliberate testing)
 
 #### 8F — API Documentation ✅
-Done June 16, 2026; cleanup pass July 11, 2026; users/set-active added July 14, 2026; security-log documented July 15, 2026.
-- `docs/api-documentation.md` documents all 8 API routes
-  (feedback-notify, mfa/enroll, recovery-codes/generate,
+Done June 16, 2026; cleanup pass July 11, 2026; users/set-active added July 14, 2026; security-log documented July 15, 2026; enroll-complete + set-role added July 15, 2026 (Batch 2).
+- `docs/api-documentation.md` documents **10** API routes
+  (feedback-notify, mfa/enroll, mfa/enroll-complete, recovery-codes/generate,
   recovery-codes/redeem, recovery-elevation-status, super-admin/user-email,
-  users/set-active, security-log):
+  users/set-active, users/set-role, security-log):
   purpose, caller, auth, rate limit, request/response.
 - JSDoc added on the three most auditor-scrutinized functions in
   `lib/inventory-utils.ts`: parseSmartBarcode(), logActivity(),
@@ -888,6 +1063,8 @@ Done June 16, 2026; cleanup pass July 11, 2026; users/set-active added July 14, 
   state it queries `profiles` (not the JWT) and cross-references get_my_lab_id().
 - Doc reflects the DB-row recovery elevation model and `security_logs` writes
   for redeem (including super_admin/org_admin with `lab_id = NULL`).
+  Note: enroll-complete + set-role docs may still need a doc pass if not yet
+  folded into api-documentation.md (code + security_logs writes are live).
 
 #### 8G — Software Validation Plan ✅
 Done June 16, 2026. `docs/software-validation-plan.md` (BIM-SVP-001 v1.2) —
@@ -1847,7 +2024,8 @@ orderedNotReceived, benchExpiring, outOfStock, totalCount, isLoading.
 - Never expose service role key with NEXT_PUBLIC_ prefix
 - Email change blocked for technicians by design (security anchor —
   prevents account hijacking via compromised email access)
-- Rate limiting must stay on all API routes (Upstash pattern) (exception: recovery-elevation-status has no limiter by design — it is called on every gate evaluation). As of July 15, 2026 every limited route uses a route-specific prefixed key (`feedback-notify:`, `mfa-enroll:`, `mfa-recovery-gen:`, `mfa-recovery-redeem:`, `user-email:`, `set-active:`, `security-log:`) so per-IP buckets cannot collide.
+- Rate limiting must stay on all API routes (Upstash pattern) (exception: recovery-elevation-status has no limiter by design — it is called on every gate evaluation). As of July 15, 2026 every limited route uses a route-specific prefixed key (`feedback-notify:`, `mfa-enroll:`, `mfa-enroll-complete:`, `mfa-recovery-gen:`, `mfa-recovery-redeem:`, `user-email:`, `set-active:`, `set-role:`, `security-log:`) so per-IP buckets cannot collide.
+- `profiles.role` is client-immutable: authenticated has table UPDATE revoked and column UPDATE only on `(full_name, lab_id, org_id)`. Role changes go through `set_user_role` / `/api/users/set-role` only. A plain `REVOKE UPDATE (role)` is a no-op against Supabase's table-level UPDATE grant — always use the table-revoke + column-regrant form in `role-column-lockdown.sql`.
 - Labs RLS policies must use JWT claims only — never profiles subquery
 - Super admins must not access /dashboard — /super-admin only
 - Org admins have no lab_id — never scope to inventory queries
