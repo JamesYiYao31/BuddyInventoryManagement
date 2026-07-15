@@ -1,9 +1,9 @@
 # Software Validation Plan
 ## Buddy Inventory Management
 
-**Document ID:** BIM-SVP-001  
-**Version:** 1.1  
-**Effective Date:** June 16, 2026  
+**Document ID:** BIM-SVP-001
+**Version:** 1.2
+**Effective Date:** July 13, 2026
 **Author:** James Cheong, Founder — Buddy Technologies LLC  
 **Status:** Active
 
@@ -172,7 +172,7 @@ Audit log rows are preserved indefinitely. The configurable `audit_log_retention
 
 ### 6.4 Multi-Tenant Data Isolation
 
-Row-Level Security (RLS) is enabled on all 16 database tables. Lab-scoped tables carry policies that restrict every row to the authenticated user's `lab_id`. The database-layer policies resolve the user's lab through `get_my_lab_id()`, which reads the `lab_id` claim directly from the signed JWT — it does not query any table, keeping the enforcement check fast and tamper-resistant.
+Row-Level Security (RLS) is enabled on all 17 database tables (the 17th, `security_logs`, was added July 10, 2026). Lab-scoped tables carry policies that restrict every row to the authenticated user's `lab_id`. The database-layer policies resolve the user's lab through `get_my_lab_id()`, which reads the `lab_id` claim directly from the signed JWT — it does not query any table, keeping the enforcement check fast and tamper-resistant.
 
 Cross-tenant data access is not possible through any application code path, and — critically — it is enforced at the database layer independently of the application. Even if an application-layer filter were bypassed, RLS would still deny rows belonging to another tenant. Application code additionally scopes queries to the user's lab via `resolveCurrentUserLabId()` (an application helper that reads the `profiles` table) as a first line of defense, but the authoritative enforcement is the database RLS policy.
 
@@ -263,3 +263,4 @@ Revisions to this document are tracked via Git commit history. A revision table 
 |---|---|---|---|
 | 1.0 | June 2026 | James Cheong | Initial release |
 | 1.1 | June 16, 2026 | James Cheong | Accuracy corrections (automated-test disclosure, table count 14→16, profiles RLS) |
+| 1.2 | July 13, 2026 | James Cheong | Table count 16→17 (security_logs); no other content changes |

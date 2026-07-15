@@ -1,7 +1,7 @@
 # Buddy Inventory Management — API Documentation
 
 **Version:** Phase 8F  
-**Last updated:** July 11, 2026  
+**Last updated:** July 15, 2026  
 **Base URL:** `https://yourbuddyapp.com`  
 **Auth model:** Supabase JWT (`Authorization: Bearer <access_token>`) unless noted
 
@@ -19,6 +19,8 @@ No route accepts or returns PHI. No route is accessible without HTTPS.
 3b. [POST /api/mfa/recovery-codes/redeem](#3b-post-apimfarecovery-codesredeem)
 4. [GET /api/mfa/recovery-elevation-status](#4-get-apimfarecovery-elevation-status)
 5. [GET /api/super-admin/user-email](#5-get-apisuper-adminuser-email)
+6. [POST /api/users/set-active](#6-post-apiusersset-active)
+7. [POST /api/security-log](#7-post-apisecurity-log)
 
 ---
 
@@ -29,7 +31,7 @@ No route accepts or returns PHI. No route is accessible without HTTPS.
 
 **Caller:** Supabase webhook (not called by client code directly)  
 **Auth:** `x-webhook-secret` header — must match `SUPABASE_WEBHOOK_SECRET` env var  
-**Rate limit:** 10 requests / hour / IP
+**Rate limit:** 10 requests / hour / IP (key: `feedback-notify:<ip>`)
 
 ### Request
 
@@ -86,7 +88,7 @@ x-webhook-secret: <SUPABASE_WEBHOOK_SECRET>
 
 **Caller:** `lib/mfa.ts` → `enrollTotp()` → called from `/mfa-setup` page  
 **Auth:** `Authorization: Bearer <access_token>` (user's current Supabase session token)  
-**Rate limit:** 10 requests / hour / IP
+**Rate limit:** 10 requests / hour / IP (key: `mfa-enroll:<ip>`)
 
 ### Request
 
@@ -320,7 +322,7 @@ The route uses the admin (service-role) client to read `mfa_recovery_elevations`
 
 **Caller:** Super-admin pages that need to display a user's email (PII lookup by `userId`)  
 **Auth:** `Authorization: Bearer <access_token>` — caller must have `profiles.role = 'super_admin'`; all other roles receive `403`  
-**Rate limit:** 20 requests / hour / IP (Upstash sliding window)
+**Rate limit:** 20 requests / hour / IP (Upstash sliding window, key: `user-email:<ip>`)
 
 **PII note:** The response contains a user's email address. Access is restricted to `super_admin` for that reason. Do not broaden the role gate without a separate privacy review.
 
@@ -370,6 +372,139 @@ Authorization: Bearer <access_token>
 
 ---
 
+## 6. POST /api/users/set-active
+
+**File:** `app/api/users/set-active/route.ts`  
+**Purpose:** Deactivates or reactivates a user account via the `set_user_active_status` Postgres RPC. Deactivation flips `profiles.is_active` to `false`, stamps `deactivated_at` / `deactivated_by`, and deletes the target's `active_sessions` row in the same transaction (the 30-second session poll then evicts any live session). Reactivation clears the metadata columns. The RPC has **service_role-only EXECUTE** — this route is the only permitted call path, guaranteeing every state change passes auth, rate limiting, and audit logging.
+
+**Caller:** `lib/set-user-active.ts` → `setUserActiveStatus()` — invoked from the four member-list surfaces (dashboard Team Management, `/org-admin`, `/super-admin/labs/[id]`, `/super-admin/orgs/[id]` Members tab)  
+**Auth:** `Authorization: Bearer <access_token>` — the acting user is resolved from the validated token, **never from the request body**  
+**Rate limit:** 20 requests / hour / IP (Upstash sliding window, key: `set-active:<ip>`)
+
+### Request
+
+```
+POST /api/users/set-active
+Authorization: Bearer <access_token>
+Content-Type: application/json
+
+{ "targetUserId": "uuid", "active": false }
+```
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `targetUserId` | uuid string | Profile id of the account to change |
+| `active` | boolean | `false` = deactivate, `true` = reactivate |
+
+### Response
+
+**Success (`200`):**
+
+```json
+{
+  "success": true,
+  "action": "deactivated",
+  "targetUserId": "uuid",
+  "targetFullName": "Jane Doe"
+}
+```
+
+`action` is `"deactivated"` or `"reactivated"`.
+
+**Failures** return `{ "error": "<human message>", "error_code": "<code>" }`. The `error_code` field is a **new additive convention** introduced by this route (older routes return `error` only) so the UI can map failures without string-matching the human message.
+
+| Status | `error_code` | Meaning |
+|--------|--------------|---------|
+| `400` | — | Malformed body (`targetUserId` not a UUID, or `active` not a boolean) |
+| `401` | — | Missing/invalid/expired Bearer token |
+| `403` | `actor_not_found` / `actor_inactive` / `forbidden` / `super_admin_target` | Actor has no profile, is itself deactivated, fails the hierarchy check, or targeted a super_admin (super_admin is structurally non-deactivatable; the DB CHECK is the hard backstop) |
+| `404` | `target_not_found` | No profile for `targetUserId` |
+| `409` | `last_admin` / `already_in_state` | Target is the last active manager/org_admin in scope (non-super_admin actor), or the account is already in the requested state |
+| `429` | — | Rate limit exceeded |
+| `500` | `rpc_error` | RPC transport failure |
+
+### Server-side flow
+
+1. Applies Upstash rate limiting (20/hr) **before** auth.
+2. Validates the Bearer token and derives the actor's `user.id` — never from the body.
+3. Validates the body (`targetUserId` UUID, `active` boolean) → `400` on failure.
+4. Calls `set_user_active_status(p_actor_id, p_target_id, p_active)` via the service-role client and maps the jsonb result to the status codes above.
+5. **On success only** (audit-after-action): writes a `security_logs` event and returns the success JSON.
+
+### Authorization model (enforced inside the RPC)
+
+- **super_admin** actor: any target — and is **exempt from the last-admin guard** (deliberate offboarding override; the UI shows a warning instead of blocking).
+- **org_admin** actor: targets in their org, matched via `target.org_id` OR the target's lab's `labs.org_id` (technicians in org labs have `profiles.org_id` NULL).
+- **manager** actor: manager/technician targets in their own lab. Self-deactivation is allowed when the guard passes.
+- **Last-admin guard:** deactivating the last active manager of a lab (or last active org_admin of an org) returns `last_admin` for non-super_admin actors. The peer count uses `FOR UPDATE` row locks, making concurrent mutual deactivations race-proof.
+
+### Security-log side effect
+
+On success only, the route writes `event_type = "user_deactivated"` or `"user_reactivated"` (`outcome = "success"`) to `security_logs`, attributed to the **actor** (name/initials/role via `resolveSecurityLogIdentity()`), with `lab_id` = the **target's** lab (nullable). Guard-blocked attempts are not logged (consistent with the documented failed-login exclusion). Log-write failure never fails the request.
+
+### Rate-limit key convention
+
+All rate-limited routes use a **route-specific prefixed key** (e.g. `set-active:<ip>`, `mfa-enroll:<ip>`) so per-IP buckets cannot collide across routes. As of July 15, 2026 there are no remaining bare-IP identifiers. The only unlimited route is `GET /api/mfa/recovery-elevation-status` (by design — called on every gate evaluation).
+
+---
+
+## 7. POST /api/security-log
+
+**File:** `app/api/security-log/route.ts`  
+**Purpose:** Client-triggered write path for access-control events that originate in the browser (login / logout). Persists a row to `security_logs` via the service-role helper. Recovery-code generate/redeem write `security_logs` directly from their routes and do **not** use this endpoint.
+
+**Caller:** `lib/security-log.ts` → `recordSecurityEvent()` — used from login success, voluntary logout, and session-replaced logout paths  
+**Auth:** `Authorization: Bearer <access_token>` (validated via `authenticateBearerRequest()`)  
+**Rate limit:** 60 requests / hour / IP (Upstash sliding window, key: `security-log:<ip>`)
+
+### Request
+
+```
+POST /api/security-log
+Authorization: Bearer <access_token>
+Content-Type: application/json
+
+{ "eventType": "login", "outcome": "success", "details": "optional string" }
+```
+
+| Field | Type | Required | Meaning |
+|-------|------|----------|---------|
+| `eventType` | string | Yes | Only `"login"` or `"logout"` accepted by this route |
+| `outcome` | string | Yes | `"success"` or `"failure"`; `logout` requires `"success"` (DB pairing) |
+| `details` | string | No | Free-text detail; truncated server-side (capped so identity fallback suffix still fits) |
+
+### Response
+
+**Success (`200`):**
+
+```json
+{ "ok": true }
+```
+
+| Status | Body | Meaning |
+|--------|------|---------|
+| `200` | `{ "ok": true }` | Event recorded (or log helper swallowed a write failure — write is non-fatal to the client flow) |
+| `400` | `{ "error": "Invalid event type." }` / `{ "error": "Invalid outcome." }` / `{ "error": "Invalid outcome for event type." }` / `{ "error": "Invalid request body." }` | Body missing/malformed, disallowed type/outcome, or logout+failure |
+| `401` | `{ "error": "..." }` | Missing/invalid/expired Bearer token |
+| `429` | `{ "error": "Too many requests" }` | Rate limit exceeded |
+| `500` | `{ "error": "Internal server error" }` | Unexpected route failure |
+
+### Server-side flow
+
+1. Applies Upstash rate limiting (60/hr) **before** auth.
+2. Validates the Bearer token via `authenticateBearerRequest()`.
+3. Parses and validates `eventType` / `outcome` against the client allowlist (`login`/`logout` only).
+4. Resolves actor identity via `resolveSecurityLogIdentity()` (profile → JWT `user_role` → technician fallback).
+5. Writes via `logSecurityEvent()` (service-role insert; failures logged server-side, do not throw to the client as a failed login/logout).
+
+### Security notes
+
+- Actor identity and `lab_id` come from the verified token / profile lookup — never from the body.
+- This route cannot invent recovery or deactivation event types; those are server-only writes from their respective routes.
+- Forced/system sign-outs (archived-lab gate, deactivated gate, missing-profile poll) deliberately do **not** call this route.
+
+---
+
 ## Environment Variables Referenced
 
 | Variable | Used By | Scope |
@@ -397,7 +532,7 @@ All routes validate the caller's identity before any business logic runs. For we
 **Ordering vs rate limits:** On every rate-limited route, the Upstash check runs **before** auth. An unauthenticated (or invalid-token) caller who exceeds the limit receives `429` and may never see `401`. Only after the limiter allows the request does auth run and potentially return `401`/`403`. Exception: `GET /api/mfa/recovery-elevation-status` has no rate limiter by design (called on every gate evaluation), so auth is always the first gate on that route.
 
 ### 429 Too Many Requests
-Rate-limited routes use Upstash Redis sliding-window limiting, with per-route limits: feedback-notify 10/hr, mfa/enroll 10/hr, recovery-codes/generate 10/hr, recovery-codes/redeem 20/hr, super-admin/user-email 20/hr. The recovery-elevation-status route has no rate limit. Response headers on limited routes include `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset`.
+Rate-limited routes use Upstash Redis sliding-window limiting, with per-route limits: feedback-notify 10/hr, mfa/enroll 10/hr, recovery-codes/generate 10/hr, recovery-codes/redeem 20/hr, super-admin/user-email 20/hr, users/set-active 20/hr, security-log 60/hr. Every limited route uses a route-specific prefixed key (e.g. `feedback-notify:<ip>`) so buckets cannot collide. The recovery-elevation-status route has no rate limit. Response headers on limited routes include `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset`.
 
 ### 500 Internal Server Error
 Most routes catch unexpected errors and return an error JSON body (feedback-notify includes a `details` message string — never a stack trace). The recovery-elevation-status route is the exception: it never returns 500, instead failing closed to `{ "elevated": false }` on any error. All server errors are logged to Vercel's server-side log stream.

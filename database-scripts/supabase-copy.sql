@@ -1,3 +1,6 @@
+-- DEPRECATED — HISTORICAL ONLY. Drifted from production (verified July 2026).
+-- Production DB is authoritative.
+--
 -- Lab Inventory Management - multi-tenant migration (full script)
 -- Clears and recreates public schema tables with lab isolation + RLS
 

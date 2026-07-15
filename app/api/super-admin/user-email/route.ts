@@ -20,7 +20,8 @@ export async function GET(request: NextRequest) {
     request.headers.get("x-real-ip") ??
     request.headers.get("x-forwarded-for")?.split(",")[0].trim() ??
     "anonymous"
-  const { success, limit, reset, remaining } = await ratelimit.limit(ip)
+  // Prefixed so this route cannot share a per-IP bucket with other limiters.
+  const { success, limit, reset, remaining } = await ratelimit.limit(`user-email:${ip}`)
 
   if (!success) {
     return new Response(JSON.stringify({ error: "Too many requests" }), {

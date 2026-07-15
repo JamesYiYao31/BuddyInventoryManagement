@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import {
   Loader2,
@@ -11,6 +11,7 @@ import {
 import { supabase } from "@/lib/supabase"
 import { deactivatedSignOut } from "@/lib/active-session"
 import { resolveMfaGateRedirect } from "@/lib/mfa-gate"
+import { setUserActiveStatus, setUserActiveErrorMessage } from "@/lib/set-user-active"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -43,6 +44,8 @@ type MemberRow = {
   full_name: string | null
   role: string
   created_at: string | null
+  is_active: boolean
+  deactivated_at: string | null
 }
 
 type OrgDetail = {
@@ -200,6 +203,12 @@ export default function LabDetailPage() {
   const [editRoleValue, setEditRoleValue] = useState("")
   const [editRoleBusy, setEditRoleBusy] = useState(false)
 
+  // Deactivate confirm modal
+  const [deactivateMember, setDeactivateMember] = useState<MemberRow | null>(null)
+  const [activeBusyId, setActiveBusyId] = useState<string | null>(null)
+  const deactivateMemberRef = useRef<MemberRow | null>(null)
+  deactivateMemberRef.current = deactivateMember
+
   // Revoke invite modal
   const [revokeInvite, setRevokeInvite] = useState<InviteRow | null>(null)
   const [revokeBusy, setRevokeBusy] = useState(false)
@@ -314,7 +323,7 @@ export default function LabDetailPage() {
     setMembersLoading(true)
     const { data } = await supabase
       .from("profiles")
-      .select("id, full_name, role, created_at")
+      .select("id, full_name, role, created_at, is_active, deactivated_at")
       .eq("lab_id", labId)
       .order("full_name")
     setMembers((data as MemberRow[]) || [])
@@ -421,6 +430,63 @@ export default function LabDetailPage() {
     showToast("success", "Role updated. Change takes effect on next login.")
     await fetchMembers()
   }
+
+  const handleSetActive = useCallback(async (member: MemberRow, nextActive: boolean) => {
+    setActiveBusyId(member.id)
+    const result = await setUserActiveStatus(member.id, nextActive)
+    setActiveBusyId(null)
+
+    if (result.ok) {
+      setDeactivateMember(null)
+      setToast({
+        kind: "success",
+        text: `${member.full_name || "Member"} ${nextActive ? "reactivated" : "deactivated"}.`,
+      })
+      setTimeout(() => setToast(null), 4000)
+      await fetchMembers()
+      return
+    }
+
+    if (result.errorCode === "already_in_state") {
+      // State drifted since load — silently refresh the list.
+      setDeactivateMember(null)
+      await fetchMembers()
+      return
+    }
+
+    setToast({ kind: "error", text: setUserActiveErrorMessage(result.errorCode) })
+    setTimeout(() => setToast(null), 4000)
+  }, [fetchMembers])
+
+  const confirmDeactivate = useCallback(async () => {
+    const member = deactivateMemberRef.current
+    if (!member) return
+    await handleSetActive(member, false)
+  }, [handleSetActive])
+
+  // Deactivate confirm modal: Enter submits (textarea-guarded), ESC closes,
+  // Android back closes via pushState/popstate (established modal conventions).
+  useEffect(() => {
+    if (!deactivateMember) return
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDeactivateMember(null)
+      if (e.key === "Enter" && document.activeElement?.tagName !== "TEXTAREA") {
+        e.preventDefault()
+        void confirmDeactivate()
+      }
+    }
+
+    window.history.pushState(null, "", window.location.href)
+    const onPopState = () => setDeactivateMember(null)
+
+    document.addEventListener("keydown", onKeyDown)
+    window.addEventListener("popstate", onPopState)
+    return () => {
+      document.removeEventListener("keydown", onKeyDown)
+      window.removeEventListener("popstate", onPopState)
+    }
+  }, [deactivateMember, confirmDeactivate])
 
   const handleRevokeConfirm = async () => {
     if (!revokeInvite || !currentUserId) return
@@ -702,7 +768,9 @@ export default function LabDetailPage() {
                         No members yet.
                       </div>
                     ) : (
-                      members.map((member) => (
+                      members.map((member) => {
+                        const memberActive = member.is_active !== false
+                        return (
                         <div
                           key={member.id}
                           className="grid grid-cols-1 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-2 px-6 py-4 border-t border-border/60 items-center text-sm"
@@ -710,7 +778,7 @@ export default function LabDetailPage() {
                           <span className="font-bold truncate">
                             {member.full_name || "—"}
                           </span>
-                          <span>
+                          <span className="inline-flex flex-wrap items-center gap-1.5">
                             <span
                               className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
                                 member.role === "manager"
@@ -720,11 +788,19 @@ export default function LabDetailPage() {
                             >
                               {member.role}
                             </span>
+                            {!memberActive ? (
+                              <span
+                                title={member.deactivated_at ? `Deactivated ${formatDateOnly(member.deactivated_at)}` : undefined}
+                                className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-500/15 text-zinc-600 dark:text-zinc-400"
+                              >
+                                Deactivated
+                              </span>
+                            ) : null}
                           </span>
                           <span className="text-xs text-muted-foreground">
                             {formatDateOnly(member.created_at)}
                           </span>
-                          <div>
+                          <div className="flex flex-wrap items-start gap-2">
                             <button
                               type="button"
                               onClick={() => {
@@ -736,9 +812,32 @@ export default function LabDetailPage() {
                               <ChevronRight className="size-3.5" />
                               Edit Role
                             </button>
+                            {member.role !== "super_admin" ? (
+                              memberActive ? (
+                                <button
+                                  type="button"
+                                  disabled={activeBusyId === member.id}
+                                  onClick={() => setDeactivateMember(member)}
+                                  className="h-9 px-3 rounded-lg border border-destructive/40 text-destructive text-xs font-bold hover:bg-destructive/10 disabled:opacity-50 disabled:pointer-events-none"
+                                >
+                                  Deactivate
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  disabled={activeBusyId === member.id}
+                                  onClick={() => void handleSetActive(member, true)}
+                                  className="h-9 px-3 rounded-lg bg-primary/10 text-primary text-xs font-bold hover:bg-primary/15 disabled:opacity-50 inline-flex items-center gap-1.5"
+                                >
+                                  {activeBusyId === member.id ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                                  Reactivate
+                                </button>
+                              )
+                            ) : null}
                           </div>
                         </div>
-                      ))
+                        )
+                      })
                     )}
                   </div>
                 )}
@@ -1061,6 +1160,51 @@ export default function LabDetailPage() {
               >
                 {editRoleBusy && <Loader2 className="size-3.5 animate-spin" />}
                 Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Deactivate Confirm Modal ── */}
+      {deactivateMember && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-card shadow-xl space-y-5 p-6">
+            <h2 className="text-lg font-bold">Deactivate Member</h2>
+            <p className="text-sm text-muted-foreground">
+              Deactivate <span className="font-bold text-foreground">{deactivateMember.full_name || "this member"}</span>?
+              They will lose all access immediately. This is reversible.
+            </p>
+            {/* Viewer here is super_admin, whom the RPC deliberately exempts
+                from the last-admin guard (offboarding override) — so the
+                last-active-manager case is a WARNING, not a disabled control.
+                On the dashboard and /org-admin, manager/org_admin actors ARE
+                blocked by the guard, so those surfaces keep the disabled state. */}
+            {deactivateMember.role === "manager" &&
+            deactivateMember.is_active !== false &&
+            members.filter(
+              (x) => x.role === "manager" && x.is_active !== false && x.id !== deactivateMember.id
+            ).length === 0 ? (
+              <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-xs text-amber-800 dark:text-amber-400 font-medium">
+                This is the lab&apos;s last active manager. After deactivation, this lab will have no active admin.
+              </div>
+            ) : null}
+            <div className="flex gap-3 justify-end">
+              <button
+                type="button"
+                onClick={() => setDeactivateMember(null)}
+                className="h-9 px-4 rounded-xl border border-border text-xs font-bold hover:bg-muted/50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={activeBusyId === deactivateMember.id}
+                onClick={() => void confirmDeactivate()}
+                className="h-9 px-4 rounded-xl bg-destructive text-destructive-foreground text-xs font-bold hover:opacity-90 disabled:opacity-50 disabled:pointer-events-none inline-flex items-center gap-2"
+              >
+                {activeBusyId === deactivateMember.id && <Loader2 className="size-3.5 animate-spin" />}
+                Deactivate
               </button>
             </div>
           </div>

@@ -1010,6 +1010,8 @@ export interface LabProfile {
   email: string
   role: "manager" | "technician"
   isOwner: boolean
+  isActive: boolean
+  deactivatedAt: string | null
 }
 
 /**
@@ -1121,7 +1123,7 @@ export const fetchLabProfiles = async (): Promise<LabProfile[]> => {
 
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, full_name, role")
+    .select("id, full_name, role, is_active, deactivated_at")
     .eq("lab_id", labId)
     .order("full_name", { ascending: true })
 
@@ -1135,6 +1137,8 @@ export const fetchLabProfiles = async (): Promise<LabProfile[]> => {
     return []
   }
 
+  // super_admin rows are filtered out here, so the Team Management UI can
+  // never render a deactivate control for a super_admin.
   return (data || [])
     .filter((p: any) => p.role !== "super_admin")
     .map((p: any) => ({
@@ -1143,6 +1147,8 @@ export const fetchLabProfiles = async (): Promise<LabProfile[]> => {
       email: "",
       role: (p.role === "manager" ? "manager" : "technician") as "manager" | "technician",
       isOwner: Boolean(ownerId && p.id === ownerId),
+      isActive: p.is_active !== false,
+      deactivatedAt: p.deactivated_at ?? null,
     }))
 }
 

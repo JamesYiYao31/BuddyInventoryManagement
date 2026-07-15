@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import {
   Loader2,
@@ -11,6 +11,7 @@ import {
 import { supabase } from "@/lib/supabase"
 import { deactivatedSignOut } from "@/lib/active-session"
 import { resolveMfaGateRedirect } from "@/lib/mfa-gate"
+import { setUserActiveStatus, setUserActiveErrorMessage } from "@/lib/set-user-active"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -35,6 +36,8 @@ type MemberRow = {
   role: string
   lab_id: string | null
   created_at: string | null
+  is_active: boolean
+  deactivated_at: string | null
 }
 
 type OrgAdminProfile = {
@@ -159,6 +162,12 @@ export default function OrgDetailPage() {
   // UI
   const [activeTab, setActiveTab] = useState<ActiveTab>("overview")
   const [toast, setToast] = useState<Toast>(null)
+
+  // Deactivate confirm modal
+  const [deactivateMember, setDeactivateMember] = useState<MemberRow | null>(null)
+  const [activeBusyId, setActiveBusyId] = useState<string | null>(null)
+  const deactivateMemberRef = useRef<MemberRow | null>(null)
+  deactivateMemberRef.current = deactivateMember
 
   // Edit role modal
   const [editRoleMember, setEditRoleMember] = useState<MemberRow | null>(null)
@@ -287,7 +296,7 @@ export default function OrgDetailPage() {
       setMembersLoading(true)
       const { data: membersData } = await supabase
         .from("profiles")
-        .select("id, full_name, role, lab_id, created_at")
+        .select("id, full_name, role, lab_id, created_at, is_active, deactivated_at")
         .in("lab_id", labIds)
         .order("full_name")
       const memberList = (membersData as MemberRow[]) || []
@@ -371,6 +380,63 @@ export default function OrgDetailPage() {
     showToast("success", "Role updated. Change takes effect on next login.")
     await fetchAll()
   }
+
+  const handleSetActive = useCallback(async (member: MemberRow, nextActive: boolean) => {
+    setActiveBusyId(member.id)
+    const result = await setUserActiveStatus(member.id, nextActive)
+    setActiveBusyId(null)
+
+    if (result.ok) {
+      setDeactivateMember(null)
+      setToast({
+        kind: "success",
+        text: `${member.full_name || "Member"} ${nextActive ? "reactivated" : "deactivated"}.`,
+      })
+      setTimeout(() => setToast(null), 4000)
+      await fetchAll()
+      return
+    }
+
+    if (result.errorCode === "already_in_state") {
+      // State drifted since load — silently refresh the list.
+      setDeactivateMember(null)
+      await fetchAll()
+      return
+    }
+
+    setToast({ kind: "error", text: setUserActiveErrorMessage(result.errorCode) })
+    setTimeout(() => setToast(null), 4000)
+  }, [fetchAll])
+
+  const confirmDeactivate = useCallback(async () => {
+    const member = deactivateMemberRef.current
+    if (!member) return
+    await handleSetActive(member, false)
+  }, [handleSetActive])
+
+  // Deactivate confirm modal: Enter submits (textarea-guarded), ESC closes,
+  // Android back closes via pushState/popstate (established modal conventions).
+  useEffect(() => {
+    if (!deactivateMember) return
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDeactivateMember(null)
+      if (e.key === "Enter" && document.activeElement?.tagName !== "TEXTAREA") {
+        e.preventDefault()
+        void confirmDeactivate()
+      }
+    }
+
+    window.history.pushState(null, "", window.location.href)
+    const onPopState = () => setDeactivateMember(null)
+
+    document.addEventListener("keydown", onKeyDown)
+    window.addEventListener("popstate", onPopState)
+    return () => {
+      document.removeEventListener("keydown", onKeyDown)
+      window.removeEventListener("popstate", onPopState)
+    }
+  }, [deactivateMember, confirmDeactivate])
 
   const handleRevokeConfirm = async () => {
     if (!revokeInvite || !currentUserId) return
@@ -705,7 +771,9 @@ export default function OrgDetailPage() {
                         No members yet.
                       </div>
                     ) : (
-                      members.map((member) => (
+                      members.map((member) => {
+                        const memberActive = member.is_active !== false
+                        return (
                         <div
                           key={member.id}
                           className="grid grid-cols-1 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)] gap-2 px-6 py-4 border-t border-border/60 items-center text-sm"
@@ -713,7 +781,7 @@ export default function OrgDetailPage() {
                           <span className="font-bold truncate">
                             {member.full_name || "—"}
                           </span>
-                          <span>
+                          <span className="inline-flex flex-wrap items-center gap-1.5">
                             <span
                               className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
                                 member.role === "manager"
@@ -723,6 +791,14 @@ export default function OrgDetailPage() {
                             >
                               {member.role}
                             </span>
+                            {!memberActive ? (
+                              <span
+                                title={member.deactivated_at ? `Deactivated ${formatDateOnly(member.deactivated_at)}` : undefined}
+                                className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-500/15 text-zinc-600 dark:text-zinc-400"
+                              >
+                                Deactivated
+                              </span>
+                            ) : null}
                           </span>
                           <span className="text-xs text-muted-foreground truncate">
                             {labNameById(member.lab_id)}
@@ -730,7 +806,12 @@ export default function OrgDetailPage() {
                           <span className="text-xs text-muted-foreground">
                             {formatDateOnly(member.created_at)}
                           </span>
-                          <div>
+                          {/* No client-side last-admin disable on this org-wide list:
+                              the API's 409 last_admin surfaces through the error path
+                              instead. For org_admin targets specifically, a client-side
+                              peer-count query is deliberately deferred — the org layer
+                              is unexercised in production (zero orgs post-wipe). */}
+                          <div className="flex flex-wrap items-center gap-2">
                             <button
                               type="button"
                               onClick={() => {
@@ -742,9 +823,32 @@ export default function OrgDetailPage() {
                               <ChevronRight className="size-3.5" />
                               Edit Role
                             </button>
+                            {member.role !== "super_admin" ? (
+                              memberActive ? (
+                                <button
+                                  type="button"
+                                  disabled={activeBusyId === member.id}
+                                  onClick={() => setDeactivateMember(member)}
+                                  className="h-9 px-3 rounded-lg border border-destructive/40 text-destructive text-xs font-bold hover:bg-destructive/10 disabled:opacity-50 disabled:pointer-events-none"
+                                >
+                                  Deactivate
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  disabled={activeBusyId === member.id}
+                                  onClick={() => void handleSetActive(member, true)}
+                                  className="h-9 px-3 rounded-lg bg-primary/10 text-primary text-xs font-bold hover:bg-primary/15 disabled:opacity-50 inline-flex items-center gap-1.5"
+                                >
+                                  {activeBusyId === member.id ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                                  Reactivate
+                                </button>
+                              )
+                            ) : null}
                           </div>
                         </div>
-                      ))
+                        )
+                      })
                     )}
                   </div>
                 )}
@@ -941,6 +1045,37 @@ export default function OrgDetailPage() {
           </>
         )}
       </main>
+
+      {/* ── Deactivate Confirm Modal ── */}
+      {deactivateMember && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-card shadow-xl space-y-5 p-6">
+            <h2 className="text-lg font-bold">Deactivate Member</h2>
+            <p className="text-sm text-muted-foreground">
+              Deactivate <span className="font-bold text-foreground">{deactivateMember.full_name || "this member"}</span>?
+              They will lose all access immediately. This is reversible.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                type="button"
+                onClick={() => setDeactivateMember(null)}
+                className="h-9 px-4 rounded-xl border border-border text-xs font-bold hover:bg-muted/50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={activeBusyId === deactivateMember.id}
+                onClick={() => void confirmDeactivate()}
+                className="h-9 px-4 rounded-xl bg-destructive text-destructive-foreground text-xs font-bold hover:opacity-90 disabled:opacity-50 disabled:pointer-events-none inline-flex items-center gap-2"
+              >
+                {activeBusyId === deactivateMember.id && <Loader2 className="size-3.5 animate-spin" />}
+                Deactivate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Edit Role Modal ── */}
       {editRoleMember && (

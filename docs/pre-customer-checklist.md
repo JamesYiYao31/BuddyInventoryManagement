@@ -49,7 +49,7 @@ before the next customer invite goes out.
 
 ## 3. Multi-Tenancy & RLS Verification  `(8I · core arch)`
 
-- [ ] **RLS enabled on all 16 tables** — spot-check in Supabase that no table had RLS disabled during debugging and left off. (`profiles` RLS stays enabled.)
+- [ ] **RLS enabled on all 17 tables** (the 17th, `security_logs`, added July 10, 2026) — spot-check in Supabase that no table had RLS disabled during debugging and left off. (`profiles` RLS stays enabled.)
 - [ ] **Cross-tenant isolation confirmed** — log in as an Oakwood manager and verify you see only Oakwood data; no other lab's inventory, lots, or logs are reachable.
 - [ ] **Super_admin scoping correct** — super_admin has `lab_id = NULL` AND `org_id = NULL`, can reach `/super-admin` only, and is correctly blocked from `/dashboard`.
 - [ ] **JWT claims minting correctly** — decode a fresh production token (full sign-out → clear `buddylab-auth` localStorage → fresh login) and confirm `lab_id`, `org_id`, `user_role` are all correct. (Stale-token lesson from June 7 — only a re-minted token reflects reality.)
@@ -76,6 +76,7 @@ before the next customer invite goes out.
 - [x] **Super_admin (you) has TOTP enrolled + recovery codes generated** — done *before* the mandatory super_admin gate is enforced (Phase A). No self-lockout.
 - [x] **Recovery-code login verified** — you've confirmed you can get back in via a recovery code, and the 60-min elevation TTL expires correctly.
 - [x] **Mandatory 2FA gate works for super_admin / managers / org_admins** — dashboard gate order intact (onboarding → setup → challenge → dashboard); `/super-admin` (×3) and `/org-admin` use `resolveMfaGateRedirect()`.
+- [ ] **Deactivation verified:** deactivated test user cannot log in, loses data access mid-session, and events appear in `security_logs`.
 - [ ] **Super_admin login email alerts live** — you get notified on super_admin login (Phase 8 lighter item).
 
 ## 7. Email & Domain  `(Phase 7 · domain routing)`

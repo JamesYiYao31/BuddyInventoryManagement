@@ -23,6 +23,7 @@ import {
 } from "@/lib/active-session"
 import { resolveMfaGateRedirect } from "@/lib/mfa-gate"
 import { recordSecurityEvent } from "@/lib/security-log"
+import { setUserActiveStatus, setUserActiveErrorMessage } from "@/lib/set-user-active"
 import { ProfileSettingsDialog } from "@/components/dashboard/profile-settings-dialog"
 
 type LabRow = {
@@ -38,6 +39,8 @@ type MemberRow = {
   role: string
   lab_id: string
   created_at: string | null
+  is_active: boolean
+  deactivated_at: string | null
 }
 
 function formatJoinDate(iso: string | null | undefined): string {
@@ -61,6 +64,12 @@ type RoleModalState = {
   memberName: string
   labName: string
   targetRole: "manager" | "technician"
+} | null
+
+type DeactivateModalState = {
+  memberId: string
+  memberName: string
+  labName: string
 } | null
 
 function shortenToken(t: string) {
@@ -95,6 +104,12 @@ export default function OrgAdminPage() {
 
   const roleModalRef = useRef<RoleModalState>(null)
   roleModalRef.current = roleModal
+
+  const [deactivateModal, setDeactivateModal] = useState<DeactivateModalState>(null)
+  const [activeBusyId, setActiveBusyId] = useState<string | null>(null)
+
+  const deactivateModalRef = useRef<DeactivateModalState>(null)
+  deactivateModalRef.current = deactivateModal
 
   const loadDashboard = useCallback(async (oid: string) => {
     setPageError(null)
@@ -138,7 +153,7 @@ export default function OrgAdminPage() {
 
     const { data: memberRows, error: memErr } = await supabase
       .from("profiles")
-      .select("id, full_name, role, lab_id, created_at")
+      .select("id, full_name, role, lab_id, created_at, is_active, deactivated_at")
       .in("lab_id", labIds)
       .order("full_name", { ascending: true })
 
@@ -430,6 +445,50 @@ export default function OrgAdminPage() {
     }
   }, [roleModal, confirmRoleChange])
 
+  const handleSetActive = useCallback(async (memberId: string, nextActive: boolean) => {
+    setPageError(null)
+    setActiveBusyId(memberId)
+    const result = await setUserActiveStatus(memberId, nextActive)
+    setActiveBusyId(null)
+
+    if (result.ok || result.errorCode === "already_in_state") {
+      // already_in_state: state drifted since load — silently refresh.
+      setDeactivateModal(null)
+      await refresh()
+      return
+    }
+
+    setPageError(setUserActiveErrorMessage(result.errorCode))
+  }, [refresh])
+
+  const confirmDeactivate = useCallback(async () => {
+    const modal = deactivateModalRef.current
+    if (!modal) return
+    await handleSetActive(modal.memberId, false)
+  }, [handleSetActive])
+
+  useEffect(() => {
+    if (!deactivateModal) return
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDeactivateModal(null)
+      if (e.key === "Enter" && !isTextareaFocused()) {
+        e.preventDefault()
+        void confirmDeactivate()
+      }
+    }
+
+    window.history.pushState(null, "", window.location.href)
+    const onPopState = () => setDeactivateModal(null)
+
+    document.addEventListener("keydown", onKeyDown)
+    window.addEventListener("popstate", onPopState)
+    return () => {
+      document.removeEventListener("keydown", onKeyDown)
+      window.removeEventListener("popstate", onPopState)
+    }
+  }, [deactivateModal, confirmDeactivate])
+
   if (gateLoading || !authorized) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-background">
@@ -536,21 +595,39 @@ export default function OrgAdminPage() {
                         <p className="text-sm text-muted-foreground italic py-2">No members yet</p>
                       ) : (
                         <ul className="space-y-2">
-                          {members.map((m) => (
+                          {members.map((m) => {
+                            const memberActive = m.is_active !== false
+                            const lastAdminBlocked =
+                              m.role === "manager" &&
+                              memberActive &&
+                              members.filter(
+                                (x) => x.role === "manager" && x.is_active !== false && x.id !== m.id
+                              ).length === 0
+                            return (
                             <li
                               key={m.id}
                               className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 rounded-xl border border-border/60 bg-muted/20 px-3 py-3"
                             >
                               <div className="min-w-0">
                                 <p className="text-sm font-bold truncate">{m.full_name || "—"}</p>
-                                <span
-                                  className={`inline-flex mt-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                    m.role === "manager"
-                                      ? "bg-violet-500/15 text-violet-800 dark:text-violet-300"
-                                      : "bg-sky-500/15 text-sky-800 dark:text-sky-300"
-                                  }`}
-                                >
-                                  {m.role === "manager" ? "Manager" : "Technician"}
+                                <span className="inline-flex flex-wrap items-center gap-1.5 mt-1">
+                                  <span
+                                    className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                      m.role === "manager"
+                                        ? "bg-violet-500/15 text-violet-800 dark:text-violet-300"
+                                        : "bg-sky-500/15 text-sky-800 dark:text-sky-300"
+                                    }`}
+                                  >
+                                    {m.role === "manager" ? "Manager" : "Technician"}
+                                  </span>
+                                  {!memberActive ? (
+                                    <span
+                                      title={m.deactivated_at ? `Deactivated ${formatJoinDate(m.deactivated_at)}` : undefined}
+                                      className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-500/15 text-zinc-600 dark:text-zinc-400"
+                                    >
+                                      Deactivated
+                                    </span>
+                                  ) : null}
                                 </span>
                                 <p className="text-xs text-muted-foreground mt-1">Joined {formatJoinDate(m.created_at)}</p>
                               </div>
@@ -589,9 +666,45 @@ export default function OrgAdminPage() {
                                     Make Manager
                                   </button>
                                 ) : null}
+                                {m.role !== "super_admin" ? (
+                                  memberActive ? (
+                                    <div className="flex flex-col gap-1">
+                                      <button
+                                        type="button"
+                                        disabled={activeBusyId === m.id || lastAdminBlocked}
+                                        onClick={() =>
+                                          setDeactivateModal({
+                                            memberId: m.id,
+                                            memberName: m.full_name || "Member",
+                                            labName: lab.name,
+                                          })
+                                        }
+                                        className="h-9 px-3 rounded-lg border border-destructive/40 text-destructive text-xs font-bold hover:bg-destructive/10 disabled:opacity-50 disabled:pointer-events-none"
+                                      >
+                                        Deactivate
+                                      </button>
+                                      {lastAdminBlocked ? (
+                                        <p className="text-[10px] text-muted-foreground leading-tight max-w-[160px]">
+                                          Last active manager — another admin must exist first.
+                                        </p>
+                                      ) : null}
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      disabled={activeBusyId === m.id}
+                                      onClick={() => void handleSetActive(m.id, true)}
+                                      className="h-9 px-3 rounded-lg bg-primary/10 text-primary text-xs font-bold hover:bg-primary/15 disabled:opacity-50 inline-flex items-center gap-1.5"
+                                    >
+                                      {activeBusyId === m.id ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : null}
+                                      Reactivate
+                                    </button>
+                                  )
+                                ) : null}
                               </div>
                             </li>
-                          ))}
+                            )
+                          })}
                         </ul>
                       )}
                     </div>
@@ -698,6 +811,49 @@ export default function OrgAdminPage() {
               >
                 {roleBusyId === roleModal.memberId ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
                 Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {deactivateModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-md p-4">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-card shadow-2xl overflow-hidden">
+            <div className="flex justify-between items-center px-6 py-4 border-b border-border bg-muted/30">
+              <h4 className="font-bold text-lg text-foreground">Deactivate Member</h4>
+              <button
+                type="button"
+                onClick={() => setDeactivateModal(null)}
+                className="p-2 rounded-full hover:bg-muted text-muted-foreground"
+                aria-label="Close"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                Deactivate <span className="font-bold text-foreground">{deactivateModal.memberName}</span> at{" "}
+                <span className="font-bold text-foreground">{deactivateModal.labName}</span>?
+                They will lose all access immediately. This is reversible.
+              </p>
+            </div>
+            <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 sm:gap-3 px-6 py-4 border-t border-border bg-muted/20">
+              <button
+                type="button"
+                onClick={() => setDeactivateModal(null)}
+                className="h-11 px-5 rounded-xl border border-border bg-background font-bold text-sm text-muted-foreground hover:bg-muted"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={activeBusyId === deactivateModal.memberId}
+                onClick={() => void confirmDeactivate()}
+                className="h-11 px-6 rounded-xl bg-destructive text-destructive-foreground font-bold text-sm shadow-sm hover:opacity-90 disabled:opacity-50 inline-flex items-center justify-center gap-2"
+              >
+                {activeBusyId === deactivateModal.memberId ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+                Deactivate
               </button>
             </div>
           </div>

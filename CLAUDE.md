@@ -2,7 +2,92 @@
 
 ## Recent Sessions
 
-### Session: July 11, 2026 (latest) — API Doc Cleanup + SVP Controlled-Document Fields
+### Session: July 13–14, 2026 (latest) — Week 2: User Deactivation Phases A–E Shipped
+- **User deactivation shipped end-to-end (Phases A–E) + docs closeout (Phase F).**
+  Deactivation is the decided user-lifecycle model (reversible, no FK-cascade
+  risk); hard deletion / tenant offboarding remain separate future workflows.
+- **Phase A — schema (`database-scripts/user-deactivation.sql`, executed in
+  Supabase):** `profiles.is_active` (boolean NOT NULL DEFAULT true) +
+  `deactivated_at` + `deactivated_by` (text snapshot, not FK);
+  state-coherence CHECK (`profiles_deactivation_state_chk` — half-set states
+  unrepresentable); super_admin immunity CHECK
+  (`profiles_super_admin_always_active_chk` — super_admin structurally
+  non-deactivatable at the DB layer; API checks are just friendly errors);
+  `public.user_is_active()` (SQL, STABLE, SECURITY DEFINER, empty search_path,
+  fail-closed to false). `security_logs` event_type + pairing constraints
+  extended with `user_deactivated` / `user_reactivated` (success-only pairs).
+- **Phase B — restrictive RLS (`database-scripts/user-deactivation-rls.sql`):**
+  13 `AS RESTRICTIVE FOR ALL TO authenticated` policies using
+  `(SELECT public.user_is_active())` (initplan — one profiles PK lookup per
+  statement) so a deactivated user's data access dies instantly, even
+  mid-session on a valid token. Restrictive ANDs with permissive — lab scoping
+  unchanged. **Deliberate exclusions:** `profiles` (deactivated user must read
+  own row for a legible gate message), `active_sessions` (eviction/poll
+  semantics unchanged; Phase D deletes the row explicitly),
+  `mfa_recovery_codes` + `mfa_recovery_elevations` (auth flows untouched).
+- **Phase C — login + gate enforcement:** `is_active` added to exactly six
+  profiles SELECTs (login, dashboard checkSessionAndRole, super-admin ×3,
+  org-admin). Login denies before MFA challenge/routing with inline error;
+  gates deny via new `deactivatedSignOut(router, userId)` in
+  `lib/active-session.ts` → `/login?reason=account_deactivated` (red banner,
+  distinct from amber session_replaced). Gate denials write NO security event —
+  forced/system signouts are a documented security_logs exclusion.
+- **Phase D — RPC + API route:** `set_user_active_status(actor, target,
+  active)` (plpgsql SECURITY DEFINER, jsonb error codes, **service_role-only
+  EXECUTE** — every call must flow through the API route so auth + rate limit +
+  audit are guaranteed). Hierarchy: super_admin → any; org_admin → own org
+  (checks BOTH target.org_id AND labs.org_id since org-lab technicians have
+  profiles.org_id NULL); manager → own-lab manager/technician targets
+  (self-deactivation legal when the guard passes). **Last-admin guard is
+  race-proof via FOR UPDATE row locks; super_admin actor is EXEMPT (deliberate
+  offboarding override).** Deactivation deletes the target's active_sessions
+  row in the same transaction (30s poll evicts live sessions).
+  `POST /api/users/set-active`: 20/hr Upstash with PREFIXED key
+  `set-active:${ip}` (MFA-route convention; user-email's bare-IP key is the
+  known pre-existing exception); failures return `error` + additive
+  `error_code`; success-only (audit-after-action) `user_deactivated` /
+  `user_reactivated` security_logs writes, actor-attributed, lab_id = target's.
+- **Phase E — UI on four surfaces:** dashboard Team Management
+  (lab-settings-tab), /org-admin members, /super-admin/labs/[id] members,
+  /super-admin/orgs/[id] Members tab. "Deactivated" badge (deactivated_at in
+  tooltip), confirm modal per modal conventions (textarea-guarded Enter,
+  ESC, pushState/popstate Android back), reactivate = direct action (no
+  modal). Shared bearer helper `lib/set-user-active.ts`. No control ever
+  renders on a super_admin row (explicit guards + fetchLabProfiles filter).
+  Client-side last-admin disable (manager targets) on dashboard + /org-admin.
+- **Phase E fix — super-admin last-manager handling:** the client-side disable
+  was initially applied on /super-admin/labs/[id] too, but the RPC exempts
+  super_admin actors from the guard. Fixed: on the super-admin lab page the
+  Deactivate button is always enabled and the confirm modal instead shows an
+  amber WARNING ("This is the lab's last active manager…"). Viewer-role
+  distinction commented in code: manager/org_admin actors are genuinely
+  blocked by the guard, so dashboard + /org-admin keep the disabled state
+  (org_admin escalation to super_admin is the decided MVP flow).
+- **Phase F — docs closeout:** api-documentation.md route #7
+  (users/set-active, full section + TOC + 429 summary); SVP bumped to v1.2
+  (table count 16→17 for security_logs, revision row added); CLAUDE.md table
+  counts 16→17 and 8F route count updated.
+- **Key learnings / parked notes:**
+  - Offboarding practice (parked): rotate the lab `tech_key` when
+    deactivating staff — deactivation blocks the ACCOUNT, not re-registration
+    with a remembered key.
+  - Known property (documented, not changed): the active_sessions 30s poll
+    fails OPEN on query error (`verifyActiveSessionForUser` returns "ok") — a
+    deliberate availability choice.
+- **Still deferred (unchanged):** 2FA enable/replace and role-change
+  security-log events; security_logs viewer UI.
+- **Files changed:** `database-scripts/user-deactivation.sql`,
+  `database-scripts/user-deactivation-rls.sql`,
+  `database-scripts/user-deactivation-rpc.sql`,
+  `app/api/users/set-active/route.ts`, `lib/active-session.ts`,
+  `lib/set-user-active.ts`, `lib/inventory-utils.ts`, `app/login/page.tsx`,
+  `app/dashboard/page.tsx`, `app/org-admin/page.tsx`,
+  `app/super-admin/page.tsx`, `app/super-admin/labs/[id]/page.tsx`,
+  `app/super-admin/orgs/[id]/page.tsx`,
+  `components/dashboard/lab-settings-tab.tsx`, `docs/api-documentation.md`,
+  `docs/software-validation-plan.md`, `CLAUDE.md`.
+
+### Session: July 11, 2026 — API Doc Cleanup + SVP Controlled-Document Fields
 - **docs/api-documentation.md cleanup pass COMPLETE** (doc-only; no route code
   touched). Closes the June 16 deferred api-doc findings:
   - Documented 6th route `GET /api/super-admin/user-email` (super_admin-only,
@@ -438,7 +523,9 @@
 - **Security-log sub-scope still deferred (explicit):**
   - 2FA enable/replace events
   - role-change events
-  - deactivate/reactivate events (to land with the user-deactivation build)
+  - ✅ **SHIPPED July 14, 2026:** deactivate/reactivate events
+    (`user_deactivated` / `user_reactivated`, written by
+    `/api/users/set-active` on success only — see latest session)
 - **TWO separate logs, split by event TYPE (not by actor).** James decided:
   - `activity_logs` (existing) = DATA-INTEGRITY / ALCOA+ trail ONLY. Lab "stuff":
     lot validations, inventory changes, COA actions. Stays clean/focused so an
@@ -473,12 +560,9 @@
     Offboarding test plan must include a live (non-rollback) SET NULL
     survival test: throwaway lab + user, one login, wipe, confirm the
     security row survives with lab_id nulled.
-- **Deferred:** Regenerate `database-scripts/supabase-copy.sql` from live
-  schema or mark its header DEPRECATED — HISTORICAL ONLY. It has now
-  drifted twice from production (stale RLS policies; `labs.manager_key`
-  column no longer exists — live labs columns verified July 11: id, name,
-  tech_key, is_archived, archived_at, created_at, owner_id, org_id,
-  trial_starts_at, trial_ends_at).
+- ✅ **DEPRECATED July 15, 2026:** `database-scripts/supabase-copy.sql` marked
+  HISTORICAL ONLY (header note) — drifted from production; production DB is
+  authoritative. Regeneration deferred indefinitely.
 - ✅ **Verified July 10, 2026:** recovery-code REDEEM route is rate-limited
   (Upstash, 20/hr sliding window), confirmed in the July 10 audit.
 
@@ -792,10 +876,11 @@ Seed requirements:
   deliberate testing)
 
 #### 8F — API Documentation ✅
-Done June 16, 2026; cleanup pass July 11, 2026.
-- `docs/api-documentation.md` documents all 6 API routes
+Done June 16, 2026; cleanup pass July 11, 2026; users/set-active added July 14, 2026; security-log documented July 15, 2026.
+- `docs/api-documentation.md` documents all 8 API routes
   (feedback-notify, mfa/enroll, recovery-codes/generate,
-  recovery-codes/redeem, recovery-elevation-status, super-admin/user-email):
+  recovery-codes/redeem, recovery-elevation-status, super-admin/user-email,
+  users/set-active, security-log):
   purpose, caller, auth, rate limit, request/response.
 - JSDoc added on the three most auditor-scrutinized functions in
   `lib/inventory-utils.ts`: parseSmartBarcode(), logActivity(),
@@ -805,7 +890,7 @@ Done June 16, 2026; cleanup pass July 11, 2026.
   for redeem (including super_admin/org_admin with `lab_id = NULL`).
 
 #### 8G — Software Validation Plan ✅
-Done June 16, 2026. `docs/software-validation-plan.md` (BIM-SVP-001 v1.1) —
+Done June 16, 2026. `docs/software-validation-plan.md` (BIM-SVP-001 v1.2) —
 full document, not a skeleton. Covers: intended use, regulatory classification
 (NOT a medical device; supports customer Part 11 compliance but is not itself
 FDA-regulated), SDLC (iterative phase-based, solo founder, Cursor + GitHub +
@@ -821,6 +906,7 @@ ALCOA+, RLS isolation, auth/session security).
   reviews or audits (controlled-document fields already seeded in §9).
 - ✅ **July 11, 2026:** Author field + revision table filled (James Cheong;
   v1.0 / v1.1 rows). Version not bumped — controlled-document fields only.
+- ✅ **July 13, 2026:** Bumped to v1.2 — table count 16→17 (`security_logs`).
 
 #### 8H — Terms of Service & Privacy Policy ✅ (draft + pages shipped)
 - **Entity:** Buddy Technologies LLC (Wyoming) — umbrella LLC, NOT YET FORMED
@@ -973,8 +1059,9 @@ tooling (formal pen testing, SOC 2).
 
 ### Verified Facts
 - profiles RLS: ENABLED (verified June 16, 2026, pg_class.relrowsecurity = true).
-  Public-schema tables: 16 total, RLS enabled on all (verified June 16, 2026 in
-  Supabase). Never disable. Supersedes any note claiming it should be disabled.
+  Public-schema tables: 17 total (16 verified June 16, 2026 in Supabase;
+  `security_logs` added with RLS July 10, 2026), RLS enabled on all. Never
+  disable. Supersedes any note claiming it should be disabled.
 
 ### Security Layers
 | Layer | Implementation |
@@ -982,7 +1069,7 @@ tooling (formal pen testing, SOC 2).
 | Passwords | Supabase Auth bcrypt, min 8 chars, mixed case + digits + symbols |
 | Password reset | Email-based flow via /reset-password |
 | Session enforcement | One active session per user (30s poll) |
-| Database isolation | RLS on all 16 tables (activity_logs append-only) |
+| Database isolation | RLS on all 17 tables (activity_logs append-only) |
 | Data scoping | JWT-based get_my_lab_id() + get_my_org_id() |
 | Profile security | RLS enabled, email column removed |
 | Transport | HTTPS via HSTS |
@@ -1370,10 +1457,17 @@ order_qty, unit_price, total_price, status, notes, date_requested
 ```
 id, lab_id, org_id, full_name,
 role ('super_admin' | 'org_admin' | 'manager' | 'technician'),
-created_at (timestamptz, default now())
+created_at (timestamptz, default now()),
+is_active (boolean NOT NULL DEFAULT true),
+deactivated_at (timestamptz, nullable),
+deactivated_by (text snapshot of actor name — not an FK)
 ```
 - email column removed — stored in auth.users only
 - RLS enabled
+- State-coherence CHECK `profiles_deactivation_state_chk`: active rows must
+  have both metadata columns NULL; inactive rows must have both set
+- Super_admin immunity CHECK `profiles_super_admin_always_active_chk`:
+  `role = 'super_admin'` cannot have `is_active = false`
 - Never query email from profiles — use `admin.auth.admin.getUserById()`
 - `id` → auth.users ON DELETE **CASCADE**
 - `lab_id` → labs ON DELETE **SET NULL**
@@ -1753,7 +1847,7 @@ orderedNotReceived, benchExpiring, outOfStock, totalCount, isLoading.
 - Never expose service role key with NEXT_PUBLIC_ prefix
 - Email change blocked for technicians by design (security anchor —
   prevents account hijacking via compromised email access)
-- Rate limiting must stay on all API routes (Upstash pattern) (exception: recovery-elevation-status has no limiter by design — it is called on every gate evaluation; super-admin/user-email now has a 20/hr limiter added July 2026)
+- Rate limiting must stay on all API routes (Upstash pattern) (exception: recovery-elevation-status has no limiter by design — it is called on every gate evaluation). As of July 15, 2026 every limited route uses a route-specific prefixed key (`feedback-notify:`, `mfa-enroll:`, `mfa-recovery-gen:`, `mfa-recovery-redeem:`, `user-email:`, `set-active:`, `security-log:`) so per-IP buckets cannot collide.
 - Labs RLS policies must use JWT claims only — never profiles subquery
 - Super admins must not access /dashboard — /super-admin only
 - Org admins have no lab_id — never scope to inventory queries
@@ -1905,14 +1999,14 @@ Allowlist for open-to-bench (NEVER use blocklist):
 - Everything else → BLOCKED
 
 ### Software Validation Plan
-- Document: docs/software-validation-plan.md (BIM-SVP-001 v1.1 — COMPLETE)
+- Document: docs/software-validation-plan.md (BIM-SVP-001 v1.2 — COMPLETE)
 - Covers: intended use, SDLC, validation strategy, known limits
 - Classification: NOT a medical device
 
 ### Traceability Matrix
 - Document: docs/traceability-matrix.md
 - Maps: Requirement → Feature → Code → Test → Status
-- 10 requirements seeded
+- 11 requirements seeded (REQ-011 user deactivation added July 15, 2026)
 
 - Break-glass emergency recovery: docs/break-glass-runbook.md
 

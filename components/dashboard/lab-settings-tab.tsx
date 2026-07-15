@@ -1,11 +1,12 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { Settings, Save, Loader2, ShieldAlert, Package, Clock, AlertTriangle, LayoutDashboard, Users, ShieldCheck, User as UserIcon, Shield, KeyRound, Pencil, FileClock } from "lucide-react"
+import { Settings, Save, Loader2, ShieldAlert, Package, Clock, AlertTriangle, LayoutDashboard, Users, ShieldCheck, User as UserIcon, Shield, KeyRound, Pencil, FileClock, X } from "lucide-react"
 import {
   LabSettings, TechDashboardWidget, fetchLabSettings, updateLabSettings,
   LabProfile, fetchLabProfiles, updateUserRole, resolveCurrentUserLabId,
 } from "@/lib/inventory-utils"
+import { setUserActiveStatus, setUserActiveErrorMessage } from "@/lib/set-user-active"
 import { supabase } from "@/lib/supabase"
 import { useToast } from "@/hooks/use-toast"
 import { TIMEZONES } from "@/lib/timezones"
@@ -37,6 +38,8 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
   const [profiles, setProfiles] = useState<LabProfile[]>([])
   const [profilesLoading, setProfilesLoading] = useState(false)
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null)
+  const [deactivateTarget, setDeactivateTarget] = useState<LabProfile | null>(null)
+  const [activeBusyId, setActiveBusyId] = useState<string | null>(null)
 
   const loadProfiles = useCallback(async () => {
     setProfilesLoading(true)
@@ -120,6 +123,60 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
       })
     }
   }
+
+  const handleSetActive = useCallback(async (target: LabProfile, nextActive: boolean) => {
+    setActiveBusyId(target.id)
+    const result = await setUserActiveStatus(target.id, nextActive)
+    setActiveBusyId(null)
+
+    if (result.ok) {
+      setDeactivateTarget(null)
+      toast({
+        title: nextActive ? "Member reactivated" : "Member deactivated",
+        description: `${target.fullName || "User"} ${nextActive ? "can sign in again." : "has lost access to this lab."}`,
+      })
+      await loadProfiles()
+      return
+    }
+
+    if (result.errorCode === "already_in_state") {
+      // State drifted since load — silently refresh the list.
+      setDeactivateTarget(null)
+      await loadProfiles()
+      return
+    }
+
+    toast({
+      variant: "destructive",
+      title: "Could not update member",
+      description: setUserActiveErrorMessage(result.errorCode),
+    })
+  }, [toast, loadProfiles])
+
+  // Deactivate confirm modal: Enter submits (textarea-guarded), ESC closes,
+  // Android back closes via pushState/popstate (established modal conventions).
+  useEffect(() => {
+    if (!deactivateTarget) return
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDeactivateTarget(null)
+    }
+    const handleEnter = (e: KeyboardEvent) => {
+      if (e.key === "Enter" && document.activeElement?.tagName !== "TEXTAREA") {
+        e.preventDefault()
+        void handleSetActive(deactivateTarget, false)
+      }
+    }
+    window.history.pushState(null, "", window.location.href)
+    const handlePopState = () => setDeactivateTarget(null)
+    document.addEventListener("keydown", handleEsc)
+    document.addEventListener("keydown", handleEnter)
+    window.addEventListener("popstate", handlePopState)
+    return () => {
+      document.removeEventListener("keydown", handleEsc)
+      document.removeEventListener("keydown", handleEnter)
+      window.removeEventListener("popstate", handlePopState)
+    }
+  }, [deactivateTarget, handleSetActive])
 
   const isDirty =
     form.lowStockThreshold !== labSettings.lowStockThreshold ||
@@ -566,7 +623,14 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
                 No registered users found.
               </div>
             ) : (
-              profiles.map(p => (
+              profiles.map(p => {
+                // fetchLabProfiles filters out super_admin rows, so no
+                // deactivate control can ever render for a super_admin here.
+                const otherActiveManagers = profiles.filter(
+                  x => x.role === "manager" && x.isActive && x.id !== p.id
+                ).length
+                const lastAdminBlocked = p.role === "manager" && p.isActive && otherActiveManagers === 0
+                return (
                 <div key={p.id} className="grid grid-cols-[2fr_1.3fr] items-center px-6 py-4 border-t border-border/50 text-sm hover:bg-muted/20 transition-colors">
                   <div className="flex items-center gap-3 min-w-0">
                     <div className={`size-8 rounded-xl flex items-center justify-center text-[11px] font-black shrink-0 ${
@@ -585,10 +649,18 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
                       ) : (
                         <UserIcon className="size-3.5 text-muted-foreground shrink-0" />
                       )}
+                      {!p.isActive ? (
+                        <span
+                          title={p.deactivatedAt ? `Deactivated ${new Date(p.deactivatedAt).toLocaleDateString()}` : undefined}
+                          className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-500/15 text-zinc-600 dark:text-zinc-400 shrink-0"
+                        >
+                          Deactivated
+                        </span>
+                      ) : null}
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <select
                       value={p.role}
                       onChange={e => handleRoleChange(p.id, e.target.value as "manager" | "technician")}
@@ -601,9 +673,37 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
                       <option value="manager">Manager</option>
                     </select>
                     {updatingUserId === p.id && <Loader2 className="size-3.5 text-muted-foreground animate-spin" />}
+                    {p.isActive ? (
+                      <div className="flex flex-col gap-1">
+                        <button
+                          type="button"
+                          disabled={activeBusyId === p.id || lastAdminBlocked}
+                          onClick={() => setDeactivateTarget(p)}
+                          className="h-9 px-3 rounded-lg border border-destructive/40 text-destructive text-xs font-bold hover:bg-destructive/10 disabled:opacity-50 disabled:pointer-events-none"
+                        >
+                          Deactivate
+                        </button>
+                        {lastAdminBlocked ? (
+                          <p className="text-[10px] text-muted-foreground leading-tight max-w-[180px]">
+                            Last active manager — another admin must exist first.
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={activeBusyId === p.id}
+                        onClick={() => void handleSetActive(p, true)}
+                        className="h-9 px-3 rounded-lg bg-primary/10 text-primary text-xs font-bold hover:bg-primary/15 disabled:opacity-50 inline-flex items-center gap-1.5"
+                      >
+                        {activeBusyId === p.id ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                        Reactivate
+                      </button>
+                    )}
                   </div>
                 </div>
-              ))
+                )
+              })
             )}
           </div>
         </div>
@@ -636,6 +736,49 @@ export default function LabSettingsTab({ labSettings, refreshData, userRole }: L
           </button>
         </div>
       )}
+
+      {/* ── Deactivate Confirm Modal ── */}
+      {deactivateTarget ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-md p-4">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-card shadow-2xl overflow-hidden">
+            <div className="flex justify-between items-center px-6 py-4 border-b border-border bg-muted/30">
+              <h4 className="font-bold text-lg text-foreground">Deactivate Member</h4>
+              <button
+                type="button"
+                onClick={() => setDeactivateTarget(null)}
+                className="p-2 rounded-full hover:bg-muted text-muted-foreground"
+                aria-label="Close"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                Deactivate <span className="font-bold text-foreground">{deactivateTarget.fullName || "this member"}</span>?
+                They will lose all access immediately. This is reversible.
+              </p>
+            </div>
+            <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 sm:gap-3 px-6 py-4 border-t border-border bg-muted/20">
+              <button
+                type="button"
+                onClick={() => setDeactivateTarget(null)}
+                className="h-11 px-5 rounded-xl border border-border bg-background font-bold text-sm text-muted-foreground hover:bg-muted"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={activeBusyId === deactivateTarget.id}
+                onClick={() => void handleSetActive(deactivateTarget, false)}
+                className="h-11 px-6 rounded-xl bg-destructive text-destructive-foreground font-bold text-sm shadow-sm hover:opacity-90 disabled:opacity-50 inline-flex items-center justify-center gap-2"
+              >
+                {activeBusyId === deactivateTarget.id ? <Loader2 className="size-4 animate-spin" /> : null}
+                Deactivate
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
