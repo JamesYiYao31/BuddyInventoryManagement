@@ -5,7 +5,7 @@ import { setUserRole, setUserRoleErrorMessage } from "./set-user-role"
 
 export { getEarliestExpiry }
 
-export type SidebarPage = "dashboard" | "inventory" | "lotinuse" | "requests" | "activitylog" | "validation" | "analytics" | "labsharing" | "settings"
+export type SidebarPage = "dashboard" | "inventory" | "lotinuse" | "requests" | "activitylog" | "securitylog" | "validation" | "analytics" | "labsharing" | "settings"
 export type InventoryStatus = "In Storage" | "Low Stock" | "Expiring Soon" | "Expired" | "Watchlist"
 
 /** Single lowest-trackable count. Legacy DB rows (boxes × units) are normalized when reading. */
@@ -1248,6 +1248,133 @@ export function formatActivityLogTimestamp(
       .pop() ?? tz
   const time = `${timeBase} ${tzAbbr}`
   return { date, time }
+}
+
+/** Live security_logs.event_type values → human labels (never render raw enums as primary text). */
+export const SECURITY_EVENT_TYPES = {
+  login: "Login",
+  logout: "Logout",
+  recovery_codes_generated: "Recovery Codes Generated",
+  recovery_code_redeemed: "Recovery Code Redeemed",
+  user_deactivated: "User Deactivated",
+  user_reactivated: "User Reactivated",
+  mfa_factor_enrolled: "MFA Factor Enrolled",
+  mfa_factor_replaced: "MFA Factor Replaced",
+  role_changed: "Role Changed",
+} as const
+
+export type SecurityEventType = keyof typeof SECURITY_EVENT_TYPES
+
+export const SECURITY_EVENT_TYPE_KEYS = Object.keys(
+  SECURITY_EVENT_TYPES
+) as SecurityEventType[]
+
+export function securityEventLabel(eventType: string): string {
+  return (
+    SECURITY_EVENT_TYPES[eventType as SecurityEventType] ??
+    eventType.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+  )
+}
+
+export interface SecurityLogEntry {
+  id: string
+  createdAt: string
+  date: string
+  time: string
+  user: string
+  userInitials: string
+  userRole: string
+  eventType: string
+  outcome: string
+  details: string
+  labId: string | null
+  ipAddress: string | null
+}
+
+/**
+ * Fetches security_logs for the current session.
+ *
+ * WHY no resolveCurrentUserLabId() / null-lab early-return / .eq("lab_id"):
+ * super_admin has lab_id NULL and must receive ALL rows (including null-lab).
+ * org_admin and manager are scoped by RLS (security_logs_select_scoped).
+ * An app-level lab gate would incorrectly empty the super_admin viewer.
+ */
+export const fetchSecurityLogsFromSupabase = async (
+  timezone: string = "UTC"
+): Promise<SecurityLogEntry[]> => {
+  const tz = timezone || "UTC"
+
+  const { data, error } = await supabase
+    .from("security_logs")
+    .select(
+      "id, created_at, user_name, user_initials, user_role, event_type, outcome, details, lab_id, ip_address"
+    )
+    .order("created_at", { ascending: false })
+
+  if (error) {
+    console.error(error)
+    return []
+  }
+
+  return (data || []).map((log: any) => {
+    const { date, time } = formatActivityLogTimestamp(log.created_at, tz)
+    return {
+      id: log.id,
+      createdAt: log.created_at,
+      date,
+      time,
+      user: log.user_name,
+      userInitials: log.user_initials,
+      userRole: log.user_role,
+      eventType: log.event_type,
+      outcome: log.outcome,
+      details: log.details ?? "",
+      labId: log.lab_id ?? null,
+      ipAddress: log.ip_address ?? null,
+    }
+  })
+}
+
+export function filterSecurityLogs(
+  logs: SecurityLogEntry[],
+  opts: {
+    searchQuery: string
+    selectedEvents: Set<string>
+    userFilter: string
+    dateStart: string
+    dateEnd: string
+  }
+): SecurityLogEntry[] {
+  const query = opts.searchQuery.toLowerCase().trim()
+  return logs.filter((log) => {
+    const eventLabel = securityEventLabel(log.eventType).toLowerCase()
+    const matchSearch =
+      !query ||
+      (log.user || "").toLowerCase().includes(query) ||
+      (log.details || "").toLowerCase().includes(query) ||
+      eventLabel.includes(query) ||
+      (log.eventType || "").toLowerCase().includes(query)
+
+    const matchEvent =
+      opts.selectedEvents.size === 0 || opts.selectedEvents.has(log.eventType)
+    const matchUser = opts.userFilter === "all" || log.user === opts.userFilter
+
+    let matchDate = true
+    if (opts.dateStart || opts.dateEnd) {
+      const logDate = new Date(log.date)
+      logDate.setHours(0, 0, 0, 0)
+      if (opts.dateStart) {
+        const start = new Date(opts.dateStart + "T00:00:00")
+        if (logDate < start) matchDate = false
+      }
+      if (opts.dateEnd) {
+        const end = new Date(opts.dateEnd + "T00:00:00")
+        if (logDate > end) matchDate = false
+      }
+    }
+
+    return matchSearch && matchEvent && matchUser && matchDate
+  })
 }
 
 export const fetchLogsFromSupabase = async (): Promise<ActivityLogEntry[]> => {

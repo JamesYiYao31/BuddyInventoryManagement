@@ -19,6 +19,7 @@ import {
   CreditCard,
   Settings,
   LogOut,
+  ShieldAlert,
 } from "lucide-react"
 import type { User } from "@supabase/supabase-js"
 import { supabase } from "@/lib/supabase"
@@ -26,6 +27,7 @@ import { voluntarySignOut, deactivatedSignOut } from "@/lib/active-session"
 import { resolveMfaGateRedirect } from "@/lib/mfa-gate"
 import { recordSecurityEvent } from "@/lib/security-log"
 import { ProfileSettingsDialog } from "@/components/dashboard/profile-settings-dialog"
+import { SecurityLogPanel } from "@/components/dashboard/security-log-panel"
 
 type OrganizationRow = {
   id: string
@@ -1278,6 +1280,32 @@ export default function SuperAdminPage() {
               ))
             )}
           </div>
+        </section>
+
+        {/* Section 4 — Security Log (global; RLS returns all rows for super_admin) */}
+        <section className="rounded-2xl border border-border bg-card p-8 shadow-sm space-y-6">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-primary/10">
+              <ShieldAlert className="size-5 text-primary" aria-hidden />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold">Security Log</h2>
+              <p className="text-xs text-muted-foreground">
+                Global access-control trail — all labs and null-lab (system) events.
+              </p>
+            </div>
+          </div>
+          <SecurityLogPanel
+            timezone="UTC"
+            showLab
+            labNamesById={Object.fromEntries(labs.map((l) => [l.id, l.name]))}
+            currentUserName={
+              authUser?.user_metadata?.full_name ||
+              authUser?.email?.split("@")[0] ||
+              "Super Admin"
+            }
+            currentUserRole="super_admin"
+          />
         </section>
       </main>
     </div>

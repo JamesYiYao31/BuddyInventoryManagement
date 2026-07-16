@@ -12,6 +12,7 @@ import {
   Users,
   X,
   Settings,
+  ShieldAlert,
 } from "lucide-react"
 import type { User } from "@supabase/supabase-js"
 import { supabase } from "@/lib/supabase"
@@ -26,6 +27,7 @@ import { recordSecurityEvent } from "@/lib/security-log"
 import { setUserActiveStatus, setUserActiveErrorMessage } from "@/lib/set-user-active"
 import { setUserRole, setUserRoleErrorMessage } from "@/lib/set-user-role"
 import { ProfileSettingsDialog } from "@/components/dashboard/profile-settings-dialog"
+import { SecurityLogPanel } from "@/components/dashboard/security-log-panel"
 
 type LabRow = {
   id: string
@@ -774,6 +776,29 @@ export default function OrgAdminPage() {
               })}
             </div>
           )}
+        </section>
+
+        <section className="space-y-4">
+          <div className="flex items-center gap-2">
+            <ShieldAlert className="size-5 text-primary shrink-0" aria-hidden />
+            <h2 className="text-base font-bold">Security Log</h2>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Access-control events for labs in this organization. Scoped by RLS to your org&apos;s labs.
+          </p>
+          <div className="rounded-2xl border border-border bg-card p-4 sm:p-6 shadow-sm">
+            <SecurityLogPanel
+              timezone="UTC"
+              showLab={labs.length > 1}
+              labNamesById={Object.fromEntries(labs.map((l) => [l.id, l.name]))}
+              currentUserName={
+                authUser?.user_metadata?.full_name ||
+                authUser?.email?.split("@")[0] ||
+                "Org Admin"
+              }
+              currentUserRole="org_admin"
+            />
+          </div>
         </section>
       </main>
 

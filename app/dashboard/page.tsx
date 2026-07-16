@@ -18,8 +18,10 @@ import { recordSecurityEvent } from "@/lib/security-log"
 import { 
   InventoryGroup, LabSettings, SidebarPage, daysUntilExpiry, 
   getEarliestExpiry, LotInUseEntry, ReorderRequest, ActivityLogEntry,
+  SecurityLogEntry, SECURITY_EVENT_TYPE_KEYS, SECURITY_EVENT_TYPES,
+  securityEventLabel, filterSecurityLogs,
   fetchInventoryFromSupabase, fetchLogsFromSupabase, fetchActiveLotsFromSupabase,
-  fetchLabSettings, getLotTotalCount,
+  fetchSecurityLogsFromSupabase, fetchLabSettings, getLotTotalCount,
   getLabCurrentDateStr, ACTION_STYLES, resolveCurrentUserLabId, fetchLabName,
 } from "@/lib/inventory-utils"
 
@@ -31,6 +33,7 @@ import InventoryTab from "@/components/dashboard/inventory-table"
 import LotInUseTab from "@/components/dashboard/lot-in-use-table"
 import RequestsTab from "@/components/dashboard/requests-table"
 import ActivityLogTab from "@/components/dashboard/activity-log-table"
+import SecurityLogTable from "@/components/dashboard/security-log-table"
 import AnalyticsTab from "@/components/dashboard/analytics-tab"
 import LabSharingTab from "@/components/dashboard/lab-sharing-tab"
 import LabSettingsTab from "@/components/dashboard/lab-settings-tab"
@@ -220,6 +223,7 @@ const VALID_SIDEBAR_PAGES = new Set<SidebarPage>([
   "lotinuse",
   "requests",
   "activitylog",
+  "securitylog",
   "validation",
   "analytics",
   "labsharing",
@@ -259,6 +263,7 @@ function DashboardPageContent() {
   const [inventory, setInventory] = useState<InventoryGroup[]>([])
   const [requests, setRequests] = useState<ReorderRequest[]>([])
   const [activityLogs, setActivityLogs] = useState<ActivityLogEntry[]>([])
+  const [securityLogs, setSecurityLogs] = useState<SecurityLogEntry[]>([])
   const [lotsInUse, setLotsInUse] = useState<LotInUseEntry[]>([]) 
   const [labSettings, setLabSettings] = useState<LabSettings>({
     lowStockThreshold: 5,
@@ -288,6 +293,10 @@ function DashboardPageContent() {
   const [logUserFilter, setLogUserFilter] = useState("all")
   const [logDateStart, setLogDateStart] = useState("")
   const [logDateEnd, setLogDateEnd] = useState("")
+  const [selectedSecurityEvents, setSelectedSecurityEvents] = useState<Set<string>>(new Set())
+  const [securityUserFilter, setSecurityUserFilter] = useState("all")
+  const [securityDateStart, setSecurityDateStart] = useState("")
+  const [securityDateEnd, setSecurityDateEnd] = useState("")
 
   // Resolve the authenticated user's display name — matches the header's logic
   // so that activity-log entries can be filtered by the current user.
@@ -364,15 +373,17 @@ function DashboardPageContent() {
 
   const refreshData = useCallback(async () => {
     try {
-      const [invData, logData, activeData, settings, resolvedLabName] = await Promise.all([
+      const settings = await fetchLabSettings()
+      const [invData, logData, activeData, resolvedLabName, secData] = await Promise.all([
         fetchInventoryFromSupabase(),
         fetchLogsFromSupabase(),
         fetchActiveLotsFromSupabase(),
-        fetchLabSettings(),
         fetchLabName(),
+        fetchSecurityLogsFromSupabase(settings.labTimezone || "UTC"),
       ])
       setLabSettings(settings)
       setLabName(resolvedLabName)
+      setSecurityLogs(secData)
 
       // Fetch Requests and map snake_case to camelCase
       const labId = await resolveCurrentUserLabId()
@@ -667,7 +678,16 @@ function DashboardPageContent() {
     return matchSearch && matchItem && matchAction && matchUser && matchDate
   })
 
+  const filteredSecurityLogs = filterSecurityLogs(securityLogs, {
+    searchQuery,
+    selectedEvents: selectedSecurityEvents,
+    userFilter: securityUserFilter,
+    dateStart: securityDateStart,
+    dateEnd: securityDateEnd,
+  })
+
   const allLogUsers = Array.from(new Set(activityLogs.map(l => l.user).filter(Boolean))).sort()
+  const allSecurityLogUsers = Array.from(new Set(securityLogs.map(l => l.user).filter(Boolean))).sort()
 
   const allItemNames = Array.from(new Set([
     ...inventory.map(g => g.name).filter(Boolean), 
@@ -969,7 +989,7 @@ function DashboardPageContent() {
                 {activePage === "settings" && <LabSettingsTab labSettings={labSettings} refreshData={refreshData} userRole={userRole} />}
                 {activePage === "validation" && userRole === "manager" && <ValidationTab userRole={userRole} refreshData={refreshData} />}
 
-                {["inventory", "lotinuse", "requests", "activitylog"].includes(activePage) && (
+                {["inventory", "lotinuse", "requests", "activitylog", "securitylog"].includes(activePage) && (
                   <div className="flex gap-8 items-start overflow-x-hidden print:block">
                     <div className="w-full min-w-0 lg:flex-1 print:w-full">
                       {activePage === "inventory" && <InventoryTab inventory={inventory} sortedFlatInventory={sortedFlatInventory} labSettings={labSettings} refreshData={refreshData} userRole={userRole} requests={requests} />}
@@ -996,6 +1016,25 @@ function DashboardPageContent() {
                           <ActivityLogTab logs={filteredLogs} currentUserName={currentUserName} currentUserRole={userRole} labSettings={labSettings} filterUser={logUserFilter} filterAction={selectedActions.size > 0 ? Array.from(selectedActions).join(", ") : undefined} filterDateStart={logDateStart} filterDateEnd={logDateEnd} labName={labName} />
                         </div>
                       )}
+                      {activePage === "securitylog" && userRole === "manager" && (
+                        <SecurityLogTable
+                          logs={filteredSecurityLogs}
+                          currentUserName={currentUserName}
+                          currentUserRole={userRole}
+                          timezone={labSettings.labTimezone || "UTC"}
+                          showLab={false}
+                          filterUser={securityUserFilter}
+                          filterEvent={
+                            selectedSecurityEvents.size > 0
+                              ? Array.from(selectedSecurityEvents)
+                                  .map((k) => securityEventLabel(k))
+                                  .join(", ")
+                              : undefined
+                          }
+                          filterDateStart={securityDateStart}
+                          filterDateEnd={securityDateEnd}
+                        />
+                      )}
                     </div>
                     
                     <div className="relative hidden print:hidden lg:block xl:block">
@@ -1011,9 +1050,19 @@ function DashboardPageContent() {
                       <div className="sticky top-0 rounded-2xl border border-border bg-card p-6 space-y-8 shadow-sm">
                         <div className="space-y-3">
                           <p className="text-[10px] font-bold uppercase text-muted-foreground tracking-widest">Global Search</p>
-                          <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Type lot or item..." className="w-full h-11 px-4 text-sm bg-background border border-input rounded-xl focus:ring-2 focus:ring-primary/20 outline-none transition-all" />
+                          <input
+                            value={searchQuery}
+                            onChange={e => setSearchQuery(e.target.value)}
+                            placeholder={
+                              activePage === "securitylog"
+                                ? "Search user, event, or details"
+                                : "Type lot or item..."
+                            }
+                            className="w-full h-11 px-4 text-sm bg-background border border-input rounded-xl focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                          />
                         </div>
 
+                        {activePage !== "securitylog" && (
                         <div className="space-y-3">
                           <div className="flex items-center justify-between">
                              <p className="text-[10px] font-bold uppercase text-muted-foreground tracking-widest">Filter Items</p>
@@ -1032,6 +1081,7 @@ function DashboardPageContent() {
                             ))}
                           </div>
                         </div>
+                        )}
 
                         {(activePage === "inventory" || activePage === "lotinuse") && (
                           <div className="space-y-3 pt-6 border-t border-border">
@@ -1122,6 +1172,106 @@ function DashboardPageContent() {
                                   className="w-full text-center px-4 py-2 text-xs font-bold text-primary rounded-xl hover:bg-primary/10 transition-all"
                                 >
                                   Reset Log Filters
+                                </button>
+                              )}
+                            </div>
+                          </>
+                        )}
+
+                        {activePage === "securitylog" && userRole === "manager" && (
+                          <>
+                            <div className="space-y-3 pt-6 border-t border-border">
+                              <p className="text-[10px] font-bold uppercase text-muted-foreground tracking-widest flex items-center gap-2"><User className="size-4" /> Filter by User</p>
+                              <select
+                                value={securityUserFilter}
+                                onChange={e => setSecurityUserFilter(e.target.value)}
+                                className="w-full h-10 border border-input bg-background rounded-xl px-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                              >
+                                <option value="all">All Users</option>
+                                {allSecurityLogUsers.map(name => (
+                                  <option key={name} value={name}>{name}</option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="space-y-3 pt-6 border-t border-border">
+                              <div className="flex items-center justify-between">
+                                <p className="text-[10px] font-bold uppercase text-muted-foreground tracking-widest flex items-center gap-2"><Activity className="size-4" /> Filter by Event</p>
+                                {selectedSecurityEvents.size > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedSecurityEvents(new Set())}
+                                    className="text-[10px] text-primary font-bold hover:underline"
+                                  >
+                                    RESET
+                                  </button>
+                                )}
+                              </div>
+                              <div className="space-y-1.5 max-h-52 overflow-y-auto pr-2 custom-scrollbar">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedSecurityEvents(new Set())}
+                                  className={`flex items-center gap-3 w-full px-3 py-2 text-sm rounded-xl transition-all ${selectedSecurityEvents.size === 0 ? "bg-primary/10 text-primary font-bold" : "hover:bg-muted text-muted-foreground"}`}
+                                >
+                                  <div className={`size-4 rounded-md border flex items-center justify-center ${selectedSecurityEvents.size === 0 ? "bg-primary border-primary text-primary-foreground" : "border-border"}`}>
+                                    {selectedSecurityEvents.size === 0 && <CheckCircle2 className="size-3" />}
+                                  </div>
+                                  <span className="truncate">All Events</span>
+                                </button>
+                                {SECURITY_EVENT_TYPE_KEYS.map(eventKey => (
+                                  <button
+                                    type="button"
+                                    key={eventKey}
+                                    onClick={() => {
+                                      const next = new Set(selectedSecurityEvents)
+                                      if (next.has(eventKey)) next.delete(eventKey); else next.add(eventKey)
+                                      setSelectedSecurityEvents(next)
+                                    }}
+                                    className={`flex items-center gap-3 w-full px-3 py-2 text-sm rounded-xl transition-all ${selectedSecurityEvents.has(eventKey) ? "bg-primary/10 text-primary font-bold" : "hover:bg-muted text-muted-foreground"}`}
+                                  >
+                                    <div className={`size-4 rounded-md border flex items-center justify-center ${selectedSecurityEvents.has(eventKey) ? "bg-primary border-primary text-primary-foreground" : "border-border"}`}>
+                                      {selectedSecurityEvents.has(eventKey) && <CheckCircle2 className="size-3" />}
+                                    </div>
+                                    <span className="truncate">{SECURITY_EVENT_TYPES[eventKey]}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="space-y-3 pt-6 border-t border-border">
+                              <p className="text-[10px] font-bold uppercase text-muted-foreground tracking-widest flex items-center gap-2"><CalendarDays className="size-4" /> Date Range</p>
+                              <div className="space-y-2">
+                                <div className="space-y-1">
+                                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest ml-1">Start Date</label>
+                                  <input
+                                    type="date"
+                                    value={securityDateStart}
+                                    onChange={e => setSecurityDateStart(e.target.value)}
+                                    className="w-full h-10 border border-input bg-background rounded-xl px-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest ml-1">End Date</label>
+                                  <input
+                                    type="date"
+                                    value={securityDateEnd}
+                                    onChange={e => setSecurityDateEnd(e.target.value)}
+                                    className="w-full h-10 border border-input bg-background rounded-xl px-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                                  />
+                                </div>
+                              </div>
+                              {(securityUserFilter !== "all" || securityDateStart || securityDateEnd || selectedSecurityEvents.size > 0) && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSecurityUserFilter("all")
+                                    setSecurityDateStart("")
+                                    setSecurityDateEnd("")
+                                    setSelectedSecurityEvents(new Set())
+                                  }}
+                                  className="w-full text-center px-4 py-2 text-xs font-bold text-primary rounded-xl hover:bg-primary/10 transition-all"
+                                >
+                                  Reset Security Filters
                                 </button>
                               )}
                             </div>

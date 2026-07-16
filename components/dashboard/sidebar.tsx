@@ -13,6 +13,7 @@ import {
   Network,
   Shield,
   ShieldCheck,
+  ShieldAlert,
 } from "lucide-react"
 import { SidebarPage } from "@/lib/inventory-utils"
 import Image from "next/image"
@@ -35,6 +36,7 @@ export function DashboardSidebar({ activePage, setActivePage, isMobileOpen, onMo
     { id: "requests", label: "Requests", icon: ClipboardList },
     { id: "activitylog", label: "Activity Log", icon: Activity },
     ...(userRole === "manager" ? [{ id: "validation", label: "Validation & COA", icon: ShieldCheck }] : []),
+    ...(userRole === "manager" ? [{ id: "securitylog", label: "Security Log", icon: ShieldAlert }] : []),
     { id: "analytics", label: "Analytics", icon: BarChart3 },
     { id: "labsharing", label: "Lab Sharing", icon: Network },
     { id: "settings", label: "Settings", icon: Settings },
