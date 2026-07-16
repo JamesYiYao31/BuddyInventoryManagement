@@ -539,7 +539,7 @@ function DashboardPageContent() {
       // Check if user profile still exists and lab isn't archived
       const { data: profile } = await supabase
         .from("profiles")
-        .select("lab_id, role")
+        .select("lab_id, role, is_active")
         .eq("id", session.user.id)
         .single()
 
@@ -574,6 +574,11 @@ function DashboardPageContent() {
           )
           return
         }
+      }
+
+      if (profile?.is_active === false) {
+        await deactivatedSignOut(router, session.user.id)
+        return
       }
 
       const activeOk = await verifyActiveSessionForUser(session.user.id)

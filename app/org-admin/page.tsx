@@ -282,7 +282,7 @@ export default function OrgAdminPage() {
 
       const { data: profile } = await supabase
         .from("profiles")
-        .select("role, org_id")
+        .select("role, org_id, is_active")
         .eq("id", session.user.id)
         .maybeSingle()
 
@@ -304,6 +304,11 @@ export default function OrgAdminPage() {
 
       if (profile.role !== "org_admin" || !profile.org_id) {
         router.replace("/dashboard")
+        return
+      }
+
+      if (profile?.is_active === false) {
+        await deactivatedSignOut(router, session.user.id)
         return
       }
 
