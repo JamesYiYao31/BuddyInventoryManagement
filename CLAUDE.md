@@ -2,7 +2,125 @@
 
 ## Recent Sessions
 
-### Session: July 15, 2026 (latest) — Pre-Stripe Audit + MFA/Role Security Events + LIVE PRIVILEGE-ESCALATION FIX
+### Session: July 16, 2026 (latest) — Security-Log Viewer (Batch 2 Phase 2) + Eviction-Message Fix — BOTH BATCHES CLOSED
+- **Headline:** Batch 2 Phase 2 (security-log viewer, 3 surfaces) built and
+  verified; deactivation eviction-message bug fixed; full production
+  regression 10/10. Batches 1 (hygiene) and 2 (MFA events, privilege-
+  escalation fix, role governance, viewer) are now FORMALLY COMPLETE and
+  verified as a coherent system on production.
+- **Context:** Continuation of the July 15 session (pre-Stripe audit +
+  privilege-escalation fix). This session closed the one remaining Batch 2
+  item (the viewer) plus one bug found during its testing. Week 3 (Stripe)
+  deferred until user chose to finish both batches first.
+
+- **Batch 2 Phase 2 — SECURITY-LOG VIEWER (SHIPPED, production-verified):**
+  Read-only viewer over security_logs, mirroring the activity-log pattern,
+  with full filtering (search, event-type multi-select, user, date range).
+  - **Placement (three surfaces):** super_admin → global "Security Log"
+    SECTION on the /super-admin main page (all rows incl lab_id NULL);
+    org_admin → SECTION on the /org-admin single-page layout (org-scoped);
+    manager → manager-only SIDEBAR TAB on the dashboard (Validation gating
+    pattern, hidden from technicians). Manager tab uses the right-panel
+    filter LAYOUT group (["inventory","lotinuse","requests","activitylog",
+    "securitylog"]), NOT the solo Validation mount — Validation has no
+    filters, the viewer does.
+  - **Org_admin RLS read-gap FIXED** (database-scripts/security-logs-viewer-rls.sql):
+    the old security_logs_select_scoped shared a manager/org_admin branch
+    checking lab_id = get_my_lab_id(). Org_admin JWT lab_id is NULL, so
+    NULL = NULL → unknown → they matched NOTHING (not even own events).
+    New policy splits the branch: manager → lab_id = get_my_lab_id();
+    org_admin → lab_id IN (SELECT id FROM labs WHERE org_id = get_my_org_id()).
+    Org_admin does NOT see lab_id NULL rows (those stay super_admin-only,
+    per existing rule). super_admin branch unchanged. Restrictive
+    require_active_user policy untouched (deactivated users read nothing).
+  - **Fetch divergence from activity-log (CRITICAL):**
+    fetchSecurityLogsFromSupabase deliberately does NOT call
+    resolveCurrentUserLabId() and does NOT early-return on null lab_id —
+    super_admin has null lab_id and must receive ALL rows. It relies purely
+    on RLS to scope; no .eq("lab_id"). (The activity-log fetch's null-lab
+    early-return would have shown super_admin an EMPTY log.)
+  - **Shared components:** security-log-table.tsx (date-grouped timeline +
+    print, columns Time/User/Event/Outcome/Details/IP, +Lab when showLab),
+    security-log-filters.tsx, security-log-panel.tsx (self-contained
+    org/super viewer). SECURITY_EVENT_TYPES label map (snake_case → Title
+    Case) + SecurityLogEntry type live in lib/inventory-utils.ts next to
+    the fetch. formatActivityLogTimestamp reused (lab TZ on dashboard, UTC
+    on super/org).
+  - **Per-role scoping VERIFIED on production:** the invariant holds —
+    super_admin sees ALL rows; manager sees only their lab's rows; the
+    difference between the two equals the null-lab (super_admin-only) row
+    count exactly. Technician sees ZERO and has NO tab.
+
+- **Deactivation eviction-message BUG FIXED** (app/dashboard/page.tsx +
+  app/org-admin/page.tsx):
+  - **Bug:** a user deactivated mid-session while IDLE was correctly evicted
+    but saw "logged in from another device" (session-replaced message)
+    instead of the deactivation banner. Cause: the deactivation RPC deletes
+    the active_sessions row; verifyActiveSessionForUser returns "replaced"
+    for BOTH a missing row (deactivation) and a token mismatch (real device
+    replacement) — it cannot distinguish them. The 30s poll caught the
+    missing row before the mount-only checkSessionAndRole gate, so idle
+    users got the wrong message.
+  - **Fix:** both 30s poll loops now add is_active to their existing profile
+    SELECT and, BEFORE verifyActiveSessionForUser, check
+    `if (profile?.is_active === false) → deactivatedSignOut(router, userId)`.
+    Explicit === false (not falsy) so a transient undefined read can't
+    false-evict. Genuine device replacement (user still is_active=true, row
+    exists with different token) still falls through to "replaced" →
+    sessionReplacedSignOut → amber message. lib/active-session.ts UNCHANGED
+    (verify stays "ok"|"replaced"). deactivatedSignOut still writes NO
+    security event (forced-signout exclusion preserved).
+  - **VERIFIED on production:** idle deactivation → RED "account deactivated"
+    banner; second-device login → AMBER "logged in from another device".
+    Both messages now correct.
+
+- **FULL PRODUCTION REGRESSION — 10/10 (both batches sealed):**
+  (1) technician self-escalation → 403 (July 15 fix holds); (2) viewer
+  per-role scoping invariant correct; (3) idle deactivation → red banner;
+  (4) device replacement → amber; (5) mid-session deactivation cuts data
+  access via RLS instantly; (6) registration produces technician; (7) Edit
+  Role works, role_changed logged with ACTOR attribution; (8) last-manager
+  demotion amber warning fires; (9) all 9 security_logs event types
+  populated (mfa_factor_replaced confirmed after a clean regenerate);
+  (10) normal users unaffected (dashboards load, bell no eternal spinner).
+
+- **Parked notes / known properties (so future sessions don't misread as bugs):**
+  - **Eviction TIMING is by-design, NOT a lag bug:** RLS cuts a deactivated
+    user's DATA access INSTANTLY (queries return empty on flag flip); the
+    SESSION eviction (bounce to /login) rides the 30s poll, so an idle user
+    may sit on an empty screen up to 30s before eviction. This is the
+    Decision-2 tradeoff (reuse the existing poll, no new push mechanism).
+    Only a bug if they could still READ DATA for 30s — they cannot.
+  - **IP column display:** renders raw values; ::1 appears for
+    localhost/dev-origin events (IPv6 localhost), real IPs for production
+    events. Cosmetic only — could render "—" for null and label ::1 as
+    "localhost". Not a bug; low priority.
+  - **mfa_factor_replaced** now populated (was empty until a clean regenerate;
+    earlier abandon-and-resume regenerations logged as enrolled because the
+    ?mode=replace flag doesn't survive the abandon path — see July 15 notes).
+
+- **Files changed this session (two commits, HEAD 4ca2576):**
+  Viewer — Phase 2a RLS + Phase 2b UI landed together in ONE commit
+  (a5ad19a): database-scripts/security-logs-viewer-rls.sql,
+  lib/inventory-utils.ts, components/dashboard/security-log-table.tsx,
+  components/dashboard/security-log-filters.tsx,
+  components/dashboard/security-log-panel.tsx,
+  components/dashboard/sidebar.tsx, app/dashboard/page.tsx,
+  app/super-admin/page.tsx, app/org-admin/page.tsx.
+  Eviction fix (4ca2576): app/dashboard/page.tsx, app/org-admin/page.tsx
+  (same two files also touched by the viewer commit).
+
+- **Current state:** BOTH BATCHES COMPLETE, production-verified. Batch 1
+  (hygiene, tsc=0) and Batch 2 (MFA events, privilege-escalation fix, role
+  governance + set_user_role RPC, security-log viewer + org_admin RLS fix,
+  eviction-message fix) all shipped. tsc at ZERO. security_logs captures the
+  full access-control lifecycle across 9 event types. Only cosmetic parked
+  items remain (IP display). Week 3 (Stripe) is the next major work.
+  Pre-Stripe architecture questions (from July 15): webhook auth
+  (signature-verified, not bearer), how billing state composes with
+  is_active, org-level billing against zero-org production.
+
+### Session: July 15, 2026 — Pre-Stripe Audit + MFA/Role Security Events + LIVE PRIVILEGE-ESCALATION FIX
 - **Headline:** A full pre-Stripe integrity audit surfaced a CONFIRMED live
   privilege-escalation vulnerability — a technician could promote themselves
   to manager via a direct client-side profiles.update({role}) write (RLS
