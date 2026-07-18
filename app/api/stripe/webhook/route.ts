@@ -4,18 +4,27 @@ import { createAdminClient } from "@/lib/mfa-api-auth"
 
 export const runtime = "nodejs"
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!)
-
 /**
  * Stripe webhook — LOG-ONLY.
  * Signature verification IS authentication. No bearer auth, no Upstash limiter.
  * Observes events into processed_stripe_events; does not touch billing_accounts.
+ *
+ * Stripe client is created inside the handler (not module scope) so Next.js
+ * build-time page-data collection does not require STRIPE_SECRET_KEY.
  */
 export async function POST(req: NextRequest) {
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET
   if (!webhookSecret) {
     console.error(
       "[stripe/webhook] STRIPE_WEBHOOK_SECRET is missing — refusing to verify.",
+    )
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+  }
+
+  const secretKey = process.env.STRIPE_SECRET_KEY
+  if (!secretKey) {
+    console.error(
+      "[stripe/webhook] STRIPE_SECRET_KEY is missing — refusing to verify.",
     )
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
@@ -30,6 +39,7 @@ export async function POST(req: NextRequest) {
 
   let event: Stripe.Event
   try {
+    const stripe = new Stripe(secretKey)
     event = stripe.webhooks.constructEvent(body, signature, webhookSecret)
   } catch {
     return NextResponse.json({ error: "Invalid webhook signature." }, { status: 400 })
