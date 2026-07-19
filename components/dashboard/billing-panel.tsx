@@ -27,14 +27,42 @@ function formatUsd(amount: number): string {
   return amount.toLocaleString("en-US")
 }
 
+function formatRenewalDate(iso: string | null | undefined): string | null {
+  if (!iso) return null
+  try {
+    return new Date(iso).toLocaleDateString(undefined, { dateStyle: "medium" })
+  } catch {
+    return null
+  }
+}
+
 function statusBadgeClass(status: string): string {
   switch (status) {
     case "active":
       return "bg-green-500/15 text-green-800 dark:text-green-400"
     case "trialing":
       return "bg-amber-500/15 text-amber-800 dark:text-amber-400"
+    case "past_due":
+      return "bg-amber-500/15 text-amber-800 dark:text-amber-400"
+    case "suspended":
+      return "bg-red-500/15 text-red-800 dark:text-red-400"
     default:
       return "bg-zinc-500/15 text-zinc-600 dark:text-zinc-400"
+  }
+}
+
+function statusLabel(status: string): string {
+  switch (status) {
+    case "active":
+      return "Active"
+    case "past_due":
+      return "Payment issue"
+    case "suspended":
+      return "Suspended"
+    case "trialing":
+      return "Trialing"
+    default:
+      return status
   }
 }
 
@@ -42,18 +70,24 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
   const [loading, setLoading] = useState(true)
   const [billingStatus, setBillingStatus] = useState<string>("trialing")
   const [trialEndsAt, setTrialEndsAt] = useState<string | null>(null)
+  const [currentPeriodEnd, setCurrentPeriodEnd] = useState<string | null>(null)
   const [labCount, setLabCount] = useState(1)
   const [upgradeBusy, setUpgradeBusy] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [checkoutBanner, setCheckoutBanner] = useState<"success" | "cancelled" | null>(
     null,
   )
+  const [activating, setActivating] = useState(false)
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const checkout = params.get("checkout")
-    if (checkout === "success") setCheckoutBanner("success")
-    else if (checkout === "cancelled") setCheckoutBanner("cancelled")
+    if (checkout === "success") {
+      setCheckoutBanner("success")
+      setActivating(true)
+    } else if (checkout === "cancelled") {
+      setCheckoutBanner("cancelled")
+    }
 
     if (checkout === "success" || checkout === "cancelled") {
       params.delete("checkout")
@@ -63,15 +97,17 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
     }
   }, [])
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setErrorMsg(null)
+  const load = useCallback(async (opts?: { quiet?: boolean }) => {
+    if (!opts?.quiet) {
+      setLoading(true)
+      setErrorMsg(null)
+    }
 
     try {
       if (mode === "manager") {
         const labId = await resolveCurrentUserLabId()
         if (!labId) {
-          setErrorMsg("Could not resolve lab context.")
+          if (!opts?.quiet) setErrorMsg("Could not resolve lab context.")
           setLoading(false)
           return
         }
@@ -79,7 +115,7 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
         const [{ data: account }, { data: lab }] = await Promise.all([
           supabase
             .from("billing_accounts")
-            .select("billing_status")
+            .select("billing_status, current_period_end")
             .eq("lab_id", labId)
             .maybeSingle(),
           supabase
@@ -94,13 +130,18 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
             ? account.billing_status
             : "trialing",
         )
+        setCurrentPeriodEnd(
+          typeof account?.current_period_end === "string"
+            ? account.current_period_end
+            : null,
+        )
         setTrialEndsAt(
           typeof lab?.trial_ends_at === "string" ? lab.trial_ends_at : null,
         )
         setLabCount(1)
       } else {
         if (!orgId) {
-          setErrorMsg("Could not resolve organization context.")
+          if (!opts?.quiet) setErrorMsg("Could not resolve organization context.")
           setLoading(false)
           return
         }
@@ -108,7 +149,7 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
         const [{ data: account }, { data: org }, { count }] = await Promise.all([
           supabase
             .from("billing_accounts")
-            .select("billing_status")
+            .select("billing_status, current_period_end")
             .eq("org_id", orgId)
             .maybeSingle(),
           supabase
@@ -128,13 +169,18 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
             ? account.billing_status
             : "trialing",
         )
+        setCurrentPeriodEnd(
+          typeof account?.current_period_end === "string"
+            ? account.current_period_end
+            : null,
+        )
         setTrialEndsAt(
           typeof org?.trial_ends_at === "string" ? org.trial_ends_at : null,
         )
         setLabCount(count ?? 0)
       }
     } catch {
-      setErrorMsg("Could not load billing information.")
+      if (!opts?.quiet) setErrorMsg("Could not load billing information.")
     } finally {
       setLoading(false)
     }
@@ -143,6 +189,18 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
   useEffect(() => {
     void load()
   }, [load])
+
+  // After Checkout success: wait ~3s for webhook, then refetch once.
+  useEffect(() => {
+    if (!activating) return
+    const timer = setTimeout(() => {
+      void (async () => {
+        await load({ quiet: true })
+        setActivating(false)
+      })()
+    }, 3000)
+    return () => clearTimeout(timer)
+  }, [activating, load])
 
   const handleUpgrade = async () => {
     setErrorMsg(null)
@@ -160,13 +218,15 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
 
   const daysLeft = daysUntil(trialEndsAt)
   const monthlyTotal = labCount * 200
-  // Phase 5: past_due (and similar) should open Stripe Billing Portal to
-  // fix the card — not create a second Checkout subscription.
-  const showUpgrade = billingStatus !== "active"
+  const renewalDate = formatRenewalDate(currentPeriodEnd)
+  const isActive = billingStatus === "active"
+  // Phase 5: past_due should open Billing Portal — not a second Checkout.
+  const showUpgrade = !isActive && !activating
+  const showActivatingCta = activating && !isActive
 
   return (
     <div className="space-y-6">
-      {checkoutBanner === "success" ? (
+      {checkoutBanner === "success" && !isActive ? (
         <p
           role="status"
           className="text-sm font-medium rounded-xl border border-green-500/30 bg-green-500/10 text-green-800 dark:text-green-300 px-4 py-3"
@@ -204,9 +264,9 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
           <>
             <div className="flex flex-wrap items-center gap-3">
               <span
-                className={`inline-flex px-2.5 py-1 rounded-full text-xs font-bold capitalize ${statusBadgeClass(billingStatus)}`}
+                className={`inline-flex px-2.5 py-1 rounded-full text-xs font-bold ${statusBadgeClass(billingStatus)}`}
               >
-                {billingStatus}
+                {statusLabel(billingStatus)}
               </span>
               {billingStatus === "trialing" && daysLeft !== null ? (
                 <span className="text-sm text-muted-foreground font-medium">
@@ -215,7 +275,32 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
               ) : null}
             </div>
 
-            {mode === "org_admin" ? (
+            {isActive ? (
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-foreground">
+                  Active · $200/lab/month
+                </p>
+                {renewalDate ? (
+                  <p className="text-xs text-muted-foreground">
+                    Renews {renewalDate}
+                  </p>
+                ) : null}
+                {mode === "org_admin" ? (
+                  <p className="text-xs text-muted-foreground">
+                    {labCount} lab{labCount === 1 ? "" : "s"} × $200 = $
+                    {formatUsd(monthlyTotal)}/month
+                  </p>
+                ) : null}
+              </div>
+            ) : billingStatus === "past_due" ? (
+              <p className="text-sm font-medium text-amber-800 dark:text-amber-400">
+                Payment issue
+              </p>
+            ) : billingStatus === "suspended" ? (
+              <p className="text-sm font-medium text-red-800 dark:text-red-400">
+                Suspended
+              </p>
+            ) : mode === "org_admin" ? (
               <p className="text-sm font-medium text-foreground">
                 {labCount} lab{labCount === 1 ? "" : "s"} × $200 = $
                 {formatUsd(monthlyTotal)}/month
@@ -233,7 +318,16 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
               </p>
             ) : null}
 
-            {showUpgrade ? (
+            {showActivatingCta ? (
+              <button
+                type="button"
+                disabled
+                className="h-11 px-6 rounded-xl border border-border bg-muted/40 text-muted-foreground font-bold text-sm opacity-70 cursor-not-allowed inline-flex items-center justify-center gap-2"
+              >
+                <Loader2 className="size-4 animate-spin" aria-hidden />
+                Payment received — activating…
+              </button>
+            ) : showUpgrade ? (
               <button
                 type="button"
                 disabled={upgradeBusy}
@@ -245,11 +339,7 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
                 ) : null}
                 Upgrade
               </button>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                Your subscription is active.
-              </p>
-            )}
+            ) : null}
           </>
         )}
       </div>

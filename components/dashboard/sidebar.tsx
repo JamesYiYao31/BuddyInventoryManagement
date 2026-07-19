@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
 import {
@@ -16,7 +17,8 @@ import {
   ShieldAlert,
   CreditCard,
 } from "lucide-react"
-import { SidebarPage } from "@/lib/inventory-utils"
+import { SidebarPage, resolveCurrentUserLabId } from "@/lib/inventory-utils"
+import { supabase } from "@/lib/supabase"
 import Image from "next/image"
 
 interface DashboardSidebarProps {
@@ -27,6 +29,108 @@ interface DashboardSidebarProps {
   /** When true, show internal link to the super-admin control panel (never for manager/technician). */
   showSuperAdminLink?: boolean
   userRole?: "manager" | "technician"
+}
+
+function daysUntil(iso: string | null | undefined): number | null {
+  if (!iso) return null
+  const end = new Date(iso)
+  if (Number.isNaN(end.getTime())) return null
+  const ms = end.getTime() - Date.now()
+  return Math.max(0, Math.ceil(ms / (1000 * 60 * 60 * 24)))
+}
+
+function formatRenewalDate(iso: string | null | undefined): string | null {
+  if (!iso) return null
+  try {
+    return new Date(iso).toLocaleDateString(undefined, { dateStyle: "medium" })
+  } catch {
+    return null
+  }
+}
+
+function ManagerLicenseCard() {
+  const [title, setTitle] = useState("Standard plan")
+  const [subtitle, setSubtitle] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+
+    const run = async () => {
+      const labId = await resolveCurrentUserLabId()
+      if (!labId || cancelled) return
+
+      const [{ data: account }, { data: lab }] = await Promise.all([
+        supabase
+          .from("billing_accounts")
+          .select("billing_status, current_period_end")
+          .eq("lab_id", labId)
+          .maybeSingle(),
+        supabase
+          .from("labs")
+          .select("trial_ends_at")
+          .eq("id", labId)
+          .maybeSingle(),
+      ])
+
+      if (cancelled) return
+
+      const status =
+        typeof account?.billing_status === "string"
+          ? account.billing_status
+          : "trialing"
+      const periodEnd =
+        typeof account?.current_period_end === "string"
+          ? account.current_period_end
+          : null
+      const trialEndsAt =
+        typeof lab?.trial_ends_at === "string" ? lab.trial_ends_at : null
+
+      if (status === "active") {
+        setTitle("Standard plan")
+        const renews = formatRenewalDate(periodEnd)
+        setSubtitle(renews ? `Renews ${renews}` : null)
+        return
+      }
+
+      if (status === "past_due") {
+        setTitle("Payment issue")
+        setSubtitle("Payment issue")
+        return
+      }
+
+      if (status === "suspended") {
+        setTitle("Suspended")
+        setSubtitle("Suspended")
+        return
+      }
+
+      // trialing (default when no billing_accounts row)
+      const n = daysUntil(trialEndsAt)
+      setTitle(n !== null ? `Trial · ${n} day${n === 1 ? "" : "s"} left` : "Trial")
+      setSubtitle(
+        n !== null ? `Trial · ${n} day${n === 1 ? "" : "s"} left` : null,
+      )
+    }
+
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  return (
+    <div className="hidden border-t border-border p-4 xl:block">
+      <div className="rounded-2xl bg-muted/50 p-4">
+        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+          Lab License
+        </p>
+        <p className="mt-1 text-sm font-black text-foreground">{title}</p>
+        {subtitle && subtitle !== title ? (
+          <p className="mt-0.5 text-xs text-muted-foreground">{subtitle}</p>
+        ) : null}
+      </div>
+    </div>
+  )
 }
 
 export function DashboardSidebar({ activePage, setActivePage, isMobileOpen, onMobileClose, showSuperAdminLink = false, userRole }: DashboardSidebarProps) {
@@ -93,13 +197,7 @@ export function DashboardSidebar({ activePage, setActivePage, isMobileOpen, onMo
           </>
         ) : null}
       </nav>
-      <div className="hidden border-t border-border p-4 xl:block">
-        <div className="rounded-2xl bg-muted/50 p-4">
-          <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Lab License</p>
-          <p className="mt-1 text-sm font-black text-foreground">Enterprise Plan</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">Valid until Dec 2026</p>
-        </div>
-      </div>
+      {userRole === "manager" ? <ManagerLicenseCard /> : null}
       </aside>
     </>
   )
