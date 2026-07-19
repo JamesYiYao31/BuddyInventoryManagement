@@ -5,7 +5,7 @@ import { setUserRole, setUserRoleErrorMessage } from "./set-user-role"
 
 export { getEarliestExpiry }
 
-export type SidebarPage = "dashboard" | "inventory" | "lotinuse" | "requests" | "activitylog" | "securitylog" | "validation" | "analytics" | "labsharing" | "settings"
+export type SidebarPage = "dashboard" | "inventory" | "lotinuse" | "requests" | "activitylog" | "securitylog" | "billing" | "validation" | "analytics" | "labsharing" | "settings"
 export type InventoryStatus = "In Storage" | "Low Stock" | "Expiring Soon" | "Expired" | "Watchlist"
 
 /** Single lowest-trackable count. Legacy DB rows (boxes × units) are normalized when reading. */

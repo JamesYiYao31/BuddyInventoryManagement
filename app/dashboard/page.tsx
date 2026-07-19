@@ -34,6 +34,7 @@ import LotInUseTab from "@/components/dashboard/lot-in-use-table"
 import RequestsTab from "@/components/dashboard/requests-table"
 import ActivityLogTab from "@/components/dashboard/activity-log-table"
 import SecurityLogTable from "@/components/dashboard/security-log-table"
+import { BillingPanel } from "@/components/dashboard/billing-panel"
 import AnalyticsTab from "@/components/dashboard/analytics-tab"
 import LabSharingTab from "@/components/dashboard/lab-sharing-tab"
 import LabSettingsTab from "@/components/dashboard/lab-settings-tab"
@@ -224,6 +225,7 @@ const VALID_SIDEBAR_PAGES = new Set<SidebarPage>([
   "requests",
   "activitylog",
   "securitylog",
+  "billing",
   "validation",
   "analytics",
   "labsharing",
@@ -249,12 +251,22 @@ const IDLE_TIMEOUT_MS = 10 * 60 * 1000
 const IDLE_WARNING_MS = 2 * 60 * 1000
 const IDLE_BEFORE_WARNING_MS = IDLE_TIMEOUT_MS - IDLE_WARNING_MS
 
+function initialSidebarPage(tabParam: string | null): SidebarPage {
+  if (tabParam && VALID_SIDEBAR_PAGES.has(tabParam as SidebarPage)) {
+    return tabParam as SidebarPage
+  }
+  // Home / Lab Overview tab (product "overview"; sidebar id is "dashboard")
+  return "dashboard"
+}
+
 function DashboardPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   
   // ── 1. STATE ──
-  const [activePage, setActivePage] = useState<SidebarPage>("dashboard")
+  const [activePage, setActivePage] = useState<SidebarPage>(() =>
+    initialSidebarPage(searchParams.get("tab")),
+  )
   const [user, setUser] = useState<any>(null)
   const [userRole, setUserRole] = useState<"manager" | "technician">("technician")
   const [isSuperAdmin, setIsSuperAdmin] = useState(false)
@@ -993,6 +1005,7 @@ function DashboardPageContent() {
                 {activePage === "labsharing" && <LabSharingTab labName={labName} />}
                 {activePage === "settings" && <LabSettingsTab labSettings={labSettings} refreshData={refreshData} userRole={userRole} />}
                 {activePage === "validation" && userRole === "manager" && <ValidationTab userRole={userRole} refreshData={refreshData} />}
+                {activePage === "billing" && userRole === "manager" && <BillingPanel mode="manager" />}
 
                 {["inventory", "lotinuse", "requests", "activitylog", "securitylog"].includes(activePage) && (
                   <div className="flex gap-8 items-start overflow-x-hidden print:block">

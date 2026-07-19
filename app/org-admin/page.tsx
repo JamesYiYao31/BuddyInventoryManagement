@@ -28,6 +28,7 @@ import { setUserActiveStatus, setUserActiveErrorMessage } from "@/lib/set-user-a
 import { setUserRole, setUserRoleErrorMessage } from "@/lib/set-user-role"
 import { ProfileSettingsDialog } from "@/components/dashboard/profile-settings-dialog"
 import { SecurityLogPanel } from "@/components/dashboard/security-log-panel"
+import { BillingPanel } from "@/components/dashboard/billing-panel"
 
 type LabRow = {
   id: string
@@ -781,6 +782,10 @@ export default function OrgAdminPage() {
               })}
             </div>
           )}
+        </section>
+
+        <section className="space-y-4">
+          <BillingPanel mode="org_admin" orgId={orgId} />
         </section>
 
         <section className="space-y-4">

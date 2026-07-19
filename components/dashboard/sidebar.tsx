@@ -14,6 +14,7 @@ import {
   Shield,
   ShieldCheck,
   ShieldAlert,
+  CreditCard,
 } from "lucide-react"
 import { SidebarPage } from "@/lib/inventory-utils"
 import Image from "next/image"
@@ -37,6 +38,7 @@ export function DashboardSidebar({ activePage, setActivePage, isMobileOpen, onMo
     { id: "activitylog", label: "Activity Log", icon: Activity },
     ...(userRole === "manager" ? [{ id: "validation", label: "Validation & COA", icon: ShieldCheck }] : []),
     ...(userRole === "manager" ? [{ id: "securitylog", label: "Security Log", icon: ShieldAlert }] : []),
+    ...(userRole === "manager" ? [{ id: "billing", label: "Billing", icon: CreditCard }] : []),
     { id: "analytics", label: "Analytics", icon: BarChart3 },
     { id: "labsharing", label: "Lab Sharing", icon: Network },
     { id: "settings", label: "Settings", icon: Settings },
