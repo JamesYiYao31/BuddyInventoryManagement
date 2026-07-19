@@ -48,6 +48,16 @@ function formatRenewalDate(iso: string | null | undefined): string | null {
   }
 }
 
+/** Positive whole days remaining until trial end; null if missing or already ended. */
+function daysLeftInTrial(iso: string | null | undefined): number | null {
+  if (!iso) return null
+  const end = new Date(iso)
+  if (Number.isNaN(end.getTime())) return null
+  const ms = end.getTime() - Date.now()
+  if (ms <= 0) return null
+  return Math.ceil(ms / (1000 * 60 * 60 * 24))
+}
+
 function ManagerLicenseCard() {
   const [title, setTitle] = useState("Standard plan")
   const [subtitle, setSubtitle] = useState<string | null>(null)
@@ -133,6 +143,68 @@ function ManagerLicenseCard() {
   )
 }
 
+/** Trial countdown only — no billing_accounts query (technicians must not hit that table). */
+function TechnicianTrialCard() {
+  const [daysLeft, setDaysLeft] = useState<number | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+
+    const run = async () => {
+      const labId = await resolveCurrentUserLabId()
+      if (!labId || cancelled) return
+
+      const { data: lab, error } = await supabase
+        .from("labs")
+        .select("trial_ends_at")
+        .eq("id", labId)
+        .maybeSingle()
+
+      if (cancelled) return
+
+      // Empty row with no transport error → likely silent RLS; leave box hidden.
+      if (!error && !lab) {
+        console.error(
+          "[sidebar] TechnicianTrialCard: labs select returned empty for lab_id=",
+          labId,
+          "(possible silent RLS block — no policy change applied)",
+        )
+        setDaysLeft(null)
+        return
+      }
+
+      if (error || !lab) {
+        setDaysLeft(null)
+        return
+      }
+
+      const trialEndsAt =
+        typeof lab.trial_ends_at === "string" ? lab.trial_ends_at : null
+      setDaysLeft(daysLeftInTrial(trialEndsAt))
+    }
+
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  if (daysLeft === null) return null
+
+  return (
+    <div className="hidden border-t border-border p-4 xl:block">
+      <div className="rounded-2xl bg-muted/50 p-4">
+        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+          Lab License
+        </p>
+        <p className="mt-1 text-sm font-black text-foreground">
+          {daysLeft} day{daysLeft === 1 ? "" : "s"} left
+        </p>
+      </div>
+    </div>
+  )
+}
+
 export function DashboardSidebar({ activePage, setActivePage, isMobileOpen, onMobileClose, showSuperAdminLink = false, userRole }: DashboardSidebarProps) {
   const navItems = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -198,6 +270,7 @@ export function DashboardSidebar({ activePage, setActivePage, isMobileOpen, onMo
         ) : null}
       </nav>
       {userRole === "manager" ? <ManagerLicenseCard /> : null}
+      {userRole === "technician" ? <TechnicianTrialCard /> : null}
       </aside>
     </>
   )
