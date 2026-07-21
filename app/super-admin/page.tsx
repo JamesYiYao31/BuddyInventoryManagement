@@ -45,6 +45,32 @@ type LabRow = {
   is_archived: boolean
   archived_at: string | null
   org_id: string | null
+  trial_ends_at: string | null
+}
+
+type BillingAccountRow = {
+  id: string
+  org_id: string | null
+  lab_id: string | null
+  billing_status: string
+  current_period_end: string | null
+}
+
+type BillingOverviewStatus =
+  | "past_due"
+  | "suspended"
+  | "trial_expired"
+  | "trialing"
+  | "active"
+
+type BillingOverviewRow = {
+  key: string
+  name: string
+  type: "Org" | "Lab"
+  labCount: number
+  status: BillingOverviewStatus
+  dateIso: string | null
+  monthlyUsd: number | null
 }
 
 type InviteRow = {
@@ -117,10 +143,12 @@ export default function SuperAdminPage() {
 
   const [organizations, setOrganizations] = useState<OrganizationRow[]>([])
   const [labs, setLabs] = useState<LabRow[]>([])
+  const [billingAccounts, setBillingAccounts] = useState<BillingAccountRow[]>([])
   const [invites, setInvites] = useState<InviteRow[]>([])
   const [creatorNameById, setCreatorNameById] = useState<Record<string, string>>({})
   const [orgsLoading, setOrgsLoading] = useState(false)
   const [labsLoading, setLabsLoading] = useState(false)
+  const [billingLoading, setBillingLoading] = useState(false)
   const [invitesLoading, setInvitesLoading] = useState(false)
   const [labRowBusyId, setLabRowBusyId] = useState<string | null>(null)
   const [labsMsg, setLabsMsg] = useState<InlineMsg>(null)
@@ -150,7 +178,7 @@ export default function SuperAdminPage() {
     setLabsLoading(true)
     const { data, error } = await supabase
       .from("labs")
-      .select("id, name, created_at, is_archived, archived_at, org_id")
+      .select("id, name, created_at, is_archived, archived_at, org_id, trial_ends_at")
       .order("created_at", { ascending: false })
 
     setLabsLoading(false)
@@ -160,6 +188,23 @@ export default function SuperAdminPage() {
       return
     }
     setLabs((data as LabRow[]) || [])
+  }, [])
+
+  const fetchBillingAccounts = useCallback(async () => {
+    setBillingLoading(true)
+    const { data, error } = await supabase
+      .from("billing_accounts")
+      .select("id, org_id, lab_id, billing_status, current_period_end")
+
+    setBillingLoading(false)
+    if (error) {
+      setLabsMsg((prev) =>
+        prev ?? { kind: "error", text: `Could not load billing accounts: ${error.message}` },
+      )
+      setBillingAccounts([])
+      return
+    }
+    setBillingAccounts((data as BillingAccountRow[]) || [])
   }, [])
 
   const fetchInvites = useCallback(async () => {
@@ -241,18 +286,28 @@ export default function SuperAdminPage() {
       setAuthUser(session.user)
       setAuthorized(true)
       setGateLoading(false)
-      await Promise.all([fetchOrganizations(), fetchLabs(), fetchInvites()])
+      await Promise.all([
+        fetchOrganizations(),
+        fetchLabs(),
+        fetchBillingAccounts(),
+        fetchInvites(),
+      ])
     }
 
     void run()
     return () => {
       cancelled = true
     }
-  }, [router, fetchOrganizations, fetchLabs, fetchInvites])
+  }, [router, fetchOrganizations, fetchLabs, fetchBillingAccounts, fetchInvites])
 
   const refreshAll = useCallback(async () => {
-    await Promise.all([fetchOrganizations(), fetchLabs(), fetchInvites()])
-  }, [fetchOrganizations, fetchLabs, fetchInvites])
+    await Promise.all([
+      fetchOrganizations(),
+      fetchLabs(),
+      fetchBillingAccounts(),
+      fetchInvites(),
+    ])
+  }, [fetchOrganizations, fetchLabs, fetchBillingAccounts, fetchInvites])
 
   const orgById = useMemo(() => new Map(organizations.map((o) => [o.id, o])), [organizations])
 
@@ -327,25 +382,157 @@ export default function SuperAdminPage() {
     return [...singles, ...orgGroups]
   }, [labs, labsSearch, labsTypeFilter, labsStatusFilter, orgById])
 
+  const billingOverviewRows = useMemo((): BillingOverviewRow[] => {
+    const now = Date.now()
+
+    const deriveStatus = (
+      account: BillingAccountRow | undefined,
+      trialEndsAt: string | null,
+    ): BillingOverviewStatus => {
+      if (account?.billing_status) {
+        const s = account.billing_status
+        if (s === "active") return "active"
+        if (s === "past_due") return "past_due"
+        if (s === "suspended") return "suspended"
+        if (s === "trialing") return "trialing"
+        // Unknown account status — fall through to trial derivation.
+      }
+      if (trialEndsAt) {
+        const ends = new Date(trialEndsAt).getTime()
+        if (!Number.isNaN(ends)) {
+          return ends > now ? "trialing" : "trial_expired"
+        }
+      }
+      return "trial_expired"
+    }
+
+    const statusRank = (s: BillingOverviewStatus): number => {
+      switch (s) {
+        case "past_due":
+          return 0
+        case "suspended":
+          return 1
+        case "trial_expired":
+          return 2
+        case "trialing":
+          return 3
+        case "active":
+          return 4
+        default:
+          return 5
+      }
+    }
+
+    const rows: BillingOverviewRow[] = []
+
+    for (const org of organizations) {
+      const orgLabs = labs.filter((l) => l.org_id === org.id && !l.is_archived)
+      const account = billingAccounts.find((a) => a.org_id === org.id)
+      const status = deriveStatus(account, org.trial_ends_at)
+      const dateIso =
+        status === "active"
+          ? account?.current_period_end ?? null
+          : org.trial_ends_at
+      rows.push({
+        key: `org:${org.id}`,
+        name: org.name,
+        type: "Org",
+        labCount: orgLabs.length,
+        status,
+        dateIso,
+        monthlyUsd: status === "active" ? orgLabs.length * 200 : null,
+      })
+    }
+
+    for (const lab of labs.filter((l) => l.org_id === null)) {
+      const account = billingAccounts.find((a) => a.lab_id === lab.id)
+      const status = deriveStatus(account, lab.trial_ends_at)
+      const dateIso =
+        status === "active"
+          ? account?.current_period_end ?? null
+          : lab.trial_ends_at
+      const labCount = lab.is_archived ? 0 : 1
+      rows.push({
+        key: `lab:${lab.id}`,
+        name: lab.name,
+        type: "Lab",
+        labCount,
+        status,
+        dateIso,
+        monthlyUsd: status === "active" ? labCount * 200 : null,
+      })
+    }
+
+    rows.sort((a, b) => {
+      const rank = statusRank(a.status) - statusRank(b.status)
+      if (rank !== 0) return rank
+      return a.name.localeCompare(b.name)
+    })
+
+    return rows
+  }, [organizations, labs, billingAccounts])
+
   const trialCount = useMemo(
-    () => organizations.filter(o => o.plan === 'trial').length,
-    [organizations]
+    () => billingOverviewRows.filter((r) => r.status === "trialing").length,
+    [billingOverviewRows],
   )
 
   const expiringThisWeek = useMemo(() => {
     const now = new Date()
     const cutoff = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
-    return organizations.filter(o => {
-      if (!o.trial_ends_at) return false
-      const ends = new Date(o.trial_ends_at)
+    return billingOverviewRows.filter((r) => {
+      if (r.status !== "trialing" || !r.dateIso) return false
+      const ends = new Date(r.dateIso)
       return ends >= now && ends <= cutoff
     }).length
-  }, [organizations])
+  }, [billingOverviewRows])
 
   const activeCount = useMemo(
-    () => organizations.filter(o => o.plan !== 'trial').length,
-    [organizations]
+    () => billingOverviewRows.filter((r) => r.status === "active").length,
+    [billingOverviewRows],
   )
+
+  function formatBillingDate(iso: string | null): string {
+    if (!iso) return "—"
+    try {
+      return new Date(iso).toLocaleDateString(undefined, { dateStyle: "medium" })
+    } catch {
+      return "—"
+    }
+  }
+
+  function billingStatusBadgeClass(status: BillingOverviewStatus): string {
+    switch (status) {
+      case "active":
+        return "bg-green-500/15 text-green-800 dark:text-green-400"
+      case "trialing":
+        return "bg-amber-500/15 text-amber-800 dark:text-amber-400"
+      case "past_due":
+        return "bg-amber-500/15 text-amber-800 dark:text-amber-400"
+      case "suspended":
+        return "bg-red-500/15 text-red-800 dark:text-red-400"
+      case "trial_expired":
+        return "bg-zinc-500/15 text-zinc-600 dark:text-zinc-400"
+      default:
+        return "bg-zinc-500/15 text-zinc-600 dark:text-zinc-400"
+    }
+  }
+
+  function billingStatusLabel(status: BillingOverviewStatus): string {
+    switch (status) {
+      case "past_due":
+        return "Payment issue"
+      case "trial_expired":
+        return "Trial expired"
+      default:
+        return status.replace("_", " ")
+    }
+  }
+
+  function billingDateColumnLabel(status: BillingOverviewStatus): string {
+    if (status === "active") return "Renews"
+    return "Trial ends"
+  }
 
   const handleGenerateInvite = async () => {
     setGenerateMsg(null)
@@ -960,7 +1147,9 @@ export default function SuperAdminPage() {
             </div>
             <div>
               <h2 className="text-lg font-bold">Billing Overview</h2>
-              <p className="text-xs text-muted-foreground">Trial and subscription status across all organizations.</p>
+              <p className="text-xs text-muted-foreground">
+                Live subscription status from billing accounts (orgs + standalone labs).
+              </p>
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -977,6 +1166,58 @@ export default function SuperAdminPage() {
               <p className="text-3xl font-black text-green-700 dark:text-green-400">{activeCount}</p>
             </div>
           </div>
+
+          {billingLoading && labsLoading ? (
+            <div className="flex items-center justify-center py-10">
+              <Loader2 className="size-6 text-muted-foreground animate-spin" aria-hidden />
+            </div>
+          ) : billingOverviewRows.length === 0 ? (
+            <p className="text-sm text-muted-foreground italic py-4">No billing tenants yet.</p>
+          ) : (
+            <div className="rounded-xl border border-border overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/30 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                      <th className="text-left px-4 py-3">Name</th>
+                      <th className="text-left px-4 py-3">Type</th>
+                      <th className="text-right px-4 py-3">Labs</th>
+                      <th className="text-left px-4 py-3">Status</th>
+                      <th className="text-left px-4 py-3">Trial ends / Renews</th>
+                      <th className="text-right px-4 py-3">$/month</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {billingOverviewRows.map((row) => (
+                      <tr key={row.key} className="border-b border-border last:border-0">
+                        <td className="px-4 py-3 font-bold text-foreground">{row.name}</td>
+                        <td className="px-4 py-3 text-muted-foreground">{row.type}</td>
+                        <td className="px-4 py-3 text-right font-medium">{row.labCount}</td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`inline-flex px-2.5 py-1 rounded-full text-xs font-bold capitalize ${billingStatusBadgeClass(row.status)}`}
+                          >
+                            {billingStatusLabel(row.status)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          <span className="text-[10px] font-bold uppercase tracking-widest mr-2">
+                            {billingDateColumnLabel(row.status)}
+                          </span>
+                          {formatBillingDate(row.dateIso)}
+                        </td>
+                        <td className="px-4 py-3 text-right font-medium">
+                          {row.monthlyUsd !== null
+                            ? `$${row.monthlyUsd.toLocaleString("en-US")}`
+                            : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </section>
 
         {/* Section 2 — All labs */}
