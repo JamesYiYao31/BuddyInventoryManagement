@@ -45,7 +45,7 @@ function statusBadgeClass(status: string): string {
     case "active":
       return "bg-green-500/15 text-green-800 dark:text-green-400"
     case "trialing":
-      return "bg-amber-500/15 text-amber-800 dark:text-amber-400"
+      return "bg-blue-500/15 text-blue-800 dark:text-blue-400"
     case "past_due":
       return "bg-amber-500/15 text-amber-800 dark:text-amber-400"
     case "suspended":
@@ -55,25 +55,16 @@ function statusBadgeClass(status: string): string {
   }
 }
 
-function statusLabel(status: string): string {
-  switch (status) {
-    case "active":
-      return "Active"
-    case "past_due":
-      return "Payment issue"
-    case "suspended":
-      return "Suspended"
-    case "trialing":
-      return "Trialing"
-    default:
-      return status
-  }
-}
+const BTN_PRIMARY =
+  "h-11 px-6 rounded-xl bg-primary text-primary-foreground font-bold text-sm shadow-sm hover:opacity-90 disabled:opacity-50 disabled:pointer-events-none inline-flex items-center justify-center gap-2"
+const BTN_AMBER =
+  "h-11 px-6 rounded-xl bg-amber-600 text-white font-bold text-sm shadow-sm hover:opacity-90 disabled:opacity-50 disabled:pointer-events-none inline-flex items-center justify-center gap-2"
+const BTN_RED =
+  "h-11 px-6 rounded-xl bg-red-600 text-white font-bold text-sm shadow-sm hover:opacity-90 disabled:opacity-50 disabled:pointer-events-none inline-flex items-center justify-center gap-2"
 
 export function BillingPanel({ mode, orgId }: BillingPanelProps) {
   const [loading, setLoading] = useState(true)
   const [billingStatus, setBillingStatus] = useState<string>("trialing")
-  const [stripeCustomerId, setStripeCustomerId] = useState<string | null>(null)
   const [trialEndsAt, setTrialEndsAt] = useState<string | null>(null)
   const [currentPeriodEnd, setCurrentPeriodEnd] = useState<string | null>(null)
   const [labCount, setLabCount] = useState(1)
@@ -120,7 +111,7 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
         const [{ data: account }, { data: lab }] = await Promise.all([
           supabase
             .from("billing_accounts")
-            .select("billing_status, current_period_end, stripe_customer_id")
+            .select("billing_status, current_period_end")
             .eq("lab_id", labId)
             .maybeSingle(),
           supabase
@@ -134,11 +125,6 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
           typeof account?.billing_status === "string"
             ? account.billing_status
             : "trialing",
-        )
-        setStripeCustomerId(
-          typeof account?.stripe_customer_id === "string"
-            ? account.stripe_customer_id
-            : null,
         )
         setCurrentPeriodEnd(
           typeof account?.current_period_end === "string"
@@ -159,7 +145,7 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
         const [{ data: account }, { data: org }, { count }] = await Promise.all([
           supabase
             .from("billing_accounts")
-            .select("billing_status, current_period_end, stripe_customer_id")
+            .select("billing_status, current_period_end")
             .eq("org_id", orgId)
             .maybeSingle(),
           supabase
@@ -178,11 +164,6 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
           typeof account?.billing_status === "string"
             ? account.billing_status
             : "trialing",
-        )
-        setStripeCustomerId(
-          typeof account?.stripe_customer_id === "string"
-            ? account.stripe_customer_id
-            : null,
         )
         setCurrentPeriodEnd(
           typeof account?.current_period_end === "string"
@@ -249,24 +230,21 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
   const monthlyTotal = labCount * 200
   const renewalDate = formatRenewalDate(currentPeriodEnd)
   const isActive = billingStatus === "active"
-  const hasStripeCustomer = Boolean(stripeCustomerId)
-  // Never show Upgrade when a Stripe customer already exists — use Portal.
-  const showCheckout = !activating && !hasStripeCustomer && billingStatus === "trialing"
+  // Branch CTAs on billing_status only — stripe_customer_id is not client-readable.
+  const showActivatingCta = activating && !isActive
+  const showCheckout = !activating && billingStatus === "trialing"
   const showPortal =
     !activating &&
-    hasStripeCustomer &&
     (billingStatus === "active" ||
       billingStatus === "past_due" ||
-      billingStatus === "suspended" ||
-      billingStatus === "trialing")
-  const showActivatingCta = activating && !isActive
+      billingStatus === "suspended")
 
   const portalCta =
     billingStatus === "past_due"
-      ? { label: "Update payment method", className: "h-11 px-6 rounded-xl bg-amber-600 text-white font-bold text-sm shadow-sm hover:opacity-90 disabled:opacity-50 disabled:pointer-events-none inline-flex items-center justify-center gap-2" }
+      ? { label: "Update payment method", className: BTN_AMBER }
       : billingStatus === "suspended"
-        ? { label: "Reactivate subscription", className: "h-11 px-6 rounded-xl bg-red-600 text-white font-bold text-sm shadow-sm hover:opacity-90 disabled:opacity-50 disabled:pointer-events-none inline-flex items-center justify-center gap-2" }
-        : { label: "Manage billing", className: "h-11 px-6 rounded-xl bg-primary text-primary-foreground font-bold text-sm shadow-sm hover:opacity-90 disabled:opacity-50 disabled:pointer-events-none inline-flex items-center justify-center gap-2" }
+        ? { label: "Reactivate subscription", className: BTN_RED }
+        : { label: "Manage billing", className: BTN_PRIMARY }
 
   return (
     <div className="space-y-6">
@@ -310,7 +288,15 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
               <span
                 className={`inline-flex px-2.5 py-1 rounded-full text-xs font-bold ${statusBadgeClass(billingStatus)}`}
               >
-                {statusLabel(billingStatus)}
+                {billingStatus === "trialing"
+                  ? "Trial"
+                  : billingStatus === "active"
+                    ? "Active · $200/lab/month"
+                    : billingStatus === "past_due"
+                      ? "Payment issue"
+                      : billingStatus === "suspended"
+                        ? "Suspended — read-only"
+                        : billingStatus}
               </span>
               {billingStatus === "trialing" && daysLeft !== null ? (
                 <span className="text-sm text-muted-foreground font-medium">
@@ -321,9 +307,6 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
 
             {isActive ? (
               <div className="space-y-1">
-                <p className="text-sm font-medium text-foreground">
-                  Active · $200/lab/month
-                </p>
                 {renewalDate ? (
                   <p className="text-xs text-muted-foreground">
                     Renews {renewalDate}
@@ -336,22 +319,16 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
                   </p>
                 ) : null}
               </div>
-            ) : billingStatus === "past_due" ? (
-              <p className="text-sm font-medium text-amber-800 dark:text-amber-400">
-                Payment issue
-              </p>
-            ) : billingStatus === "suspended" ? (
-              <p className="text-sm font-medium text-red-800 dark:text-red-400">
-                Suspended
-              </p>
-            ) : mode === "org_admin" ? (
-              <p className="text-sm font-medium text-foreground">
-                {labCount} lab{labCount === 1 ? "" : "s"} × $200 = $
-                {formatUsd(monthlyTotal)}/month
-              </p>
-            ) : (
-              <p className="text-sm font-medium text-foreground">$200/month</p>
-            )}
+            ) : billingStatus === "trialing" ? (
+              mode === "org_admin" ? (
+                <p className="text-sm font-medium text-foreground">
+                  {labCount} lab{labCount === 1 ? "" : "s"} × $200 = $
+                  {formatUsd(monthlyTotal)}/month
+                </p>
+              ) : (
+                <p className="text-sm font-medium text-foreground">$200/month</p>
+              )
+            ) : null}
 
             {errorMsg ? (
               <p
@@ -376,7 +353,7 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
                 type="button"
                 disabled={actionBusy}
                 onClick={() => void handleCheckout()}
-                className="h-11 px-6 rounded-xl bg-primary text-primary-foreground font-bold text-sm shadow-sm hover:opacity-90 disabled:opacity-50 disabled:pointer-events-none inline-flex items-center justify-center gap-2"
+                className={BTN_PRIMARY}
               >
                 {actionBusy ? (
                   <Loader2 className="size-4 animate-spin" aria-hidden />
