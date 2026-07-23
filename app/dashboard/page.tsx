@@ -289,6 +289,8 @@ function DashboardPageContent() {
   const [pendingValidationCount, setPendingValidationCount] = useState(0)
   const [profileFullName, setProfileFullName] = useState("")
   const [loading, setLoading] = useState(true)
+  const [labBillingStatus, setLabBillingStatus] = useState<string>("trialing")
+  const [labTrialEndsAt, setLabTrialEndsAt] = useState<string | null>(null)
   const [rightPanelOpen, setRightPanelOpen] = useState(false)
   const [showIdleWarning, setShowIdleWarning] = useState(false)
   const [idleCountdownSeconds, setIdleCountdownSeconds] = useState(Math.floor(IDLE_WARNING_MS / 1000))
@@ -313,6 +315,28 @@ function DashboardPageContent() {
   // Resolve the authenticated user's display name — matches the header's logic
   // so that activity-log entries can be filtered by the current user.
   const currentUserName = user?.user_metadata?.full_name || profileFullName || user?.email?.split("@")[0] || ""
+
+  const refreshLabBillingBanner = useCallback(async (labId: string) => {
+    const [{ data: account }, { data: lab }] = await Promise.all([
+      supabase
+        .from("billing_accounts")
+        .select("billing_status")
+        .eq("lab_id", labId)
+        .maybeSingle(),
+      supabase
+        .from("labs")
+        .select("trial_ends_at")
+        .eq("id", labId)
+        .maybeSingle(),
+    ])
+
+    setLabBillingStatus(
+      typeof account?.billing_status === "string" ? account.billing_status : "trialing",
+    )
+    setLabTrialEndsAt(
+      typeof lab?.trial_ends_at === "string" ? lab.trial_ends_at : null,
+    )
+  }, [])
 
   // ── Refresh the authenticated user (called after profile edits so the
   // header and activity-log filters pick up the new display name). ──
@@ -533,11 +557,14 @@ function DashboardPageContent() {
         }
 
         await refreshData()
+        if (profile?.lab_id) {
+          await refreshLabBillingBanner(profile.lab_id as string)
+        }
         setLoading(false)
       }
     }
     checkSessionAndRole()
-  }, [router, refreshData])
+  }, [router, refreshData, refreshLabBillingBanner])
 
   useEffect(() => {
     const interval = setInterval(async () => {
@@ -571,11 +598,18 @@ function DashboardPageContent() {
       }
 
       if (profile.lab_id) {
-        const { data: lab } = await supabase
-          .from("labs")
-          .select("is_archived")
-          .eq("id", profile.lab_id)
-          .single()
+        const [{ data: lab }, { data: account }] = await Promise.all([
+          supabase
+            .from("labs")
+            .select("is_archived, trial_ends_at")
+            .eq("id", profile.lab_id)
+            .single(),
+          supabase
+            .from("billing_accounts")
+            .select("billing_status")
+            .eq("lab_id", profile.lab_id)
+            .maybeSingle(),
+        ])
 
         if (lab?.is_archived) {
           await voluntarySignOut(session.user.id)
@@ -586,6 +620,16 @@ function DashboardPageContent() {
           )
           return
         }
+
+        // Billing banner only — never sign out for billing state.
+        setLabBillingStatus(
+          typeof account?.billing_status === "string"
+            ? account.billing_status
+            : "trialing",
+        )
+        setLabTrialEndsAt(
+          typeof lab?.trial_ends_at === "string" ? lab.trial_ends_at : null,
+        )
       }
 
       if (profile?.is_active === false) {
@@ -764,6 +808,42 @@ function DashboardPageContent() {
     return `${minutes}:${seconds.toString().padStart(2, "0")}`
   }, [idleCountdownSeconds])
 
+  const billingBanner = useMemo(() => {
+    if (labBillingStatus === "past_due") {
+      return {
+        tone: "amber" as const,
+        message:
+          "Payment issue — please update the payment method to avoid interruption.",
+        showBillingLink: userRole === "manager",
+      }
+    }
+    if (labBillingStatus === "suspended") {
+      return {
+        tone: "red" as const,
+        message:
+          "This lab is read-only. Data is safe and viewable; editing resumes once billing is restored.",
+        showBillingLink: userRole === "manager",
+      }
+    }
+    if (labBillingStatus === "trialing" && labTrialEndsAt) {
+      const end = new Date(labTrialEndsAt)
+      if (!Number.isNaN(end.getTime())) {
+        const daysLeft = Math.max(
+          0,
+          Math.ceil((end.getTime() - Date.now()) / (1000 * 60 * 60 * 24)),
+        )
+        if (daysLeft <= 7) {
+          return {
+            tone: "amber" as const,
+            message: `Trial ends in ${daysLeft} day${daysLeft === 1 ? "" : "s"}.`,
+            showBillingLink: userRole === "manager",
+          }
+        }
+      }
+    }
+    return null
+  }, [labBillingStatus, labTrialEndsAt, userRole])
+
   // ── 5. RENDER ──
   return (
     <div className="flex h-screen max-w-[100vw] bg-background overflow-hidden overflow-x-hidden print:h-auto print:block print:bg-white">
@@ -785,7 +865,28 @@ function DashboardPageContent() {
 
         <main className="flex-1 overflow-y-auto overflow-x-hidden p-8 print:overflow-visible print:p-0">
           <div className="max-w-[1600px] mx-auto space-y-8 overflow-x-hidden">
-            
+            {billingBanner ? (
+              <div
+                role="status"
+                className={`print:hidden rounded-2xl border px-5 py-4 text-sm font-semibold flex flex-wrap items-center gap-x-4 gap-y-2 ${
+                  billingBanner.tone === "red"
+                    ? "border-red-500/30 bg-red-500/10 text-red-800 dark:text-red-300"
+                    : "border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200"
+                }`}
+              >
+                <p className="flex-1 min-w-0">{billingBanner.message}</p>
+                {billingBanner.showBillingLink ? (
+                  <button
+                    type="button"
+                    onClick={() => handleNavigatePage("billing")}
+                    className="shrink-0 text-xs font-bold underline underline-offset-2 hover:opacity-80"
+                  >
+                    Go to Billing →
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+
             {loading ? (
               <div className="flex flex-col items-center justify-center p-20 text-center space-y-4 h-full">
                 <div className="size-12 border-4 border-primary/20 border-t-primary rounded-full animate-spin" />

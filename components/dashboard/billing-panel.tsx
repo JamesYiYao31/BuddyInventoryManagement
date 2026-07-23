@@ -8,6 +8,10 @@ import {
   createCheckoutSession,
   createCheckoutErrorMessage,
 } from "@/lib/create-checkout"
+import {
+  createBillingPortalSession,
+  createBillingPortalErrorMessage,
+} from "@/lib/billing-portal"
 
 type BillingPanelProps = {
   /** manager = lab-scoped; org_admin = org-scoped */
@@ -69,10 +73,11 @@ function statusLabel(status: string): string {
 export function BillingPanel({ mode, orgId }: BillingPanelProps) {
   const [loading, setLoading] = useState(true)
   const [billingStatus, setBillingStatus] = useState<string>("trialing")
+  const [stripeCustomerId, setStripeCustomerId] = useState<string | null>(null)
   const [trialEndsAt, setTrialEndsAt] = useState<string | null>(null)
   const [currentPeriodEnd, setCurrentPeriodEnd] = useState<string | null>(null)
   const [labCount, setLabCount] = useState(1)
-  const [upgradeBusy, setUpgradeBusy] = useState(false)
+  const [actionBusy, setActionBusy] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [checkoutBanner, setCheckoutBanner] = useState<"success" | "cancelled" | null>(
     null,
@@ -115,7 +120,7 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
         const [{ data: account }, { data: lab }] = await Promise.all([
           supabase
             .from("billing_accounts")
-            .select("billing_status, current_period_end")
+            .select("billing_status, current_period_end, stripe_customer_id")
             .eq("lab_id", labId)
             .maybeSingle(),
           supabase
@@ -129,6 +134,11 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
           typeof account?.billing_status === "string"
             ? account.billing_status
             : "trialing",
+        )
+        setStripeCustomerId(
+          typeof account?.stripe_customer_id === "string"
+            ? account.stripe_customer_id
+            : null,
         )
         setCurrentPeriodEnd(
           typeof account?.current_period_end === "string"
@@ -149,7 +159,7 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
         const [{ data: account }, { data: org }, { count }] = await Promise.all([
           supabase
             .from("billing_accounts")
-            .select("billing_status, current_period_end")
+            .select("billing_status, current_period_end, stripe_customer_id")
             .eq("org_id", orgId)
             .maybeSingle(),
           supabase
@@ -168,6 +178,11 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
           typeof account?.billing_status === "string"
             ? account.billing_status
             : "trialing",
+        )
+        setStripeCustomerId(
+          typeof account?.stripe_customer_id === "string"
+            ? account.stripe_customer_id
+            : null,
         )
         setCurrentPeriodEnd(
           typeof account?.current_period_end === "string"
@@ -202,14 +217,28 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
     return () => clearTimeout(timer)
   }, [activating, load])
 
-  const handleUpgrade = async () => {
+  const handleCheckout = async () => {
     setErrorMsg(null)
-    setUpgradeBusy(true)
+    setActionBusy(true)
     const result = await createCheckoutSession()
-    setUpgradeBusy(false)
+    setActionBusy(false)
 
     if (!result.ok) {
       setErrorMsg(createCheckoutErrorMessage(result.errorCode))
+      return
+    }
+
+    window.location.href = result.url
+  }
+
+  const handlePortal = async () => {
+    setErrorMsg(null)
+    setActionBusy(true)
+    const result = await createBillingPortalSession()
+    setActionBusy(false)
+
+    if (!result.ok) {
+      setErrorMsg(createBillingPortalErrorMessage(result.errorCode))
       return
     }
 
@@ -220,9 +249,24 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
   const monthlyTotal = labCount * 200
   const renewalDate = formatRenewalDate(currentPeriodEnd)
   const isActive = billingStatus === "active"
-  // Phase 5: past_due should open Billing Portal — not a second Checkout.
-  const showUpgrade = !isActive && !activating
+  const hasStripeCustomer = Boolean(stripeCustomerId)
+  // Never show Upgrade when a Stripe customer already exists — use Portal.
+  const showCheckout = !activating && !hasStripeCustomer && billingStatus === "trialing"
+  const showPortal =
+    !activating &&
+    hasStripeCustomer &&
+    (billingStatus === "active" ||
+      billingStatus === "past_due" ||
+      billingStatus === "suspended" ||
+      billingStatus === "trialing")
   const showActivatingCta = activating && !isActive
+
+  const portalCta =
+    billingStatus === "past_due"
+      ? { label: "Update payment method", className: "h-11 px-6 rounded-xl bg-amber-600 text-white font-bold text-sm shadow-sm hover:opacity-90 disabled:opacity-50 disabled:pointer-events-none inline-flex items-center justify-center gap-2" }
+      : billingStatus === "suspended"
+        ? { label: "Reactivate subscription", className: "h-11 px-6 rounded-xl bg-red-600 text-white font-bold text-sm shadow-sm hover:opacity-90 disabled:opacity-50 disabled:pointer-events-none inline-flex items-center justify-center gap-2" }
+        : { label: "Manage billing", className: "h-11 px-6 rounded-xl bg-primary text-primary-foreground font-bold text-sm shadow-sm hover:opacity-90 disabled:opacity-50 disabled:pointer-events-none inline-flex items-center justify-center gap-2" }
 
   return (
     <div className="space-y-6">
@@ -327,17 +371,29 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
                 <Loader2 className="size-4 animate-spin" aria-hidden />
                 Payment received — activating…
               </button>
-            ) : showUpgrade ? (
+            ) : showCheckout ? (
               <button
                 type="button"
-                disabled={upgradeBusy}
-                onClick={() => void handleUpgrade()}
+                disabled={actionBusy}
+                onClick={() => void handleCheckout()}
                 className="h-11 px-6 rounded-xl bg-primary text-primary-foreground font-bold text-sm shadow-sm hover:opacity-90 disabled:opacity-50 disabled:pointer-events-none inline-flex items-center justify-center gap-2"
               >
-                {upgradeBusy ? (
+                {actionBusy ? (
                   <Loader2 className="size-4 animate-spin" aria-hidden />
                 ) : null}
                 Upgrade
+              </button>
+            ) : showPortal ? (
+              <button
+                type="button"
+                disabled={actionBusy}
+                onClick={() => void handlePortal()}
+                className={portalCta.className}
+              >
+                {actionBusy ? (
+                  <Loader2 className="size-4 animate-spin" aria-hidden />
+                ) : null}
+                {portalCta.label}
               </button>
             ) : null}
           </>
