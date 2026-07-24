@@ -2,7 +2,235 @@
 
 ## Recent Sessions
 
-### Session: July 16, 2026 (latest) — Security-Log Viewer (Batch 2 Phase 2) + Eviction-Message Fix — BOTH BATCHES CLOSED
+### Session: July 17–24, 2026 (latest) — Week 3: Stripe Billing Integration
+- **Headline:** Complete billing system in Stripe sandbox/test mode — from zero
+  to enforced read-only. Checkout, webhook state mapping, Billing Portal,
+  customer + super-admin billing surfaces, lab-wide banners, and 21 restrictive
+  write policies keyed on `lab_billing_allows_writes()`. Both paying sandbox
+  tenants (Oakwood + Test Org) active and production-verified.
+- **Context:** Continuation after July 16 closed Batches 1–2. Week 3 (Stripe)
+  deferred in that session; this session builds the full billing stack.
+- **Commit note:** HEAD at close `e866b76`. Range `4ca2576..e866b76` — 8 code
+  commits (`02121e2`, `ec3de11`, `1c1648b`, `ebaf9fa`, `37e15e6`, `1448eef`,
+  `7e9c5ac`, `e866b76`). `de72452` within that range is the prior session's
+  docs commit, not part of this work.
+
+- **Phase 1 — Stripe sandbox + product:**
+  Sandbox account under "Buddy LLC" (name changed this session from Buddy
+  Technologies LLC; WY LLC still unformed). Seat-based recurring product,
+  USD 200.00/lab/month, price ID `price_1TuXlqJVUm1zwdXYUpBnoxYa`. Env vars
+  added to Vercel + `.env.local`: `STRIPE_SECRET_KEY`,
+  `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `STRIPE_PRICE_ID`,
+  `STRIPE_WEBHOOK_SECRET`. Cloudflare Email Routing added:
+  support@yourbuddyapp.com → personal inbox (receive-only; outbound stays on
+  Resend).
+
+- **Phase 2 — Schema (see SCHEMA CAPTURE):**
+  - **`billing_accounts`:** id, org_id (FK RESTRICT, nullable), lab_id
+    (FK RESTRICT, nullable), stripe_customer_id (unique),
+    stripe_subscription_id (unique), billing_status CHECK IN
+    (`trialing`|`active`|`past_due`|`suspended`) default `trialing`,
+    current_period_end, created_at, updated_at.
+    CONSTRAINT `billing_owner_exactly_one` CHECK
+    `((org_id IS NULL) <> (lab_id IS NULL))`. Partial unique indexes on
+    org_id and lab_id.
+  - **`processed_stripe_events`:** event_id PK (Stripe `evt_` id), event_type,
+    received_at, payload jsonb. Webhook idempotency.
+  - **RLS at this phase:** `billing_accounts_select_scoped` (super_admin all /
+    manager own lab / org_admin own org),
+    `billing_accounts_require_active_user` (restrictive, mirrors deactivation
+    pattern), `stripe_events_select_super`. No INSERT/UPDATE/DELETE
+    policies for authenticated — writes are service-role only.
+
+- **Phase 3 — Webhook log-only first** (`app/api/stripe/webhook/route.ts`):
+  Raw-body read, signature verification as sole auth, idempotent upsert into
+  `processed_stripe_events`, no state writes. Verified in production before
+  any enforcement logic existed (deliberate deployment ordering).
+
+- **Phase 4A — Checkout + customer billing surfaces**
+  (`app/api/stripe/checkout/route.ts`):
+  Rate limited (10/hr), bearer auth, manager/org_admin
+  only, server-resolved billing owner (never client-supplied), get-or-create
+  `billing_accounts` row, quantity = 1 for standalone lab or non-archived lab
+  count for org. Checkout session with `client_reference_id` =
+  `billing_accounts.id` AND `subscription_data.metadata.billing_account_id`
+  (both threads, deliberately). Origin allowlist pinned. Customer billing
+  surfaces built for manager (`/dashboard` Billing tab) and org_admin
+  (`/org-admin`) — none existed before; all prior billing UI was super-admin
+  only.
+
+- **Phase 4B — Webhook state mapping (first delivery only):**
+  - `checkout.session.completed` → store customer + subscription IDs, status
+    `active` (guarded: refuses to overwrite a different existing subscription
+    ID, logs DUPLICATE SUBSCRIPTION)
+  - `invoice.paid` → `active` + `current_period_end`
+  - `invoice.payment_failed` → `past_due`
+  - `customer.subscription.updated` → period end; `active`/`past_due` mapped,
+    other statuses leave `billing_status` unchanged
+  - `customer.subscription.deleted` → `suspended`
+  - Unresolvable account → logs `UNMATCHED <event_id>`, returns 200 (never
+    500; payload already receipted).
+
+- **Billing visibility (post-4B):**
+  Unified `LabLicenseCard` for manager + technician, and a truth-driven
+  super-admin Billing Overview table (per-org and per-standalone-lab rows,
+  status, labs, $/month, sorted by urgency) replacing the hardcoded
+  "Enterprise Plan" fiction and the `organizations.plan`-derived KPI cards.
+  Technician branch added to `billing_accounts_select_scoped` (technician /
+  own lab), paired with the `billing_accounts` column revoke: SELECT revoked
+  table-level from authenticated, re-granted on `(id, org_id, lab_id,
+  billing_status, current_period_end, created_at, updated_at)` only.
+  Technicians read status; Stripe IDs became server-only for every client role.
+
+- **Phase 5 — Enforcement:**
+  - **`lab_billing_allows_writes()`** — STABLE SECURITY DEFINER, super_admin
+    always true, resolves account via profiles → labs → billing_accounts
+    (matching `ba.lab_id = p.lab_id OR ba.org_id = l.org_id`), returns
+    `billing_status <> 'suspended'`, coalesce default TRUE (no billing row =
+    allowed).
+  - **21 restrictive policies:** 7 tables (`items`, `inventory_lots`,
+    `active_lots`, `requests`, `coa_records`, `lot_validation_records`,
+    `lab_settings`) × 3 cmds (INSERT with-check, UPDATE using+with-check,
+    DELETE using).
+  - **DELIBERATELY EXCLUDED:** `activity_logs` (ALCOA+ — audit trail never
+    stops) and `feedback` (suspended labs must retain a support channel).
+  - **`app/api/stripe/portal/route.ts`** — creates a Stripe Billing Portal
+    session only. Cancel-at-period-end, update payment method, invoice
+    history, and quantity-editing-disabled are **Stripe Dashboard portal
+    configuration**, not app code (do not hunt the route for those behaviors).
+
+  - Status-driven CTAs, lab-wide banner at top of `<main>` on `/dashboard`
+    visible to all lab roles, `billing_status` added to the 30s poll (drives
+    banner without refresh; never signs anyone out for billing state).
+
+- **Architecture decisions (settled this session):**
+  1. Per-lab quantity pricing: ONE Stripe subscription per paying tenant with
+     quantity = lab count. Never one subscription per lab.
+  2. Single `billing_accounts` table pointing at either an org or a standalone
+     lab, never both. Chosen over duplicate columns on organizations + labs.
+  3. Billing state is ORTHOGONAL to `profiles.is_active`. Never conflated:
+     billing suspension does not touch `is_active`, does not fight the
+     last-manager guard, and keeps `security_logs` semantics clean.
+     Composition is AND at the gate.
+  4. Trial stays in-app (`labs.trial_ends_at`). No Stripe object exists during
+     trial; no card required. Stripe enters only at conversion.
+  5. Suspended = READ-ONLY, never lockout. Data is never deleted for
+     non-payment, and the manager's billing page always stays reachable —
+     otherwise a lapsed customer could never pay.
+  6. Trial expiry has NO grace (the 90-day trial was the grace). Payment
+     failure for an existing customer gets 7 days `past_due` with full access.
+  7. Stripe IDs are server-only at the column-grant level; the client branches
+     on `billing_status` alone.
+
+- **Lessons (hard-won; each cost real debugging time):**
+  - Stripe does not follow redirects. The webhook URL must be the exact
+    primary domain: `https://www.yourbuddyapp.com/...`. The apex 308-redirects
+    and every delivery fails.
+  - A 500 from the webhook can mean EITHER Stripe env var is bad, not just
+    `STRIPE_WEBHOOK_SECRET` — the Stripe client constructor throws on a
+    malformed secret key before any signature logic runs.
+  - Browser GET on the webhook URL failing is expected (POST-only route), NOT
+    evidence of a missing route. A missing route returns 404.
+  - Stripe events arrive OUT OF ORDER: `invoice.paid` preceded
+    `checkout.session.completed` by 164ms on first activation, so the
+    subscription ID was not yet stored. The invoice metadata fallback path is
+    load-bearing, not defensive.
+  - Module-scope `new Stripe()` breaks the Vercel build (collect-page-data
+    runs without env vars). Lazy-init inside the handler — see `ec3de11`. Now
+    house style.
+  - Revoking a column grant silently breaks client-side selects for EVERY role
+    including super_admin, since super_admin also authenticates as
+    `authenticated`. A UI branching on a revoked column reads undefined and
+    silently takes the wrong branch (billing panel showed "Trialing" for an
+    active account).
+  - RESTRICTIVE policies for billing MUST be per-command
+    (INSERT/UPDATE/DELETE), never `FOR ALL`. `FOR ALL` blocks reads too,
+    turning read-only into lockout — the opposite of the design.
+  - Stripe's failed-payment retry schedule must end in CANCEL, not "mark
+    unpaid", or `customer.subscription.deleted` never fires and nothing is
+    ever suspended.
+  - Cancel-at-period-end correctly leaves `billing_status = active` until the
+    period actually ends. Not a bug.
+
+- **FULL PRODUCTION REGRESSION — 15-item (billing sealed):**
+  Passed on production, both tenants active: all lab writes
+  (item/lot/usage/COA/validation/request/delete/lab settings/feedback)
+  succeed for manager and technician; `activity_logs` continues recording;
+  technician self-promotion still returns 403 (July 15 fix holds under the
+  new policies); deactivation eviction and banners correct; `security_logs`
+  scoping per role unchanged. Suspension verified live on Oakwood: reads
+  survive, all writes blocked for both roles, red banner within 30s without
+  refresh, manager's Billing tab and Reactivate CTA reachable throughout.
+  Restored to active cleanly. Technician column-grant split proven by
+  exploit: 403 on `stripe_customer_id`, 200 on `billing_status` with a real
+  technician JWT.
+
+- **Production state at close:**
+  Two paying tenants (sandbox): Oakwood Lab (standalone, lab_id
+  `447da352-fadf-4c54-83b7-7019cc4bf714`, `cus_UundkJjI5myS0k`) and Test Org
+  (org_id `5b15d0ec-06c8-4eed-92c9-762bcfbb4c60`, `cus_UunuORzTfzNIJr`,
+  quantity 2), both active, renewing 2026-08-19. Stripe remains in
+  SANDBOX/TEST mode — activation requires a US address (the WY registered
+  agent), so it is blocked on LLC formation.
+
+- **SCHEMA CAPTURE (drift resolved):**
+  The Week 3 schema was executed manually in the Supabase SQL editor and existed
+  only in production. It is now captured: `database-scripts/schema-2026-07-19.sql`
+  is a full pg_dump of the public schema (via `npx supabase db dump`, requires
+  Docker Desktop running), covering tables, RLS policies, functions, and grants —
+  including `billing_accounts`, `processed_stripe_events`, the 21 billing restrictive
+  policies, `lab_billing_allows_writes()`, and the `billing_accounts` column
+  revoke/re-grant. This file supersedes `supabase-copy.sql`, which remains
+  DEPRECATED and drifted. It also captures the `coa_records` and
+  `lot_validation_records` permissive policies that had never appeared in any repo
+  SQL file.
+  Regenerate this dump after any future manual SQL change, rather than
+  hand-editing it.
+
+- **Deferred / next:**
+  - **UNTESTED PATH:** the `ba.org_id = l.org_id` branch of
+    `lab_billing_allows_writes()` has never been exercised by a real user,
+    because no user exists inside any Test Org lab. An org customer's
+    suspension may silently fail to block writes. Test before the first org
+    customer onboards.
+  - App-sent billing emails (trial ending in 7 days; lab suspended) — own
+    small phase; needs Vercel cron for the trial warning. Stripe's own
+    failed-payment emails ARE ENABLED and cover only the payment-failure case.
+  - `organizations.plan` retirement: KPI cards no longer use it, but
+    `/super-admin/orgs/[id]` and `/super-admin/labs/[id]` still read it for
+    badges and the +30/+90 trial-extend buttons.
+  - Oakwood's `labs.trial_ends_at` (2026-08-04) is now vestigial for a paying
+    lab; decide whether trial columns retire once `billing_accounts` is
+    authoritative.
+  - Live-mode switch checklist: new live product + price ID, live keys, new
+    webhook endpoint + signing secret, Stripe account activation with the WY
+    registered agent address.
+  - Table-count drift: Security Layers and SVP-style sections still say "17
+    tables"; actual count is 19 with `billing_accounts` and
+    `processed_stripe_events`. Compliance docs must be consistent before customer
+    onboarding — sweep all four documents, not just CLAUDE.md.
+
+- **Files changed this session (8 code commits, HEAD e866b76):**
+  Named in this session's work: `app/api/stripe/webhook/route.ts`,
+  `app/api/stripe/checkout/route.ts`, `app/api/stripe/portal/route.ts`,
+  `lib/create-checkout.ts`, `lib/billing-portal.ts`,
+  `components/dashboard/billing-panel.tsx`, `package.json` /
+  `package-lock.json` (Stripe SDK), manager `/dashboard` Billing tab +
+  lab-wide banner/30s poll, `/org-admin` billing section, unified
+  `LabLicenseCard` (manager + technician), truth-driven super-admin Billing
+  Overview. Authoritative schema artifact:
+  `database-scripts/schema-2026-07-19.sql` (see SCHEMA CAPTURE). Full file
+  list is the `4ca2576..e866b76` code commit range (8 commits above).
+
+- **Current state:** Week 3 Stripe billing SHIPPED in sandbox and
+  production-verified (15-item regression + live suspension on Oakwood).
+  Checkout, portal, webhook state mapping, status-driven CTAs, lab-wide
+  banner + poll, and write-gate RLS all live. Stripe live-mode blocked on
+  LLC formation. Next: remaining Deferred items (org-path suspension branch
+  untested; table-count doc sweep; `organizations.plan` retirement; live-mode
+  checklist).
+
+### Session: July 16, 2026 — Security-Log Viewer (Batch 2 Phase 2) + Eviction-Message Fix — BOTH BATCHES CLOSED
 - **Headline:** Batch 2 Phase 2 (security-log viewer, 3 surfaces) built and
   verified; deactivation eviction-message bug fixed; full production
   regression 10/10. Batches 1 (hygiene) and 2 (MFA events, privilege-
@@ -1597,12 +1825,15 @@ archived = manager clicked "Move to History"
 ### organizations
 ```
 id, name,
-plan (text, default 'trial'),
+plan (text, default 'trial'),  — LEGACY: superseded by billing_accounts.billing_status;
+  still read by /super-admin/orgs/[id] and /super-admin/labs/[id]
 trial_ends_at (timestamptz, default now() + 90 days),
 created_at, created_by (uuid → auth.users)
 ```
 - RLS enabled — super admin full access, org admin sees own org
-- plan: 'trial' | 'starter' | 'pro' | 'enterprise' (Stripe later)
+- plan: 'trial' | 'starter' | 'pro' | 'enterprise' — **LEGACY**; billing truth is
+  `billing_accounts.billing_status` (KPI cards no longer use `plan`; two
+  super-admin detail pages still read it for badges / +30/+90 trial-extend)
 - `created_by` → auth.users ON DELETE **NO ACTION** (blocks user delete until
   org row removed or created_by reassigned)
 - `profiles.org_id` → organizations ON DELETE **RESTRICT** (org cannot be
@@ -1834,6 +2065,42 @@ created_at (timestamptz, default now())
   expired rows linger inert until the next redeem replaces them
 - This DB row — NOT an `aal` change — is what authorizes an aal1 recovery session
   (checked by `/api/mfa/recovery-elevation-status`)
+
+### billing_accounts
+```
+id, org_id (nullable → organizations, ON DELETE RESTRICT),
+lab_id (nullable → labs, ON DELETE RESTRICT),
+stripe_customer_id (text, unique, nullable),
+stripe_subscription_id (text, unique, nullable),
+billing_status ('trialing' | 'active' | 'past_due' | 'suspended',
+  NOT NULL DEFAULT 'trialing'),
+current_period_end (timestamptz, nullable),
+created_at, updated_at
+```
+- Exactly one owner: CONSTRAINT `billing_owner_exactly_one` —
+  `((org_id IS NULL) <> (lab_id IS NULL))`; partial unique indexes on org_id
+  and lab_id
+- Writes are service-role only (webhook / checkout); no authenticated
+  INSERT/UPDATE/DELETE policies
+- SELECT scoped: super_admin all; manager / technician own lab; org_admin own org
+- Column grant: authenticated SELECT only on `(id, org_id, lab_id,
+  billing_status, current_period_end, created_at, updated_at)` —
+  `stripe_customer_id` / `stripe_subscription_id` are server-only
+- Restrictive `billing_accounts_require_active_user` mirrors deactivation
+- Write-gate for lab data: `lab_billing_allows_writes()` + 21 restrictive
+  policies (7 tables × INSERT/UPDATE/DELETE); excludes `activity_logs` and
+  `feedback`. Source of record: `database-scripts/schema-2026-07-19.sql`
+
+### processed_stripe_events
+```
+event_id (text PK — Stripe evt_ id),
+event_type (text NOT NULL),
+received_at (timestamptz NOT NULL DEFAULT now()),
+payload (jsonb)
+```
+- Webhook idempotency / receipt table; service-role writes
+- SELECT: super_admin only (`stripe_events_select_super`)
+- Source of record: `database-scripts/schema-2026-07-19.sql`
 
 ### Storage bucket: coa-documents (private)
 Path: `{lab_id}/{lot_id}/{timestamp}_{filename}`
