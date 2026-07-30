@@ -289,7 +289,10 @@ function DashboardPageContent() {
   const [pendingValidationCount, setPendingValidationCount] = useState(0)
   const [profileFullName, setProfileFullName] = useState("")
   const [loading, setLoading] = useState(true)
-  const [labBillingStatus, setLabBillingStatus] = useState<string>("trialing")
+  const [labBillingStatus, setLabBillingStatus] = useState<string | null>(null)
+  const [labBillingLoadState, setLabBillingLoadState] = useState<
+    "loading" | "resolved" | "none" | "unknown"
+  >("loading")
   const [labTrialEndsAt, setLabTrialEndsAt] = useState<string | null>(null)
   const [rightPanelOpen, setRightPanelOpen] = useState(false)
   const [showIdleWarning, setShowIdleWarning] = useState(false)
@@ -317,12 +320,14 @@ function DashboardPageContent() {
   const currentUserName = user?.user_metadata?.full_name || profileFullName || user?.email?.split("@")[0] || ""
 
   const refreshLabBillingBanner = useCallback(async (labId: string) => {
-    const [{ data: account }, { data: lab }] = await Promise.all([
+    // No lab_id filter — RLS scopes to this lab's row OR the org's row.
+    const [
+      { data: accounts, error: accountError },
+      { data: lab, error: labError },
+    ] = await Promise.all([
       supabase
         .from("billing_accounts")
-        .select("billing_status")
-        .eq("lab_id", labId)
-        .maybeSingle(),
+        .select("id, lab_id, org_id, billing_status"),
       supabase
         .from("labs")
         .select("trial_ends_at")
@@ -330,11 +335,40 @@ function DashboardPageContent() {
         .maybeSingle(),
     ])
 
+    if (labError) {
+      console.error("[dashboard] labs trial read failed:", labError.message)
+      setLabTrialEndsAt(null)
+    } else {
+      setLabTrialEndsAt(
+        typeof lab?.trial_ends_at === "string" ? lab.trial_ends_at : null,
+      )
+    }
+
+    if (accountError) {
+      console.error("[dashboard] billing_accounts read failed:", accountError.message)
+      setLabBillingLoadState("unknown")
+      setLabBillingStatus(null)
+      return
+    }
+
+    if (!accounts || accounts.length === 0) {
+      setLabBillingLoadState("none")
+      setLabBillingStatus(null)
+      return
+    }
+
+    if (accounts.length > 1) {
+      console.warn(
+        "[billing] multiple billing_accounts visible to caller;",
+        "preferring org-keyed row. ids=",
+        accounts.map((r) => r.id),
+      )
+    }
+    const orgKeyed = accounts.find((r) => r.org_id != null)
+    const account = orgKeyed ?? accounts[0]
+    setLabBillingLoadState("resolved")
     setLabBillingStatus(
-      typeof account?.billing_status === "string" ? account.billing_status : "trialing",
-    )
-    setLabTrialEndsAt(
-      typeof lab?.trial_ends_at === "string" ? lab.trial_ends_at : null,
+      typeof account.billing_status === "string" ? account.billing_status : null,
     )
   }, [])
 
@@ -598,18 +632,18 @@ function DashboardPageContent() {
       }
 
       if (profile.lab_id) {
-        const [{ data: lab }, { data: account }] = await Promise.all([
-          supabase
-            .from("labs")
-            .select("is_archived, trial_ends_at")
-            .eq("id", profile.lab_id)
-            .single(),
-          supabase
-            .from("billing_accounts")
-            .select("billing_status")
-            .eq("lab_id", profile.lab_id)
-            .maybeSingle(),
-        ])
+        const [{ data: lab, error: labError }, { data: accounts, error: accountError }] =
+          await Promise.all([
+            supabase
+              .from("labs")
+              .select("is_archived, trial_ends_at")
+              .eq("id", profile.lab_id)
+              .single(),
+            // No lab_id filter — RLS scopes to this lab's row OR the org's row.
+            supabase
+              .from("billing_accounts")
+              .select("id, lab_id, org_id, billing_status"),
+          ])
 
         if (lab?.is_archived) {
           await voluntarySignOut(session.user.id)
@@ -622,14 +656,40 @@ function DashboardPageContent() {
         }
 
         // Billing banner only — never sign out for billing state.
-        setLabBillingStatus(
-          typeof account?.billing_status === "string"
-            ? account.billing_status
-            : "trialing",
-        )
-        setLabTrialEndsAt(
-          typeof lab?.trial_ends_at === "string" ? lab.trial_ends_at : null,
-        )
+        if (labError) {
+          console.error("[dashboard] labs poll read failed:", labError.message)
+          setLabTrialEndsAt(null)
+        } else {
+          setLabTrialEndsAt(
+            typeof lab?.trial_ends_at === "string" ? lab.trial_ends_at : null,
+          )
+        }
+
+        if (accountError) {
+          console.error(
+            "[dashboard] billing_accounts poll read failed:",
+            accountError.message,
+          )
+          setLabBillingLoadState("unknown")
+          setLabBillingStatus(null)
+        } else if (!accounts || accounts.length === 0) {
+          setLabBillingLoadState("none")
+          setLabBillingStatus(null)
+        } else {
+          if (accounts.length > 1) {
+            console.warn(
+              "[billing] multiple billing_accounts visible to caller;",
+              "preferring org-keyed row. ids=",
+              accounts.map((r) => r.id),
+            )
+          }
+          const orgKeyed = accounts.find((r) => r.org_id != null)
+          const account = orgKeyed ?? accounts[0]
+          setLabBillingLoadState("resolved")
+          setLabBillingStatus(
+            typeof account.billing_status === "string" ? account.billing_status : null,
+          )
+        }
       }
 
       if (profile?.is_active === false) {
@@ -809,7 +869,19 @@ function DashboardPageContent() {
   }, [idleCountdownSeconds])
 
   const billingBanner = useMemo(() => {
-    if (labBillingStatus === "past_due") {
+    // Failed read: never invent trial / purchase pressure from missing data.
+    if (labBillingLoadState === "unknown" || labBillingLoadState === "loading") {
+      return null
+    }
+
+    const status =
+      labBillingLoadState === "resolved"
+        ? labBillingStatus
+        : labBillingLoadState === "none"
+          ? "trialing"
+          : null
+
+    if (status === "past_due") {
       return {
         tone: "amber" as const,
         message:
@@ -817,7 +889,7 @@ function DashboardPageContent() {
         showBillingLink: userRole === "manager",
       }
     }
-    if (labBillingStatus === "suspended") {
+    if (status === "suspended") {
       return {
         tone: "red" as const,
         message:
@@ -825,7 +897,7 @@ function DashboardPageContent() {
         showBillingLink: userRole === "manager",
       }
     }
-    if (labBillingStatus === "trialing" && labTrialEndsAt) {
+    if (status === "trialing" && labTrialEndsAt) {
       const end = new Date(labTrialEndsAt)
       if (!Number.isNaN(end.getTime())) {
         const daysLeft = Math.max(
@@ -842,7 +914,7 @@ function DashboardPageContent() {
       }
     }
     return null
-  }, [labBillingStatus, labTrialEndsAt, userRole])
+  }, [labBillingLoadState, labBillingStatus, labTrialEndsAt, userRole])
 
   // ── 5. RENDER ──
   return (

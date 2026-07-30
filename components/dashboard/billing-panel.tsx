@@ -19,6 +19,17 @@ type BillingPanelProps = {
   orgId?: string | null
 }
 
+/** Four-state account load — never invent "trialing" from a failed/empty misread. */
+type AccountLoadState = "loading" | "resolved" | "none" | "unknown"
+
+type BillingAccountRow = {
+  id: string
+  lab_id: string | null
+  org_id: string | null
+  billing_status: string
+  current_period_end: string | null
+}
+
 function daysUntil(iso: string | null | undefined): number | null {
   if (!iso) return null
   const end = new Date(iso)
@@ -31,10 +42,24 @@ function formatUsd(amount: number): string {
   return amount.toLocaleString("en-US")
 }
 
+/** Viewer-local date + short timezone label (period-end is timezone-sensitive). */
 function formatRenewalDate(iso: string | null | undefined): string | null {
   if (!iso) return null
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return null
   try {
-    return new Date(iso).toLocaleDateString(undefined, { dateStyle: "medium" })
+    // dateStyle and timeZoneName cannot be combined in Intl — that throws and
+    // was silently nulling every renewal label after C5.
+    const date = new Intl.DateTimeFormat(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    }).format(d)
+    const tz =
+      new Intl.DateTimeFormat(undefined, { timeZoneName: "short" })
+        .formatToParts(d)
+        .find((part) => part.type === "timeZoneName")?.value ?? ""
+    return tz ? `${date} (${tz})` : date
   } catch {
     return null
   }
@@ -55,6 +80,22 @@ function statusBadgeClass(status: string): string {
   }
 }
 
+/**
+ * Prefer the org-keyed row when RLS returns more than one (duplicate-billing
+ * residue). Should be impossible after Phase B1; warn so we hear about it.
+ */
+function pickBillingAccount(rows: BillingAccountRow[]): BillingAccountRow {
+  if (rows.length > 1) {
+    console.warn(
+      "[billing] multiple billing_accounts visible to caller;",
+      "preferring org-keyed row. ids=",
+      rows.map((r) => r.id),
+    )
+  }
+  const orgKeyed = rows.find((r) => r.org_id != null)
+  return orgKeyed ?? rows[0]
+}
+
 const BTN_PRIMARY =
   "h-11 px-6 rounded-xl bg-primary text-primary-foreground font-bold text-sm shadow-sm hover:opacity-90 disabled:opacity-50 disabled:pointer-events-none inline-flex items-center justify-center gap-2"
 const BTN_AMBER =
@@ -62,12 +103,23 @@ const BTN_AMBER =
 const BTN_RED =
   "h-11 px-6 rounded-xl bg-red-600 text-white font-bold text-sm shadow-sm hover:opacity-90 disabled:opacity-50 disabled:pointer-events-none inline-flex items-center justify-center gap-2"
 
+const ORG_MANAGED_COPY =
+  "Billing is managed by your organization. Please contact your organization administrator."
+
 export function BillingPanel({ mode, orgId }: BillingPanelProps) {
-  const [loading, setLoading] = useState(true)
-  const [billingStatus, setBillingStatus] = useState<string>("trialing")
+  const [accountLoadState, setAccountLoadState] =
+    useState<AccountLoadState>("loading")
+  const [billingStatus, setBillingStatus] = useState<string | null>(null)
   const [trialEndsAt, setTrialEndsAt] = useState<string | null>(null)
   const [currentPeriodEnd, setCurrentPeriodEnd] = useState<string | null>(null)
   const [labCount, setLabCount] = useState(1)
+  /**
+   * Org membership from labs.org_id (same signal as the server resolver).
+   * unknown = lab read failed → hide purchase controls (fail closed).
+   */
+  const [orgMembership, setOrgMembership] = useState<
+    "standalone" | "org" | "unknown"
+  >(mode === "org_admin" ? "standalone" : "unknown")
   const [actionBusy, setActionBusy] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [checkoutBanner, setCheckoutBanner] = useState<"success" | "cancelled" | null>(
@@ -95,7 +147,7 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
 
   const load = useCallback(async (opts?: { quiet?: boolean }) => {
     if (!opts?.quiet) {
-      setLoading(true)
+      setAccountLoadState("loading")
       setErrorMsg(null)
     }
 
@@ -104,48 +156,76 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
         const labId = await resolveCurrentUserLabId()
         if (!labId) {
           if (!opts?.quiet) setErrorMsg("Could not resolve lab context.")
-          setLoading(false)
+          setAccountLoadState("unknown")
+          setBillingStatus(null)
+          setOrgMembership("unknown")
           return
         }
 
-        const [{ data: account }, { data: lab }] = await Promise.all([
+        // No lab_id filter — RLS scopes to this lab's row OR the org's row.
+        const [
+          { data: accounts, error: accountError },
+          { data: lab, error: labError },
+        ] = await Promise.all([
           supabase
             .from("billing_accounts")
-            .select("billing_status, current_period_end")
-            .eq("lab_id", labId)
-            .maybeSingle(),
+            .select("id, lab_id, org_id, billing_status, current_period_end"),
           supabase
             .from("labs")
-            .select("trial_ends_at")
+            .select("trial_ends_at, org_id")
             .eq("id", labId)
             .maybeSingle(),
         ])
 
-        setBillingStatus(
-          typeof account?.billing_status === "string"
-            ? account.billing_status
-            : "trialing",
-        )
-        setCurrentPeriodEnd(
-          typeof account?.current_period_end === "string"
-            ? account.current_period_end
-            : null,
-        )
-        setTrialEndsAt(
-          typeof lab?.trial_ends_at === "string" ? lab.trial_ends_at : null,
-        )
+        if (labError || !lab) {
+          // Fail closed on purchase controls; lab.org_id is the org-membership signal.
+          setOrgMembership("unknown")
+          setTrialEndsAt(null)
+        } else {
+          setOrgMembership(lab.org_id == null ? "standalone" : "org")
+          setTrialEndsAt(
+            typeof lab.trial_ends_at === "string" ? lab.trial_ends_at : null,
+          )
+        }
+
+        if (accountError) {
+          console.error("[billing-panel] billing_accounts read failed:", accountError.message)
+          setAccountLoadState("unknown")
+          setBillingStatus(null)
+          setCurrentPeriodEnd(null)
+        } else if (!accounts || accounts.length === 0) {
+          setAccountLoadState("none")
+          setBillingStatus(null)
+          setCurrentPeriodEnd(null)
+        } else {
+          const account = pickBillingAccount(accounts as BillingAccountRow[])
+          setAccountLoadState("resolved")
+          setBillingStatus(
+            typeof account.billing_status === "string" ? account.billing_status : null,
+          )
+          setCurrentPeriodEnd(
+            typeof account.current_period_end === "string"
+              ? account.current_period_end
+              : null,
+          )
+        }
         setLabCount(1)
       } else {
         if (!orgId) {
           if (!opts?.quiet) setErrorMsg("Could not resolve organization context.")
-          setLoading(false)
+          setAccountLoadState("unknown")
+          setBillingStatus(null)
           return
         }
 
-        const [{ data: account }, { data: org }, { count }] = await Promise.all([
+        const [
+          { data: account, error: accountError },
+          { data: org, error: orgError },
+          { count, error: countError },
+        ] = await Promise.all([
           supabase
             .from("billing_accounts")
-            .select("billing_status, current_period_end")
+            .select("id, lab_id, org_id, billing_status, current_period_end")
             .eq("org_id", orgId)
             .maybeSingle(),
           supabase
@@ -160,25 +240,51 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
             .eq("is_archived", false),
         ])
 
-        setBillingStatus(
-          typeof account?.billing_status === "string"
-            ? account.billing_status
-            : "trialing",
-        )
-        setCurrentPeriodEnd(
-          typeof account?.current_period_end === "string"
-            ? account.current_period_end
-            : null,
-        )
-        setTrialEndsAt(
-          typeof org?.trial_ends_at === "string" ? org.trial_ends_at : null,
-        )
-        setLabCount(count ?? 0)
+        if (accountError) {
+          console.error("[billing-panel] billing_accounts read failed:", accountError.message)
+          setAccountLoadState("unknown")
+          setBillingStatus(null)
+          setCurrentPeriodEnd(null)
+        } else if (!account) {
+          setAccountLoadState("none")
+          setBillingStatus(null)
+          setCurrentPeriodEnd(null)
+        } else {
+          setAccountLoadState("resolved")
+          setBillingStatus(
+            typeof account.billing_status === "string" ? account.billing_status : null,
+          )
+          setCurrentPeriodEnd(
+            typeof account.current_period_end === "string"
+              ? account.current_period_end
+              : null,
+          )
+        }
+
+        if (orgError) {
+          console.error("[billing-panel] organizations read failed:", orgError.message)
+          setTrialEndsAt(null)
+        } else {
+          setTrialEndsAt(
+            typeof org?.trial_ends_at === "string" ? org.trial_ends_at : null,
+          )
+        }
+
+        if (countError) {
+          console.error("[billing-panel] lab count failed:", countError.message)
+          setLabCount(0)
+        } else {
+          setLabCount(count ?? 0)
+        }
+
+        setOrgMembership("standalone")
       }
-    } catch {
+    } catch (err) {
+      console.error("[billing-panel] unexpected load error:", err)
       if (!opts?.quiet) setErrorMsg("Could not load billing information.")
-    } finally {
-      setLoading(false)
+      setAccountLoadState("unknown")
+      setBillingStatus(null)
+      if (mode === "manager") setOrgMembership("unknown")
     }
   }, [mode, orgId])
 
@@ -229,15 +335,38 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
   const daysLeft = daysUntil(trialEndsAt)
   const monthlyTotal = labCount * 200
   const renewalDate = formatRenewalDate(currentPeriodEnd)
-  const isActive = billingStatus === "active"
-  // Branch CTAs on billing_status only — stripe_customer_id is not client-readable.
-  const showActivatingCta = activating && !isActive
-  const showCheckout = !activating && billingStatus === "trialing"
-  const showPortal =
+  // org_admin always manages; manager only when labs.org_id is positively NULL.
+  const canManageBilling =
+    mode === "org_admin" || orgMembership === "standalone"
+
+  // Display status: only invent "trialing" for a positive empty read ("none").
+  const displayStatus =
+    accountLoadState === "resolved"
+      ? billingStatus
+      : accountLoadState === "none"
+        ? "trialing"
+        : null
+  const isActive = displayStatus === "active"
+  const showActivatingCta =
+    canManageBilling && activating && !isActive && accountLoadState !== "unknown"
+  const showCheckout =
+    canManageBilling &&
     !activating &&
+    (accountLoadState === "none" ||
+      (accountLoadState === "resolved" && billingStatus === "trialing"))
+  const showPortal =
+    canManageBilling &&
+    !activating &&
+    accountLoadState === "resolved" &&
     (billingStatus === "active" ||
       billingStatus === "past_due" ||
       billingStatus === "suspended")
+  // Only show the org-managed notice when we positively know this is an org lab.
+  const showOrgManagedNotice =
+    mode === "manager" &&
+    orgMembership === "org" &&
+    accountLoadState !== "loading" &&
+    accountLoadState !== "unknown"
 
   const portalCta =
     billingStatus === "past_due"
@@ -278,57 +407,57 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
           </div>
         </div>
 
-        {loading ? (
+        {accountLoadState === "loading" ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="size-6 text-muted-foreground animate-spin" aria-hidden />
           </div>
+        ) : accountLoadState === "unknown" ? (
+          <p className="text-sm text-muted-foreground font-medium">
+            Plan status unavailable
+          </p>
         ) : (
           <>
+            {/* Information — status / price / renewal. Never gated on canManageBilling. */}
             <div className="flex flex-wrap items-center gap-3">
               <span
-                className={`inline-flex px-2.5 py-1 rounded-full text-xs font-bold ${statusBadgeClass(billingStatus)}`}
+                className={`inline-flex px-2.5 py-1 rounded-full text-xs font-bold ${statusBadgeClass(displayStatus ?? "")}`}
               >
-                {billingStatus === "trialing"
+                {displayStatus === "trialing"
                   ? "Trial"
-                  : billingStatus === "active"
-                    ? "Active · $200/lab/month"
-                    : billingStatus === "past_due"
+                  : displayStatus === "active"
+                    ? "Active"
+                    : displayStatus === "past_due"
                       ? "Payment issue"
-                      : billingStatus === "suspended"
+                      : displayStatus === "suspended"
                         ? "Suspended — read-only"
-                        : billingStatus}
+                        : displayStatus ?? "—"}
               </span>
-              {billingStatus === "trialing" && daysLeft !== null ? (
+              {displayStatus === "trialing" && daysLeft !== null ? (
                 <span className="text-sm text-muted-foreground font-medium">
                   {daysLeft} day{daysLeft === 1 ? "" : "s"} remaining
                 </span>
               ) : null}
             </div>
 
-            {isActive ? (
-              <div className="space-y-1">
-                {renewalDate ? (
-                  <p className="text-xs text-muted-foreground">
-                    Renews {renewalDate}
-                  </p>
-                ) : null}
-                {mode === "org_admin" ? (
-                  <p className="text-xs text-muted-foreground">
+            <div className="space-y-1">
+              {displayStatus === "trialing" || isActive ? (
+                mode === "org_admin" ? (
+                  <p className="text-sm font-medium text-foreground">
                     {labCount} lab{labCount === 1 ? "" : "s"} × $200 = $
                     {formatUsd(monthlyTotal)}/month
                   </p>
-                ) : null}
-              </div>
-            ) : billingStatus === "trialing" ? (
-              mode === "org_admin" ? (
-                <p className="text-sm font-medium text-foreground">
-                  {labCount} lab{labCount === 1 ? "" : "s"} × $200 = $
-                  {formatUsd(monthlyTotal)}/month
+                ) : (
+                  <p className="text-sm font-medium text-foreground">
+                    $200/lab/month
+                  </p>
+                )
+              ) : null}
+              {renewalDate ? (
+                <p className="text-xs text-muted-foreground">
+                  Renews {renewalDate}
                 </p>
-              ) : (
-                <p className="text-sm font-medium text-foreground">$200/month</p>
-              )
-            ) : null}
+              ) : null}
+            </div>
 
             {errorMsg ? (
               <p
@@ -339,7 +468,12 @@ export function BillingPanel({ mode, orgId }: BillingPanelProps) {
               </p>
             ) : null}
 
-            {showActivatingCta ? (
+            {/* Actions — purchase / portal only. Org-lab staff get copy, never CTAs. */}
+            {showOrgManagedNotice ? (
+              <p className="text-sm text-muted-foreground font-medium">
+                {ORG_MANAGED_COPY}
+              </p>
+            ) : showActivatingCta ? (
               <button
                 type="button"
                 disabled

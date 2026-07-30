@@ -52,6 +52,12 @@ export function createCheckoutErrorMessage(errorCode: string): string {
       return "Your account is inactive."
     case "forbidden":
       return "You don't have permission to manage billing."
+    case "org_managed_billing":
+      return "Billing for this lab is managed by your organization. Ask your organization administrator to make changes."
+    case "role_not_permitted":
+      return "You don't have permission to manage billing."
+    case "profile_incomplete":
+      return "Your account is not fully set up for billing. Please contact support."
     case "already_subscribed":
       return "This account already has an active subscription."
     case "no_active_labs":

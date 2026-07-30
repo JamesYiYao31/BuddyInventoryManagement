@@ -2,7 +2,110 @@
 
 ## Recent Sessions
 
-### Session: July 17–24, 2026 (latest) — Week 3: Stripe Billing Integration
+### Session: July 26–31, 2026 (latest) — Billing Owner-Resolution Fix (Phases A + B1)
+- **Headline:** Closed a FINANCIAL defect: an org-lab manager clicking Upgrade
+  would create a second lab-scoped `billing_accounts` row and a second Stripe
+  subscription. Phase A (DB) + Phase B1 (server resolver) deployed and live-
+  verified. Client surfaces (Phase C) and webhook/quantity work remain.
+- **Context:** Forensic audit
+  `docs/audits/2026-07-26-billing-resolution-audit.md` (read-only; do not
+  restate). Root cause: client surfaces AND both Stripe routes resolved
+  ownership by `lab_id` only. Org-owned `billing_accounts` rows carry
+  `lab_id NULL` by CONSTRAINT `billing_owner_exactly_one`, so those lookups
+  never matched.
+
+- **Settled business model (canonical):**
+  1. Standalone lab pays for itself; its manager may purchase and manage.
+  2. An org pays ONE subscription covering all its labs.
+  3. Managers and technicians inside an org lab SEE the plan but may NEVER
+     purchase or manage billing. Only `org_admin` may.
+
+- **Phase A (deployed, verified):**
+  - New `get_my_lab_org_id()` — STABLE SECURITY DEFINER, `search_path ''`,
+    reads `labs.org_id` via the JWT `lab_id` claim (reads JWT directly;
+    does not call `get_my_lab_id()`, which has no `search_path` of its own).
+  - `billing_accounts_select_scoped` widened: manager/technician may read
+    their lab's row OR their lab's org row.
+  - `lab_billing_allows_writes()` now `bool_and` over ALL covering rows
+    (was `LIMIT 1` with no `ORDER BY` — nondeterministic if duplicates
+    existed). No rows still means allowed (brand-new labs must keep working).
+  - `REVOKE ALL` from `anon`; `REVOKE INSERT/UPDATE/DELETE` from
+    `authenticated` on `billing_accounts`. Both roles previously held
+    table-wide write grants on every column including Stripe IDs —
+    unreachable only because no write policy existed. Same defect class as
+    the closed technician self-promote hole. `REFERENCES` grants remain
+    (harmless; no `CREATE TABLE` privilege).
+
+- **Phase B1 (deployed, verified):**
+  - New `lib/resolve-billing-owner.ts` — single source of truth.
+    Discriminated union: `{kind:"lab"}` | `{kind:"org"}` | `{kind:"denied"}`.
+    Lowercase codes: `org_managed_billing`, `role_not_permitted`,
+    `profile_incomplete`.
+  - Fail-closed: every Supabase read error-checked; failed read and empty
+    result both deny. An unreadable lab is never treated as standalone.
+  - Wired into `app/api/stripe/checkout/route.ts` and `portal/route.ts`.
+    Denials return 403, not 500 (audit F-12).
+  - Optional `client` param for test injection; lazy import of the admin
+    client so `node --test` never loads Next.js. Verified against a real
+    Vercel build, not just `tsc`.
+  - `lib/resolve-billing-owner.test.ts` — 12 cases. `npm test` = 18/18.
+
+- **Live verification (production, 2026-07-31):**
+  Manager seeded in Lab1 (under Test Org). Clicked Upgrade → 403, no
+  checkout session, `billing_accounts` count unchanged at 2. Log:
+  `code=org_managed_billing`, lab `c0762265-…`. Under the old code this
+  click would have created a third row and a second Stripe subscription:
+  Test Org billed $600/mo for 2 labs instead of $400.
+
+- **SCHEMA CAPTURE (stale — regenerate):**
+  Phase A changed production. Committed
+  `database-scripts/schema-2026-07-19.sql` is now drifted. Regenerate via
+  fresh `pg_dump` / `npx supabase db dump` of the public schema — do NOT
+  hand-edit.
+
+- **Closed questions (do not reinvestigate):**
+  - Expiry columns (`active_lots`, `coa_records`, `inventory_lots`,
+    `requests` expiry fields) are type `date`, not `timestamptz` — no
+    timezone shift is possible on expiry dates. Only
+    `billing_accounts.updated_at` and `mfa_recovery_elevations.expires_at`
+    (among the audited set) are `timestamptz` for this concern.
+  - profiles RLS = ENABLED — re-verified production 2026-07-31; prior note
+    remains correct.
+
+- **Remaining phases (current plan):**
+  - **B2** — Pre-flight `already_subscribed` guard reads the row checkout
+    just inserted with hardcoded `trialing`, so it can never fire. Stripe
+    customer is re-created per purchase instead of reused. Not reachable
+    from the UI after B1, but still open.
+  - **C** — Three client surfaces: resolve by RLS scope not `lab_id`, remove
+    hardcoded `trialing` fallback, hide purchase controls for org-lab staff,
+    add denial copy, label renewal-date timezone.
+  - **D** — Webhook hardening. **DEADLINE:** both subscriptions renew
+    2026-08-19 (period-rollover path never executed). F-1 receipt-before-apply
+    can lose state permanently; F-7 cancellations never suspend.
+  - **E** — Super-admin billing overview excludes org labs entirely
+    (`page.tsx:447`), so an overcharge would appear on no Buddy surface.
+  - **F** — NEW: subscription quantity computed once at checkout, never
+    revisited. Adding a lab to an org = free; archiving one = overcharge.
+    Decision deferred: prorate immediately vs apply at next renewal.
+  - **Parked:** what happens when a standalone paying lab later joins an org.
+
+- **Files (A + B1):** `lib/resolve-billing-owner.ts`,
+  `lib/resolve-billing-owner.test.ts`, `app/api/stripe/checkout/route.ts`,
+  `app/api/stripe/portal/route.ts`,
+  `docs/audits/2026-07-26-billing-resolution-audit.md`. Phase A is
+  production SQL (not yet re-captured in a schema dump).
+
+- **Current state:** A + B1 live and verified. Org-lab Upgrade path blocked
+  server-side. Next: C (client surfaces), then D before 2026-08-19 renewal.
+- **Correction (same day, 2026-07-31):** An early draft of the Key Technical /
+  Security rules claimed Stripe routes gate role from the JWT while
+  `resolveBillingOwner` re-reads `profiles` — presented as a deliberate
+  cross-check. That was FALSE (both read `profiles.role` via the admin
+  client) and was removed/replaced the same day. See corrected rule under
+  Key Technical Rules / Security Rules.
+
+### Session: July 17–24, 2026 — Week 3: Stripe Billing Integration
 - **Headline:** Complete billing system in Stripe sandbox/test mode — from zero
   to enforced read-only. Checkout, webhook state mapping, Billing Portal,
   customer + super-admin billing surfaces, lab-wide banners, and 21 restrictive
@@ -1547,6 +1650,25 @@ When helping with any database operation, always:
 - get_my_lab_id() and get_my_org_id() read from JWT only — never query profiles
 - Super admin checks use `auth.jwt() ->> 'user_role'` — never a profiles subquery
 - Labs RLS policies must never query profiles — JWT claims only
+- Billing ownership is resolved ONLY by `resolveBillingOwner()`. Never derive
+  it inline from role or `lab_id` in a route or component.
+- Org membership for billing must be read from `labs.org_id`.
+  `profiles.org_id` and the JWT `org_id` claim are routinely NULL for
+  org-lab staff and cannot stand in.
+- Stripe route / resolver role reads: application code (checkout/portal
+  gates and `resolveBillingOwner`) reads role from `profiles.role` via the
+  admin client — single source of truth; a role change takes effect in the
+  app immediately. RLS policies read role from `auth.jwt() ->> 'user_role'`,
+  so the database keeps applying the OLD role until the user's token
+  refreshes. Consequence: after a role change the app sees it instantly,
+  RLS does not. This fails safe in both directions (demoted user stopped by
+  the app; promoted user stopped by RLS) but is a layer divergence, not a
+  designed cross-check — do not treat it as a security control.
+  (An earlier note claiming a deliberate JWT-vs-DB cross-check inside the
+  app layer was recorded in error on 2026-07-31 and corrected the same day.)
+- Table-level grants and RLS policies are two independent locks. A table can
+  be safe purely because no policy exists while grants sit wide open. Audit
+  both together.
 
 ### JWT Claims Architecture
 Every JWT contains 3 custom claims injected at login by
@@ -1558,6 +1680,11 @@ Every JWT contains 3 custom claims injected at login by
 Helpers:
 - `get_my_lab_id()` → `SELECT NULLIF(auth.jwt() ->> 'lab_id', '')::uuid`
 - `get_my_org_id()` → `SELECT NULLIF(auth.jwt() ->> 'org_id', '')::uuid`
+- `get_my_lab_org_id()` → reads `labs.org_id` for the JWT `lab_id` claim
+  (STABLE SECURITY DEFINER, empty `search_path`; used by
+  `billing_accounts_select_scoped` so org-lab staff can see the org billing
+  row). Do not replace with a call to `get_my_lab_id()` inside it —
+  `get_my_lab_id()` has no `search_path` of its own.
 
 If a user's role/lab changes, they must log out and back in for new
 JWT claims to take effect.
@@ -1581,10 +1708,16 @@ documented accepted risks. Remaining 0.2/10 gap requires enterprise
 tooling (formal pen testing, SOC 2).
 
 ### Verified Facts
-- profiles RLS: ENABLED (verified June 16, 2026, pg_class.relrowsecurity = true).
-  Public-schema tables: 17 total (16 verified June 16, 2026 in Supabase;
-  `security_logs` added with RLS July 10, 2026), RLS enabled on all. Never
-  disable. Supersedes any note claiming it should be disabled.
+- profiles RLS: ENABLED (verified June 16, 2026; re-verified 2026-07-31,
+  pg_class.relrowsecurity = true). Public-schema tables: 17 total (16 verified
+  June 16, 2026 in Supabase; `security_logs` added with RLS July 10, 2026),
+  RLS enabled on all. Never disable. Supersedes any note claiming it should
+  be disabled.
+- Expiry columns are `date`, not `timestamptz` (`active_lots`, `coa_records`,
+  `inventory_lots`, `requests` expiry fields) — no timezone shift on expiry
+  dates. Closed 2026-07-31; do not reinvestigate. (Among related billing/MFA
+  columns, `billing_accounts.updated_at` and
+  `mfa_recovery_elevations.expires_at` are `timestamptz`.)
 
 ### Security Layers
 | Layer | Implementation |
@@ -2431,6 +2564,18 @@ orderedNotReceived, benchExpiring, outOfStock, totalCount, isLoading.
   tables grandfathered until October 30, 2026.
 - All new table SQL must follow the Standard New Table Template below
   (create + grant + RLS + policies — four steps, in that order).
+- Billing ownership is resolved ONLY by `resolveBillingOwner()`. Never derive
+  it inline from role or `lab_id` in a route or component.
+- Org membership for billing must be read from `labs.org_id` — never from
+  `profiles.org_id` or the JWT `org_id` claim (routinely NULL for org-lab staff).
+- Stripe checkout/portal and `resolveBillingOwner` both read role from
+  `profiles.role` (admin client) — not from the JWT. RLS still uses
+  `auth.jwt() ->> 'user_role'` until token refresh. App-vs-RLS lag is a
+  layer divergence that fails safe, not a designed cross-check. (False
+  JWT-vs-DB app-layer claim recorded 2026-07-31, corrected same day.)
+- Table-level GRANTs and RLS policies are independent locks — audit both.
+  A missing write policy is not a substitute for tight grants (see Phase A
+  `billing_accounts` revoke; same class as the role-column lockdown).
 
 ---
 

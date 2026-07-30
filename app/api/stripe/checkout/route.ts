@@ -3,6 +3,7 @@ import { Redis } from "@upstash/redis"
 import { NextRequest, NextResponse } from "next/server"
 import Stripe from "stripe"
 import { authenticateBearerRequest, createAdminClient } from "@/lib/mfa-api-auth"
+import { resolveBillingOwner } from "@/lib/resolve-billing-owner"
 
 export const runtime = "nodejs"
 
@@ -78,20 +79,18 @@ export async function POST(request: NextRequest) {
       return failureResponse("forbidden", 403, "Forbidden.")
     }
 
-    let ownerFilter: { lab_id: string } | { org_id: string }
-    if (role === "manager") {
-      if (!profile.lab_id) {
-        console.error("[stripe/checkout] Manager missing lab_id:", user.id)
-        return NextResponse.json({ error: "Internal server error" }, { status: 500 })
-      }
-      ownerFilter = { lab_id: profile.lab_id as string }
-    } else {
-      if (!profile.org_id) {
-        console.error("[stripe/checkout] Org admin missing org_id:", user.id)
-        return NextResponse.json({ error: "Internal server error" }, { status: 500 })
-      }
-      ownerFilter = { org_id: profile.org_id as string }
+    // Ownership comes from ONE place for both Stripe routes — never derived
+    // inline from role here. A manager inside an org lab is denied: the org
+    // pays one subscription and only its org_admin may transact.
+    const owner = await resolveBillingOwner(user.id)
+    if (owner.kind === "denied") {
+      // 403, not 500 — an incomplete profile or an org-managed lab is a
+      // permission/data fact about the caller, not a server fault (audit F-12).
+      return failureResponse(owner.code, 403, owner.message)
     }
+
+    const ownerFilter: { lab_id: string } | { org_id: string } =
+      owner.kind === "lab" ? { lab_id: owner.labId } : { org_id: owner.orgId }
 
     let billingAccount: BillingAccountRow | null = null
 
@@ -150,8 +149,8 @@ export async function POST(request: NextRequest) {
     }
 
     let quantity = 1
-    if (role === "org_admin" && "org_id" in ownerFilter) {
-      const orgId = ownerFilter.org_id
+    if (owner.kind === "org") {
+      const orgId = owner.orgId
       const { count, error: countError } = await admin
         .from("labs")
         .select("id", { count: "exact", head: true })

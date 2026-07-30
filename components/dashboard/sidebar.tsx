@@ -39,32 +39,72 @@ function daysUntil(iso: string | null | undefined): number | null {
   return Math.max(0, Math.ceil(ms / (1000 * 60 * 60 * 24)))
 }
 
+/** Viewer-local date + short timezone label (period-end is timezone-sensitive). */
 function formatRenewalDate(iso: string | null | undefined): string | null {
   if (!iso) return null
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return null
   try {
-    return new Date(iso).toLocaleDateString(undefined, { dateStyle: "medium" })
+    // dateStyle and timeZoneName cannot be combined in Intl — that throws and
+    // was silently nulling every renewal label after C5.
+    const date = new Intl.DateTimeFormat(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    }).format(d)
+    const tz =
+      new Intl.DateTimeFormat(undefined, { timeZoneName: "short" })
+        .formatToParts(d)
+        .find((part) => part.type === "timeZoneName")?.value ?? ""
+    return tz ? `${date} (${tz})` : date
   } catch {
     return null
   }
 }
 
+type BillingAccountRow = {
+  id: string
+  lab_id: string | null
+  org_id: string | null
+  billing_status: string
+  current_period_end: string | null
+}
+
+function pickBillingAccount(rows: BillingAccountRow[]): BillingAccountRow {
+  if (rows.length > 1) {
+    console.warn(
+      "[billing] multiple billing_accounts visible to caller;",
+      "preferring org-keyed row. ids=",
+      rows.map((r) => r.id),
+    )
+  }
+  const orgKeyed = rows.find((r) => r.org_id != null)
+  return orgKeyed ?? rows[0]
+}
+
 /** Shared Lab License box for manager and technician. */
 function LabLicenseCard() {
-  const [line, setLine] = useState<string>("Trial")
+  // Start empty — never flash "Trial" while a paid org plan is still loading.
+  const [line, setLine] = useState<string>("")
 
   useEffect(() => {
     let cancelled = false
 
     const run = async () => {
       const labId = await resolveCurrentUserLabId()
-      if (!labId || cancelled) return
+      if (!labId || cancelled) {
+        if (!cancelled) setLine("Plan status unavailable")
+        return
+      }
 
-      const [{ data: account }, { data: lab }] = await Promise.all([
+      // No lab_id filter — RLS scopes to this lab's row OR the org's row.
+      const [
+        { data: accounts, error: accountError },
+        { data: lab, error: labError },
+      ] = await Promise.all([
         supabase
           .from("billing_accounts")
-          .select("billing_status, current_period_end")
-          .eq("lab_id", labId)
-          .maybeSingle(),
+          .select("id, lab_id, org_id, billing_status, current_period_end"),
         supabase
           .from("labs")
           .select("trial_ends_at")
@@ -74,16 +114,29 @@ function LabLicenseCard() {
 
       if (cancelled) return
 
+      if (accountError) {
+        console.error("[LabLicenseCard] billing_accounts read failed:", accountError.message)
+        setLine("Plan status unavailable")
+        return
+      }
+
+      const trialEndsAt =
+        !labError && typeof lab?.trial_ends_at === "string" ? lab.trial_ends_at : null
+
+      if (!accounts || accounts.length === 0) {
+        // Positive empty read — genuine pre-purchase trial UI.
+        const n = daysUntil(trialEndsAt)
+        setLine(n !== null ? `Trial · ${n} day${n === 1 ? "" : "s"} left` : "Trial")
+        return
+      }
+
+      const account = pickBillingAccount(accounts as BillingAccountRow[])
       const status =
-        typeof account?.billing_status === "string"
-          ? account.billing_status
-          : "trialing"
+        typeof account.billing_status === "string" ? account.billing_status : null
       const periodEnd =
-        typeof account?.current_period_end === "string"
+        typeof account.current_period_end === "string"
           ? account.current_period_end
           : null
-      const trialEndsAt =
-        typeof lab?.trial_ends_at === "string" ? lab.trial_ends_at : null
 
       if (status === "active") {
         const renews = formatRenewalDate(periodEnd)
@@ -101,9 +154,13 @@ function LabLicenseCard() {
         return
       }
 
-      // trialing (default when no billing_accounts row)
-      const n = daysUntil(trialEndsAt)
-      setLine(n !== null ? `Trial · ${n} day${n === 1 ? "" : "s"} left` : "Trial")
+      if (status === "trialing") {
+        const n = daysUntil(trialEndsAt)
+        setLine(n !== null ? `Trial · ${n} day${n === 1 ? "" : "s"} left` : "Trial")
+        return
+      }
+
+      setLine("Plan status unavailable")
     }
 
     void run()
@@ -118,7 +175,7 @@ function LabLicenseCard() {
         <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
           Lab License
         </p>
-        <p className="mt-1 text-sm font-black text-foreground">{line}</p>
+        <p className="mt-1 text-sm font-black text-foreground">{line || "…"}</p>
       </div>
     </div>
   )

@@ -3,6 +3,7 @@ import { Redis } from "@upstash/redis"
 import { NextRequest, NextResponse } from "next/server"
 import Stripe from "stripe"
 import { authenticateBearerRequest, createAdminClient } from "@/lib/mfa-api-auth"
+import { resolveBillingOwner } from "@/lib/resolve-billing-owner"
 
 export const runtime = "nodejs"
 
@@ -79,20 +80,16 @@ export async function POST(request: NextRequest) {
       return failureResponse("forbidden", 403, "Forbidden.")
     }
 
-    let ownerFilter: { lab_id: string } | { org_id: string }
-    if (role === "manager") {
-      if (!profile.lab_id) {
-        console.error("[stripe/portal] Manager missing lab_id:", user.id)
-        return NextResponse.json({ error: "Internal server error" }, { status: 500 })
-      }
-      ownerFilter = { lab_id: profile.lab_id as string }
-    } else {
-      if (!profile.org_id) {
-        console.error("[stripe/portal] Org admin missing org_id:", user.id)
-        return NextResponse.json({ error: "Internal server error" }, { status: 500 })
-      }
-      ownerFilter = { org_id: profile.org_id as string }
+    // Same single source of truth as checkout. A manager inside an org lab now
+    // gets 403 org_managed_billing instead of a misleading 409 "no subscription
+    // found — upgrade first", which pointed them at a second subscription.
+    const owner = await resolveBillingOwner(user.id)
+    if (owner.kind === "denied") {
+      return failureResponse(owner.code, 403, owner.message)
     }
+
+    const ownerFilter: { lab_id: string } | { org_id: string } =
+      owner.kind === "lab" ? { lab_id: owner.labId } : { org_id: owner.orgId }
 
     // Do NOT create — portal requires an existing Stripe customer.
     const { data: existing, error: selectError } = await admin
