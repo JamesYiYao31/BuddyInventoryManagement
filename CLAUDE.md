@@ -121,11 +121,13 @@
   click would have created a third row and a second Stripe subscription:
   Test Org billed $600/mo for 2 labs instead of $400.
 
-- **SCHEMA CAPTURE (stale AGAIN — regenerate required next step):**
-  Phase A + `applied_at` on `processed_stripe_events` changed production.
-  Committed `database-scripts/schema-2026-07-19.sql` is drifted (no
-  `applied_at`). Regenerate via fresh `pg_dump` / `npx supabase db dump`
-  of the public schema — do NOT hand-edit.
+- **SCHEMA CAPTURE (current):**
+  Regenerated 2026-07-31 via `pg_dump --schema=public --schema-only` of
+  production. Authoritative file:
+  `database-scripts/schema-2026-07-31.sql` (includes Phase A
+  `get_my_lab_org_id` / grant/RLS changes and `processed_stripe_events.applied_at`).
+  Prior `schema-2026-07-19.sql` retired. Regenerate after any future manual
+  SQL change — do NOT hand-edit.
 
 - **Closed questions (do not reinvestigate):**
   - Expiry columns (`active_lots`, `coa_records`, `inventory_lots`,
@@ -174,14 +176,14 @@
   `lib/format-renewal-date.test.ts`, `app/api/stripe/webhook/route.ts`,
   `lib/stripe-subscription-account-resolution.ts`,
   `lib/stripe-subscription-account-resolution.test.ts`,
-  `docs/audits/2026-07-26-billing-resolution-audit.md`. Phase A +
-  `applied_at` are production SQL (not yet re-captured in a schema dump).
+  `database-scripts/schema-2026-07-31.sql`. Phase A +
+  `applied_at` are captured in that dump.
 
 - **Current state:** A + B1 + C + D live and verified. Org-lab Upgrade
   path blocked server-side; customer surfaces RLS-scoped; webhook
   claim/apply/`applied_at` durable. `tsc --noEmit` exit 0; `npm test`
   30/30. Next: E (super-admin billing overview), then F / B2. Watch
-  2026-08-19 renewal. Regenerate schema dump.
+  2026-08-19 renewal.
 - **Correction (same day, 2026-07-31):** An early draft of the Key Technical /
   Security rules claimed Stripe routes gate role from the JWT while
   `resolveBillingOwner` re-reads `profiles` — presented as a deliberate
@@ -360,19 +362,19 @@
   SANDBOX/TEST mode — activation requires a US address (the WY registered
   agent), so it is blocked on LLC formation.
 
-- **SCHEMA CAPTURE (drift resolved):**
+- **SCHEMA CAPTURE (drift resolved at the time; later superseded):**
   The Week 3 schema was executed manually in the Supabase SQL editor and existed
-  only in production. It is now captured: `database-scripts/schema-2026-07-19.sql`
-  is a full pg_dump of the public schema (via `npx supabase db dump`, requires
-  Docker Desktop running), covering tables, RLS policies, functions, and grants —
-  including `billing_accounts`, `processed_stripe_events`, the 21 billing restrictive
-  policies, `lab_billing_allows_writes()`, and the `billing_accounts` column
-  revoke/re-grant. This file supersedes `supabase-copy.sql`, which remains
-  DEPRECATED and drifted. It also captures the `coa_records` and
-  `lot_validation_records` permissive policies that had never appeared in any repo
-  SQL file.
-  Regenerate this dump after any future manual SQL change, rather than
-  hand-editing it.
+  only in production. It was first captured as
+  `database-scripts/schema-2026-07-19.sql` (via `npx supabase db dump`), covering
+  tables, RLS policies, functions, and grants — including `billing_accounts`,
+  `processed_stripe_events`, the 21 billing restrictive policies,
+  `lab_billing_allows_writes()`, and the `billing_accounts` column
+  revoke/re-grant. That file also captured the `coa_records` and
+  `lot_validation_records` permissive policies that had never appeared in any
+  repo SQL file, and superseded `supabase-copy.sql` (still DEPRECATED).
+  **Current source of record:** `database-scripts/schema-2026-07-31.sql`
+  (Phase A + `applied_at`; 07-19 retired). Regenerate after any future manual
+  SQL change — do NOT hand-edit.
 
 - **Deferred / next:**
   - **UNTESTED PATH:** the `ba.org_id = l.org_id` branch of
@@ -405,8 +407,9 @@
   `package-lock.json` (Stripe SDK), manager `/dashboard` Billing tab +
   lab-wide banner/30s poll, `/org-admin` billing section, unified
   `LabLicenseCard` (manager + technician), truth-driven super-admin Billing
-  Overview. Authoritative schema artifact:
-  `database-scripts/schema-2026-07-19.sql` (see SCHEMA CAPTURE). Full file
+  Overview. Schema artifact at that close:
+  `database-scripts/schema-2026-07-19.sql` (since superseded by
+  `schema-2026-07-31.sql`). Full file
   list is the `4ca2576..e866b76` code commit range (8 commits above).
 
 - **Current state:** Week 3 Stripe billing SHIPPED in sandbox and
@@ -2306,7 +2309,7 @@ created_at, updated_at
 - Restrictive `billing_accounts_require_active_user` mirrors deactivation
 - Write-gate for lab data: `lab_billing_allows_writes()` + 21 restrictive
   policies (7 tables × INSERT/UPDATE/DELETE); excludes `activity_logs` and
-  `feedback`. Source of record: `database-scripts/schema-2026-07-19.sql`
+  `feedback`. Source of record: `database-scripts/schema-2026-07-31.sql`
 
 ### processed_stripe_events
 ```
@@ -2321,8 +2324,7 @@ payload (jsonb)
 - Webhook idempotency / receipt table; service-role writes. Receipt
   timestamp column is `received_at` (there is no `created_at` on this table).
 - SELECT: super_admin only (`stripe_events_select_super`)
-- Source of record: `database-scripts/schema-2026-07-19.sql` — **STALE**
-  (missing `applied_at`); regenerate via pg_dump, do not hand-edit.
+- Source of record: `database-scripts/schema-2026-07-31.sql`
 
 ### Storage bucket: coa-documents (private)
 Path: `{lab_id}/{lot_id}/{timestamp}_{filename}`
