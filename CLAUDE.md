@@ -128,6 +128,18 @@
   `get_my_lab_org_id` / grant/RLS changes and `processed_stripe_events.applied_at`).
   Prior `schema-2026-07-19.sql` retired. Regenerate after any future manual
   SQL change — do NOT hand-edit.
+  **Dump networking (banked 2026-07-31):** the direct host
+  `db.<ref>.supabase.co` resolves **IPv6-only** from this machine. Docker
+  Desktop cannot reach that address (`Network is unreachable` on the AAAA),
+  so `docker run … pg_dump` against the direct URL fails. Workaround that
+  worked: a short-lived host-side TCP relay (Node `net` listen on
+  `127.0.0.1:15432` → IPv6 DB), then
+  `docker run --add-host=host.docker.internal:host-gateway` with
+  `postgresql://…@host.docker.internal:15432/postgres?sslmode=require`,
+  writing the file via a volume mount (`-v …/database-scripts:/out`) so
+  PowerShell does not UTF-16 the output. Host-native `pg_dump` (if
+  installed) can use the direct URL without a relay. Do not rediscover this
+  the hard way next regenerate.
 
 - **Closed questions (do not reinvestigate):**
   - Expiry columns (`active_lots`, `coa_records`, `inventory_lots`,
@@ -149,6 +161,8 @@
     handed. Known limitation, no forward-only guard yet. Only ever replay
     the most recent invoice event per account.
   - Silent-empty remains the recurring failure mode (see Security Rules).
+  - Schema dumps via Docker: direct Supabase DB host is IPv6-only here —
+    see SCHEMA CAPTURE networking note (host relay or host-native pg_dump).
 
 - **Remaining phases (current plan):**
   - **B2** — open. Pre-flight `already_subscribed` guard is self-defeating
