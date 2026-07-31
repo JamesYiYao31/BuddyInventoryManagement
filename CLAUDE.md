@@ -2576,6 +2576,13 @@ orderedNotReceived, benchExpiring, outOfStock, totalCount, isLoading.
 - Table-level GRANTs and RLS policies are independent locks — audit both.
   A missing write policy is not a substitute for tight grants (see Phase A
   `billing_accounts` revoke; same class as the role-column lockdown).
+- Silent-empty is this codebase's recurring failure mode. Three instances
+  found in one week: an empty `billing_accounts` read rendering as "Trial";
+  an RLS-blocked read being indistinguishable from zero rows; and a throwing
+  date formatter caught into null, blanking the renewal line for every user.
+  In each case a failure produced an innocent-looking empty value that the
+  UI accepted as fact. Rule: a catch block that returns null/empty must log
+  first. Never let a failure and a legitimately-empty result look identical.
 
 ---
 

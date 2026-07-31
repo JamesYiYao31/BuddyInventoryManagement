@@ -18,6 +18,7 @@ import {
   CreditCard,
 } from "lucide-react"
 import { SidebarPage, resolveCurrentUserLabId } from "@/lib/inventory-utils"
+import { formatRenewalDate } from "@/lib/format-renewal-date"
 import { supabase } from "@/lib/supabase"
 import Image from "next/image"
 
@@ -37,29 +38,6 @@ function daysUntil(iso: string | null | undefined): number | null {
   if (Number.isNaN(end.getTime())) return null
   const ms = end.getTime() - Date.now()
   return Math.max(0, Math.ceil(ms / (1000 * 60 * 60 * 24)))
-}
-
-/** Viewer-local date + short timezone label (period-end is timezone-sensitive). */
-function formatRenewalDate(iso: string | null | undefined): string | null {
-  if (!iso) return null
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return null
-  try {
-    // dateStyle and timeZoneName cannot be combined in Intl — that throws and
-    // was silently nulling every renewal label after C5.
-    const date = new Intl.DateTimeFormat(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    }).format(d)
-    const tz =
-      new Intl.DateTimeFormat(undefined, { timeZoneName: "short" })
-        .formatToParts(d)
-        .find((part) => part.type === "timeZoneName")?.value ?? ""
-    return tz ? `${date} (${tz})` : date
-  } catch {
-    return null
-  }
 }
 
 type BillingAccountRow = {

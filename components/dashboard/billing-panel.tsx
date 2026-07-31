@@ -12,6 +12,7 @@ import {
   createBillingPortalSession,
   createBillingPortalErrorMessage,
 } from "@/lib/billing-portal"
+import { formatRenewalDate } from "@/lib/format-renewal-date"
 
 type BillingPanelProps = {
   /** manager = lab-scoped; org_admin = org-scoped */
@@ -40,29 +41,6 @@ function daysUntil(iso: string | null | undefined): number | null {
 
 function formatUsd(amount: number): string {
   return amount.toLocaleString("en-US")
-}
-
-/** Viewer-local date + short timezone label (period-end is timezone-sensitive). */
-function formatRenewalDate(iso: string | null | undefined): string | null {
-  if (!iso) return null
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return null
-  try {
-    // dateStyle and timeZoneName cannot be combined in Intl — that throws and
-    // was silently nulling every renewal label after C5.
-    const date = new Intl.DateTimeFormat(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    }).format(d)
-    const tz =
-      new Intl.DateTimeFormat(undefined, { timeZoneName: "short" })
-        .formatToParts(d)
-        .find((part) => part.type === "timeZoneName")?.value ?? ""
-    return tz ? `${date} (${tz})` : date
-  } catch {
-    return null
-  }
 }
 
 function statusBadgeClass(status: string): string {

@@ -1,18 +1,36 @@
 import { NextRequest, NextResponse } from "next/server"
 import Stripe from "stripe"
 import { createAdminClient } from "@/lib/mfa-api-auth"
+import { decideSubscriptionBillingAccount } from "@/lib/stripe-subscription-account-resolution"
 import type { SupabaseClient } from "@supabase/supabase-js"
 
 export const runtime = "nodejs"
 
 /**
- * Stripe webhook — verify, receipt (idempotent), then map state into billing_accounts.
- * Signature verification IS authentication. No bearer auth, no Upstash limiter.
- * State applies ONLY on first delivery (duplicate upsert → early return).
+ * Stripe webhook — verify, claim receipt (applied_at NULL), apply state, then
+ * stamp applied_at. Signature verification IS authentication.
  *
- * Stripe client is created inside the handler (not module scope) so Next.js
- * build-time page-data collection does not require STRIPE_SECRET_KEY.
+ * Durability (F-1): skip only when applied_at is set. Unapplied receipts are
+ * re-applied on Stripe retry. Write failures return 500; terminal ignores
+ * (unhandled type, unmatched account) return 200 with applied_at set.
  */
+
+type ApplyBillingResult =
+  | { ok: true }
+  | { ok: false; reason: string }
+
+type ResolveAccountResult =
+  | { status: "found"; accountId: string }
+  | { status: "unmatched" }
+  | { status: "error"; reason: string }
+
+const HANDLED_TYPES = new Set([
+  "checkout.session.completed",
+  "customer.subscription.updated",
+  "customer.subscription.deleted",
+  "invoice.paid",
+  "invoice.payment_failed",
+])
 
 function epochToIso(epoch: number | null | undefined): string | null {
   if (typeof epoch !== "number" || !Number.isFinite(epoch)) return null
@@ -81,14 +99,16 @@ function getInvoicePeriodEnd(invoice: Stripe.Invoice): string | null {
 async function resolveBillingAccountId(
   admin: SupabaseClient,
   event: Stripe.Event,
-): Promise<string | null> {
+): Promise<ResolveAccountResult> {
   const object = event.data.object as unknown as Record<string, unknown>
 
   if (event.type === "checkout.session.completed") {
     const session = object as unknown as Stripe.Checkout.Session
-    return typeof session.client_reference_id === "string"
-      ? session.client_reference_id
-      : null
+    const id =
+      typeof session.client_reference_id === "string"
+        ? session.client_reference_id
+        : null
+    return id ? { status: "found", accountId: id } : { status: "unmatched" }
   }
 
   if (
@@ -96,8 +116,35 @@ async function resolveBillingAccountId(
     event.type === "customer.subscription.deleted"
   ) {
     const sub = object as unknown as Stripe.Subscription
+    const { data, error } = await admin
+      .from("billing_accounts")
+      .select("id")
+      .eq("stripe_subscription_id", sub.id)
+      .maybeSingle()
+
     const fromMeta = sub.metadata?.billing_account_id
-    return typeof fromMeta === "string" && fromMeta.length > 0 ? fromMeta : null
+    const metadataAccountId =
+      typeof fromMeta === "string" && fromMeta.length > 0 ? fromMeta : null
+
+    const decision = decideSubscriptionBillingAccount({
+      lookup: {
+        data: data?.id ? { id: data.id as string } : null,
+        error: error ? { message: error.message } : null,
+      },
+      metadataAccountId,
+    })
+
+    if (decision.kind === "lookup_failed") {
+      console.error(
+        "[stripe/webhook] billing_accounts lookup by subscription failed:",
+        decision.reason,
+      )
+      return { status: "error", reason: decision.reason }
+    }
+    if (decision.kind === "account") {
+      return { status: "found", accountId: decision.accountId }
+    }
+    return { status: "unmatched" }
   }
 
   if (event.type === "invoice.paid" || event.type === "invoice.payment_failed") {
@@ -112,20 +159,24 @@ async function resolveBillingAccountId(
         .maybeSingle()
 
       if (error) {
+        // Keep out-of-order invoice metadata fallback load-bearing: log and
+        // fall through rather than hard-failing the invoice path on lookup error.
         console.error(
           "[stripe/webhook] billing_accounts lookup by subscription failed:",
           error.message,
         )
       } else if (data?.id) {
-        return data.id as string
+        return { status: "found", accountId: data.id as string }
       }
     }
 
-    // Fallback: metadata path on the receipted invoice payload (this event).
-    return getInvoiceBillingAccountId(invoice)
+    const fromMeta = getInvoiceBillingAccountId(invoice)
+    return fromMeta
+      ? { status: "found", accountId: fromMeta }
+      : { status: "unmatched" }
   }
 
-  return null
+  return { status: "unmatched" }
 }
 
 function getSubscriptionPeriodEnd(sub: Stripe.Subscription): string | null {
@@ -143,7 +194,7 @@ async function applyBillingEvent(
   admin: SupabaseClient,
   event: Stripe.Event,
   accountId: string,
-): Promise<void> {
+): Promise<ApplyBillingResult> {
   const now = new Date().toISOString()
   const object = event.data.object
 
@@ -158,11 +209,20 @@ async function applyBillingEvent(
       .eq("id", accountId)
       .maybeSingle()
 
-    if (readError || !row) {
+    if (readError) {
+      console.error(
+        "[stripe/webhook] checkout.session.completed read failed:",
+        readError.message,
+      )
+      return { ok: false, reason: readError.message }
+    }
+
+    if (!row) {
       console.error(
         `[stripe/webhook] UNMATCHED ${event.id} (checkout row missing)`,
       )
-      return
+      // Terminal: bad reference will not appear on retry.
+      return { ok: true }
     }
 
     const existingSub =
@@ -178,7 +238,8 @@ async function applyBillingEvent(
       console.error(
         `[stripe/webhook] DUPLICATE SUBSCRIPTION account=${accountId} existing=${existingSub} incoming=${incomingSub}`,
       )
-      return
+      // Terminal: refuse overwrite; do not retry forever.
+      return { ok: true }
     }
 
     const { error: updateError } = await admin
@@ -196,8 +257,9 @@ async function applyBillingEvent(
         "[stripe/webhook] checkout.session.completed update failed:",
         updateError.message,
       )
+      return { ok: false, reason: updateError.message }
     }
-    return
+    return { ok: true }
   }
 
   if (event.type === "invoice.paid") {
@@ -216,8 +278,9 @@ async function applyBillingEvent(
         "[stripe/webhook] invoice.paid update failed:",
         updateError.message,
       )
+      return { ok: false, reason: updateError.message }
     }
-    return
+    return { ok: true }
   }
 
   if (event.type === "invoice.payment_failed") {
@@ -234,8 +297,9 @@ async function applyBillingEvent(
         "[stripe/webhook] invoice.payment_failed update failed:",
         updateError.message,
       )
+      return { ok: false, reason: updateError.message }
     }
-    return
+    return { ok: true }
   }
 
   if (event.type === "customer.subscription.updated") {
@@ -258,8 +322,9 @@ async function applyBillingEvent(
         "[stripe/webhook] customer.subscription.updated update failed:",
         updateError.message,
       )
+      return { ok: false, reason: updateError.message }
     }
-    return
+    return { ok: true }
   }
 
   if (event.type === "customer.subscription.deleted") {
@@ -276,8 +341,113 @@ async function applyBillingEvent(
         "[stripe/webhook] customer.subscription.deleted update failed:",
         updateError.message,
       )
+      return { ok: false, reason: updateError.message }
     }
+    return { ok: true }
   }
+
+  // Unhandled type should be filtered before calling apply — treat as terminal.
+  return { ok: true }
+}
+
+type ClaimResult =
+  | { status: "ready" }
+  | { status: "already_applied" }
+  | { status: "error"; reason: string }
+
+/**
+ * Claim the event receipt with applied_at NULL. Skip only when a prior
+ * attempt already stamped applied_at (true duplicate). A row with
+ * applied_at NULL means re-apply.
+ */
+async function claimEventReceipt(
+  admin: SupabaseClient,
+  event: Stripe.Event,
+): Promise<ClaimResult> {
+  const { data: existing, error: selectError } = await admin
+    .from("processed_stripe_events")
+    .select("event_id, applied_at")
+    .eq("event_id", event.id)
+    .maybeSingle()
+
+  if (selectError) {
+    console.error(
+      "[stripe/webhook] processed_stripe_events select failed:",
+      selectError.message,
+    )
+    return { status: "error", reason: selectError.message }
+  }
+
+  if (existing?.applied_at) {
+    return { status: "already_applied" }
+  }
+
+  if (existing) {
+    // Prior attempt died mid-flight — re-apply without inserting.
+    return { status: "ready" }
+  }
+
+  const { error: insertError } = await admin
+    .from("processed_stripe_events")
+    .insert({
+      event_id: event.id,
+      event_type: event.type,
+      payload: event,
+      applied_at: null,
+    })
+
+  if (!insertError) {
+    return { status: "ready" }
+  }
+
+  // Race: another delivery inserted first — re-read applied_at.
+  const { data: raced, error: raceError } = await admin
+    .from("processed_stripe_events")
+    .select("event_id, applied_at")
+    .eq("event_id", event.id)
+    .maybeSingle()
+
+  if (raceError) {
+    console.error(
+      "[stripe/webhook] processed_stripe_events race re-select failed:",
+      raceError.message,
+    )
+    return { status: "error", reason: raceError.message }
+  }
+
+  if (!raced) {
+    console.error(
+      "[stripe/webhook] processed_stripe_events insert failed and row missing:",
+      insertError.message,
+    )
+    return { status: "error", reason: insertError.message }
+  }
+
+  if (raced.applied_at) {
+    return { status: "already_applied" }
+  }
+
+  return { status: "ready" }
+}
+
+async function markEventApplied(
+  admin: SupabaseClient,
+  eventId: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const { error } = await admin
+    .from("processed_stripe_events")
+    .update({ applied_at: new Date().toISOString() })
+    .eq("event_id", eventId)
+    .is("applied_at", null)
+
+  if (error) {
+    console.error(
+      "[stripe/webhook] processed_stripe_events applied_at stamp failed:",
+      error.message,
+    )
+    return { ok: false, reason: error.message }
+  }
+  return { ok: true }
 }
 
 export async function POST(req: NextRequest) {
@@ -316,45 +486,58 @@ export async function POST(req: NextRequest) {
   try {
     const admin = createAdminClient()
 
-    // ignoreDuplicates: true → duplicate event_id returns data: [] and no error
-    // (service role bypasses RLS, so empty array can only mean duplicate).
-    const { data, error } = await admin
-      .from("processed_stripe_events")
-      .upsert(
-        {
-          event_id: event.id,
-          event_type: event.type,
-          payload: event,
-        },
-        { onConflict: "event_id", ignoreDuplicates: true },
-      )
-      .select()
-
-    if (error) {
-      console.error("[stripe/webhook] processed_stripe_events upsert failed:", error)
+    const claim = await claimEventReceipt(admin, event)
+    if (claim.status === "error") {
       return NextResponse.json({ error: "Internal server error" }, { status: 500 })
     }
-
-    if (!data || data.length === 0) {
+    if (claim.status === "already_applied") {
       return NextResponse.json({ received: true, duplicate: true })
     }
 
-    // First delivery only — map into billing_accounts (never INSERT).
-    const handledTypes = new Set([
-      "checkout.session.completed",
-      "customer.subscription.updated",
-      "customer.subscription.deleted",
-      "invoice.paid",
-      "invoice.payment_failed",
-    ])
-
-    if (handledTypes.has(event.type)) {
-      const accountId = await resolveBillingAccountId(admin, event)
-      if (!accountId) {
-        console.error(`[stripe/webhook] UNMATCHED ${event.id}`)
-        return NextResponse.json({ received: true })
+    // Unhandled types are terminal — receipt + applied_at, no retry storm.
+    if (!HANDLED_TYPES.has(event.type)) {
+      const stamped = await markEventApplied(admin, event.id)
+      if (!stamped.ok) {
+        return NextResponse.json({ error: "Internal server error" }, { status: 500 })
       }
-      await applyBillingEvent(admin, event, accountId)
+      return NextResponse.json({ received: true })
+    }
+
+    const resolved = await resolveBillingAccountId(admin, event)
+    if (resolved.status === "error") {
+      // Leave applied_at NULL so Stripe retries.
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    }
+
+    if (resolved.status === "unmatched") {
+      const subId =
+        event.type === "customer.subscription.updated" ||
+        event.type === "customer.subscription.deleted"
+          ? (event.data.object as Stripe.Subscription).id
+          : null
+      if (subId) {
+        console.error(
+          `[stripe/webhook] UNMATCHED ${event.id} type=${event.type} subscription=${subId}`,
+        )
+      } else {
+        console.error(`[stripe/webhook] UNMATCHED ${event.id}`)
+      }
+      const stamped = await markEventApplied(admin, event.id)
+      if (!stamped.ok) {
+        return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+      }
+      return NextResponse.json({ received: true })
+    }
+
+    const applied = await applyBillingEvent(admin, event, resolved.accountId)
+    if (!applied.ok) {
+      // Write failed — applied_at stays NULL; Stripe retries.
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    }
+
+    const stamped = await markEventApplied(admin, event.id)
+    if (!stamped.ok) {
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 })
     }
 
     return NextResponse.json({ received: true })
