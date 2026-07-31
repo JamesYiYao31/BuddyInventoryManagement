@@ -2,17 +2,21 @@
 
 ## Recent Sessions
 
-### Session: July 26–31, 2026 (latest) — Billing Owner-Resolution Fix (Phases A + B1)
-- **Headline:** Closed a FINANCIAL defect: an org-lab manager clicking Upgrade
-  would create a second lab-scoped `billing_accounts` row and a second Stripe
-  subscription. Phase A (DB) + Phase B1 (server resolver) deployed and live-
-  verified. Client surfaces (Phase C) and webhook/quantity work remain.
+### Session: July 26–31, 2026 (latest) — Billing Owner-Resolution + Webhook Durability (Phases A, B1, C, D)
+- **Headline:** Closed a FINANCIAL defect (org-lab manager Upgrade → second
+  `billing_accounts` row + second Stripe subscription) and hardened the
+  webhook so transient write failures can no longer lose billing state
+  permanently. Phases A (DB), B1 (server resolver), C (customer surfaces),
+  and D (webhook durability / F-1 + F-7) deployed and live-verified.
+  Quantity sync and super-admin overview remain open.
 - **Context:** Forensic audit
   `docs/audits/2026-07-26-billing-resolution-audit.md` (read-only; do not
   restate). Root cause: client surfaces AND both Stripe routes resolved
   ownership by `lab_id` only. Org-owned `billing_accounts` rows carry
   `lab_id NULL` by CONSTRAINT `billing_owner_exactly_one`, so those lookups
   never matched.
+- **Commits (code):** `6ff8059` (A+B1+C surfaces + Intl renewal fix),
+  `765eee1` (D webhook durability + `formatRenewalDate` extract).
 
 - **Settled business model (canonical):**
   1. Standalone lab pays for itself; its manager may purchase and manage.
@@ -48,20 +52,80 @@
   - Optional `client` param for test injection; lazy import of the admin
     client so `node --test` never loads Next.js. Verified against a real
     Vercel build, not just `tsc`.
-  - `lib/resolve-billing-owner.test.ts` — 12 cases. `npm test` = 18/18.
+  - `lib/resolve-billing-owner.test.ts` — 12 cases (suite was 18/18 at B1
+    close; now 30/30 with C/D helpers — see Current state).
 
-- **Live verification (production, 2026-07-31):**
+- **Phase C (deployed, verified live):**
+  - Three customer surfaces (`app/dashboard/page.tsx`,
+    `components/dashboard/billing-panel.tsx`,
+    `components/dashboard/sidebar.tsx`) no longer filter `billing_accounts`
+    by `lab_id` for lab staff — they select and let RLS scope.
+  - Dashboard banner + billing-panel use four explicit load states:
+    `loading` / `resolved` / `none` / `unknown`. `unknown` (read error)
+    renders "Plan status unavailable" and NEVER trial wording or purchase
+    CTAs. Sidebar `LabLicenseCard` is fail-closed the same way on read
+    error ("Plan status unavailable") but uses a display-string `line`,
+    not the four-state enum.
+  - Purchase controls hidden for org-lab staff; org membership read from
+    `labs.org_id` (NOT `profiles.org_id` or JWT claim, which are routinely
+    NULL for org-lab staff). Org-managed copy shown on the billing panel
+    instead.
+  - Denial codes mapped in `lib/create-checkout.ts` and
+    `lib/billing-portal.ts`.
+  - Renewal dates labeled with timezone. Root cause of the missing date
+    was an Intl misuse: `dateStyle` + `timeZoneName` cannot be combined;
+    the throw was caught into null and every renewal line silently
+    vanished for ALL users, not only org labs. Fixed in `6ff8059`
+    (inline). Later extracted to `lib/format-renewal-date.ts` with tests
+    in `765eee1`; catch now `console.warn`s before returning null. Both
+    panel and sidebar import the shared helper — no local copies remain.
+  - Live verification: Lab1 manager (org lab) sees Active · $200/lab/month
+    · Renews Aug 19/20 (TZ-labeled) · org-managed copy · NO purchase
+    controls. Oakwood unchanged.
+
+- **Phase D (deployed, verified live):**
+  - `processed_stripe_events` gained nullable `applied_at` (timestamptz),
+    backfilled from `received_at`. NOTE: the table's receipt timestamp
+    column is `received_at`, not `created_at`.
+  - Receipt-before-apply inverted (audit F-1): claim the event with
+    `applied_at` NULL via select-then-insert (not upsert) → apply → stamp
+    `applied_at`. Duplicate-skip only when `applied_at IS NOT NULL`; an
+    unstamped row means a prior attempt died mid-flight and is re-applied.
+    Failed apply → HTTP 500 → Stripe retries. Previously a transient write
+    failure returned 200, Stripe never retried, and manual replay
+    short-circuited as duplicate — the state change was lost permanently.
+  - `applyBillingEvent` returns `{ ok: true } | { ok: false; reason }`
+    (not void); the caller branches on it. Write failures leave
+    `applied_at` NULL and return 500. Terminal non-failures (unhandled
+    event type, unmatched account, missing checkout row, DUPLICATE
+    SUBSCRIPTION) return 200 WITH `applied_at` stamped — retrying them
+    would be wrong.
+  - Subscription lifecycle events resolve by `stripe_subscription_id`
+    first, metadata second (audit F-7). Pure decision in
+    `lib/stripe-subscription-account-resolution.ts`
+    (`decideSubscriptionBillingAccount`). Lookup errors are retryable
+    500s, not unmatched.
+  - Logging (verified on disk): UNMATCHED subscription, missing checkout
+    row, and DUPLICATE SUBSCRIPTION all use `console.error` with Stripe
+    ids attached (`event.id`; subscription unmatched also logs
+    `type=` + `subscription=`; DUPLICATE logs existing/incoming sub ids).
+  - Live verification (2026-07-31, production): cleared `applied_at` on the
+    2026-07-19 `invoice.paid` event, resent from Stripe dashboard → 200,
+    re-applied, restamped, billing state unchanged. Resent an untouched
+    event → 200, `applied_at` unchanged. Both directions proven.
+
+- **Live verification B1 (production, 2026-07-31):**
   Manager seeded in Lab1 (under Test Org). Clicked Upgrade → 403, no
   checkout session, `billing_accounts` count unchanged at 2. Log:
   `code=org_managed_billing`, lab `c0762265-…`. Under the old code this
   click would have created a third row and a second Stripe subscription:
   Test Org billed $600/mo for 2 labs instead of $400.
 
-- **SCHEMA CAPTURE (stale — regenerate):**
-  Phase A changed production. Committed
-  `database-scripts/schema-2026-07-19.sql` is now drifted. Regenerate via
-  fresh `pg_dump` / `npx supabase db dump` of the public schema — do NOT
-  hand-edit.
+- **SCHEMA CAPTURE (stale AGAIN — regenerate required next step):**
+  Phase A + `applied_at` on `processed_stripe_events` changed production.
+  Committed `database-scripts/schema-2026-07-19.sql` is drifted (no
+  `applied_at`). Regenerate via fresh `pg_dump` / `npx supabase db dump`
+  of the public schema — do NOT hand-edit.
 
 - **Closed questions (do not reinvestigate):**
   - Expiry columns (`active_lots`, `coa_records`, `inventory_lots`,
@@ -72,32 +136,52 @@
   - profiles RLS = ENABLED — re-verified production 2026-07-31; prior note
     remains correct.
 
+- **Key lessons (this session):**
+  - `Intl.DateTimeFormat`: `dateStyle`/`timeStyle` cannot be combined with
+    `timeZoneName` (or other component options) — it throws at runtime and
+    `tsc` does not catch it. Use separate formatters.
+  - `processed_stripe_events.received_at` is the receipt column; there is
+    no `created_at` on that table.
+  - Replaying an OLD `invoice.paid` would set `current_period_end`
+    BACKWARDS — the handler takes the date from whatever invoice it is
+    handed. Known limitation, no forward-only guard yet. Only ever replay
+    the most recent invoice event per account.
+  - Silent-empty remains the recurring failure mode (see Security Rules).
+
 - **Remaining phases (current plan):**
-  - **B2** — Pre-flight `already_subscribed` guard reads the row checkout
-    just inserted with hardcoded `trialing`, so it can never fire. Stripe
-    customer is re-created per purchase instead of reused. Not reachable
-    from the UI after B1, but still open.
-  - **C** — Three client surfaces: resolve by RLS scope not `lab_id`, remove
-    hardcoded `trialing` fallback, hide purchase controls for org-lab staff,
-    add denial copy, label renewal-date timezone.
-  - **D** — Webhook hardening. **DEADLINE:** both subscriptions renew
-    2026-08-19 (period-rollover path never executed). F-1 receipt-before-apply
-    can lose state permanently; F-7 cancellations never suspend.
-  - **E** — Super-admin billing overview excludes org labs entirely
-    (`page.tsx:447`), so an overcharge would appear on no Buddy surface.
-  - **F** — NEW: subscription quantity computed once at checkout, never
-    revisited. Adding a lab to an org = free; archiving one = overcharge.
-    Decision deferred: prorate immediately vs apply at next renewal.
-  - **Parked:** what happens when a standalone paying lab later joins an org.
+  - **B2** — open. Pre-flight `already_subscribed` guard is self-defeating
+    (reads the row checkout just inserted with hardcoded `trialing`, so it
+    can never fire). Stripe customer is re-created per purchase instead of
+    reused. Unreachable from the UI after B1, but still open.
+  - **E** — open — **NEXT UP.** Super-admin billing overview excludes org
+    labs entirely, so no Buddy surface would show an org billing problem.
+    This week's defects were invisible from inside the product.
+  - **F** — open. Quantity computed once at checkout; org lab-count changes
+    never adjust the bill. Prorate-vs-next-renewal decision pending.
+  - **Parked:** standalone paying lab later joins an org; forward-only
+    guard on `current_period_end`; billing alerting/emails (Vercel cron) —
+    the webhook now fails loudly to Stripe but nothing notifies James.
+  - **2026-08-19:** both sandbox subscriptions renew — first-ever
+    production run of the renewal path. Check Stripe webhook deliveries
+    and Vercel logs that day.
 
-- **Files (A + B1):** `lib/resolve-billing-owner.ts`,
+- **Files (A + B1 + C + D):** `lib/resolve-billing-owner.ts`,
   `lib/resolve-billing-owner.test.ts`, `app/api/stripe/checkout/route.ts`,
-  `app/api/stripe/portal/route.ts`,
-  `docs/audits/2026-07-26-billing-resolution-audit.md`. Phase A is
-  production SQL (not yet re-captured in a schema dump).
+  `app/api/stripe/portal/route.ts`, `app/dashboard/page.tsx`,
+  `components/dashboard/billing-panel.tsx`,
+  `components/dashboard/sidebar.tsx`, `lib/create-checkout.ts`,
+  `lib/billing-portal.ts`, `lib/format-renewal-date.ts`,
+  `lib/format-renewal-date.test.ts`, `app/api/stripe/webhook/route.ts`,
+  `lib/stripe-subscription-account-resolution.ts`,
+  `lib/stripe-subscription-account-resolution.test.ts`,
+  `docs/audits/2026-07-26-billing-resolution-audit.md`. Phase A +
+  `applied_at` are production SQL (not yet re-captured in a schema dump).
 
-- **Current state:** A + B1 live and verified. Org-lab Upgrade path blocked
-  server-side. Next: C (client surfaces), then D before 2026-08-19 renewal.
+- **Current state:** A + B1 + C + D live and verified. Org-lab Upgrade
+  path blocked server-side; customer surfaces RLS-scoped; webhook
+  claim/apply/`applied_at` durable. `tsc --noEmit` exit 0; `npm test`
+  30/30. Next: E (super-admin billing overview), then F / B2. Watch
+  2026-08-19 renewal. Regenerate schema dump.
 - **Correction (same day, 2026-07-31):** An early draft of the Key Technical /
   Security rules claimed Stripe routes gate role from the JWT while
   `resolveBillingOwner` re-reads `profiles` — presented as a deliberate
@@ -2229,11 +2313,16 @@ created_at, updated_at
 event_id (text PK — Stripe evt_ id),
 event_type (text NOT NULL),
 received_at (timestamptz NOT NULL DEFAULT now()),
+applied_at (timestamptz, nullable — NULL = claimed/unapplied; set after
+  successful apply or terminal ignore; backfilled from received_at for
+  pre-existing rows),
 payload (jsonb)
 ```
-- Webhook idempotency / receipt table; service-role writes
+- Webhook idempotency / receipt table; service-role writes. Receipt
+  timestamp column is `received_at` (there is no `created_at` on this table).
 - SELECT: super_admin only (`stripe_events_select_super`)
-- Source of record: `database-scripts/schema-2026-07-19.sql`
+- Source of record: `database-scripts/schema-2026-07-19.sql` — **STALE**
+  (missing `applied_at`); regenerate via pg_dump, do not hand-edit.
 
 ### Storage bucket: coa-documents (private)
 Path: `{lab_id}/{lot_id}/{timestamp}_{filename}`
@@ -2583,6 +2672,14 @@ orderedNotReceived, benchExpiring, outOfStock, totalCount, isLoading.
   In each case a failure produced an innocent-looking empty value that the
   UI accepted as fact. Rule: a catch block that returns null/empty must log
   first. Never let a failure and a legitimately-empty result look identical.
+- `Intl.DateTimeFormat`: never combine `dateStyle`/`timeStyle` with
+  `timeZoneName` (or other component options) — it throws at runtime;
+  `tsc` will not catch it. Use separate formatters
+  (`lib/format-renewal-date.ts`).
+- Webhook durability: stamp `processed_stripe_events.applied_at` only after
+  apply succeeds or the event is a terminal ignore; return 500 (leave
+  `applied_at` NULL) on write failure so Stripe retries. Never treat a
+  receipt alone as "done."
 
 ---
 

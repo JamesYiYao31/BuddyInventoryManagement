@@ -19,5 +19,9 @@ tsconfig.tsbuildinfo
 # Local Claude Code / Cursor settings
 .claude/
 
+# Local Cursor agent skills (installer artifacts — not product code)
+.agents/
+skills-lock.json
+
 # Local installer scripts
 install.ps1
