@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
         "[super-admin/billing-overview] Profile load failed:",
         profileError?.message ?? "missing profile",
       )
-      return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+      return failureResponse("profile_load_failed", 500, "Internal server error")
     }
 
     if (profile.is_active === false) {
@@ -132,6 +132,6 @@ export async function GET(request: NextRequest) {
     })
   } catch (err) {
     console.error("[super-admin/billing-overview] Unexpected error:", err)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return failureResponse("internal_error", 500, "Internal server error")
   }
 }

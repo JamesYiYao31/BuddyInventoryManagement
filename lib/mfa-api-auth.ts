@@ -30,7 +30,10 @@ export async function authenticateBearerRequest(
   if (!authHeader?.startsWith("Bearer ")) {
     return {
       ok: false,
-      response: NextResponse.json({ error: "Not authenticated" }, { status: 401 }),
+      response: NextResponse.json(
+        { error: "Not authenticated", error_code: "not_authenticated" },
+        { status: 401 },
+      ),
     }
   }
 
@@ -44,7 +47,10 @@ export async function authenticateBearerRequest(
   if (userError || !user) {
     return {
       ok: false,
-      response: NextResponse.json({ error: "Not authenticated" }, { status: 401 }),
+      response: NextResponse.json(
+        { error: "Not authenticated", error_code: "not_authenticated" },
+        { status: 401 },
+      ),
     }
   }
 

@@ -27,6 +27,7 @@ import { voluntarySignOut, deactivatedSignOut } from "@/lib/active-session"
 import { resolveMfaGateRedirect } from "@/lib/mfa-gate"
 import { recordSecurityEvent } from "@/lib/security-log"
 import { formatRenewalDate } from "@/lib/format-renewal-date"
+import { resolveBillingOverviewErrorCode } from "@/lib/billing-overview-error-code"
 import type {
   Anomaly,
   EventRow,
@@ -203,27 +204,25 @@ export default function SuperAdminPage() {
         },
       })
 
-      const data = (await response.json().catch(() => ({}))) as {
-        error_code?: string
-        tenants?: TenantRow[]
-        anomalies?: Anomaly[]
-        events?: EventRow[]
-        generatedAt?: string
-      }
-
       if (!response.ok) {
+        const bodyText = await response.text()
+        const code = resolveBillingOverviewErrorCode(bodyText)
         setBillingOverviewError({
           status: response.status,
-          code:
-            typeof data.error_code === "string"
-              ? data.error_code
-              : "request_failed",
+          code,
         })
         setBillingTenants([])
         setBillingAnomalies([])
         setBillingEvents([])
         setBillingGeneratedAt(null)
         return
+      }
+
+      const data = (await response.json().catch(() => ({}))) as {
+        tenants?: TenantRow[]
+        anomalies?: Anomaly[]
+        events?: EventRow[]
+        generatedAt?: string
       }
 
       setBillingTenants(Array.isArray(data.tenants) ? data.tenants : [])
