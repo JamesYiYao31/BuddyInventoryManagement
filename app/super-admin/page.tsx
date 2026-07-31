@@ -26,6 +26,12 @@ import { supabase } from "@/lib/supabase"
 import { voluntarySignOut, deactivatedSignOut } from "@/lib/active-session"
 import { resolveMfaGateRedirect } from "@/lib/mfa-gate"
 import { recordSecurityEvent } from "@/lib/security-log"
+import { formatRenewalDate } from "@/lib/format-renewal-date"
+import type {
+  Anomaly,
+  EventRow,
+  TenantRow,
+} from "@/lib/billing-overview-model"
 import { ProfileSettingsDialog } from "@/components/dashboard/profile-settings-dialog"
 import { SecurityLogPanel } from "@/components/dashboard/security-log-panel"
 
@@ -46,31 +52,6 @@ type LabRow = {
   archived_at: string | null
   org_id: string | null
   trial_ends_at: string | null
-}
-
-type BillingAccountRow = {
-  id: string
-  org_id: string | null
-  lab_id: string | null
-  billing_status: string
-  current_period_end: string | null
-}
-
-type BillingOverviewStatus =
-  | "past_due"
-  | "suspended"
-  | "trial_expired"
-  | "trialing"
-  | "active"
-
-type BillingOverviewRow = {
-  key: string
-  name: string
-  type: "Org" | "Lab"
-  labCount: number
-  status: BillingOverviewStatus
-  dateIso: string | null
-  monthlyUsd: number | null
 }
 
 type InviteRow = {
@@ -143,16 +124,24 @@ export default function SuperAdminPage() {
 
   const [organizations, setOrganizations] = useState<OrganizationRow[]>([])
   const [labs, setLabs] = useState<LabRow[]>([])
-  const [billingAccounts, setBillingAccounts] = useState<BillingAccountRow[]>([])
   const [invites, setInvites] = useState<InviteRow[]>([])
   const [creatorNameById, setCreatorNameById] = useState<Record<string, string>>({})
   const [orgsLoading, setOrgsLoading] = useState(false)
   const [labsLoading, setLabsLoading] = useState(false)
-  const [billingLoading, setBillingLoading] = useState(false)
   const [invitesLoading, setInvitesLoading] = useState(false)
   const [labRowBusyId, setLabRowBusyId] = useState<string | null>(null)
   const [labsMsg, setLabsMsg] = useState<InlineMsg>(null)
   const [invitesTableMsg, setInvitesTableMsg] = useState<InlineMsg>(null)
+
+  const [billingTenants, setBillingTenants] = useState<TenantRow[]>([])
+  const [billingAnomalies, setBillingAnomalies] = useState<Anomaly[]>([])
+  const [billingEvents, setBillingEvents] = useState<EventRow[]>([])
+  const [billingGeneratedAt, setBillingGeneratedAt] = useState<string | null>(null)
+  const [billingOverviewLoading, setBillingOverviewLoading] = useState(false)
+  const [billingOverviewError, setBillingOverviewError] = useState<{
+    status: number
+    code: string
+  } | null>(null)
 
   const [labsSearch, setLabsSearch] = useState("")
   const [labsTypeFilter, setLabsTypeFilter] = useState<LabsFilterType>("all")
@@ -190,21 +179,68 @@ export default function SuperAdminPage() {
     setLabs((data as LabRow[]) || [])
   }, [])
 
-  const fetchBillingAccounts = useCallback(async () => {
-    setBillingLoading(true)
-    const { data, error } = await supabase
-      .from("billing_accounts")
-      .select("id, org_id, lab_id, billing_status, current_period_end")
+  const fetchBillingOverview = useCallback(async () => {
+    setBillingOverviewLoading(true)
+    setBillingOverviewError(null)
+    try {
+      // Same bearer pattern as lib/create-checkout.ts (0a).
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+      if (!session?.access_token) {
+        setBillingOverviewError({ status: 401, code: "not_authenticated" })
+        setBillingTenants([])
+        setBillingAnomalies([])
+        setBillingEvents([])
+        setBillingGeneratedAt(null)
+        return
+      }
 
-    setBillingLoading(false)
-    if (error) {
-      setLabsMsg((prev) =>
-        prev ?? { kind: "error", text: `Could not load billing accounts: ${error.message}` },
+      const response = await fetch("/api/super-admin/billing-overview", {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      })
+
+      const data = (await response.json().catch(() => ({}))) as {
+        error_code?: string
+        tenants?: TenantRow[]
+        anomalies?: Anomaly[]
+        events?: EventRow[]
+        generatedAt?: string
+      }
+
+      if (!response.ok) {
+        setBillingOverviewError({
+          status: response.status,
+          code:
+            typeof data.error_code === "string"
+              ? data.error_code
+              : "request_failed",
+        })
+        setBillingTenants([])
+        setBillingAnomalies([])
+        setBillingEvents([])
+        setBillingGeneratedAt(null)
+        return
+      }
+
+      setBillingTenants(Array.isArray(data.tenants) ? data.tenants : [])
+      setBillingAnomalies(Array.isArray(data.anomalies) ? data.anomalies : [])
+      setBillingEvents(Array.isArray(data.events) ? data.events : [])
+      setBillingGeneratedAt(
+        typeof data.generatedAt === "string" ? data.generatedAt : null,
       )
-      setBillingAccounts([])
-      return
+    } catch {
+      setBillingOverviewError({ status: 0, code: "request_failed" })
+      setBillingTenants([])
+      setBillingAnomalies([])
+      setBillingEvents([])
+      setBillingGeneratedAt(null)
+    } finally {
+      setBillingOverviewLoading(false)
     }
-    setBillingAccounts((data as BillingAccountRow[]) || [])
   }, [])
 
   const fetchInvites = useCallback(async () => {
@@ -289,7 +325,7 @@ export default function SuperAdminPage() {
       await Promise.all([
         fetchOrganizations(),
         fetchLabs(),
-        fetchBillingAccounts(),
+        fetchBillingOverview(),
         fetchInvites(),
       ])
     }
@@ -298,16 +334,16 @@ export default function SuperAdminPage() {
     return () => {
       cancelled = true
     }
-  }, [router, fetchOrganizations, fetchLabs, fetchBillingAccounts, fetchInvites])
+  }, [router, fetchOrganizations, fetchLabs, fetchBillingOverview, fetchInvites])
 
   const refreshAll = useCallback(async () => {
     await Promise.all([
       fetchOrganizations(),
       fetchLabs(),
-      fetchBillingAccounts(),
+      fetchBillingOverview(),
       fetchInvites(),
     ])
-  }, [fetchOrganizations, fetchLabs, fetchBillingAccounts, fetchInvites])
+  }, [fetchOrganizations, fetchLabs, fetchBillingOverview, fetchInvites])
 
   const orgById = useMemo(() => new Map(organizations.map((o) => [o.id, o])), [organizations])
 
@@ -382,126 +418,72 @@ export default function SuperAdminPage() {
     return [...singles, ...orgGroups]
   }, [labs, labsSearch, labsTypeFilter, labsStatusFilter, orgById])
 
-  const billingOverviewRows = useMemo((): BillingOverviewRow[] => {
-    const now = Date.now()
-
-    const deriveStatus = (
-      account: BillingAccountRow | undefined,
-      trialEndsAt: string | null,
-    ): BillingOverviewStatus => {
-      if (account?.billing_status) {
-        const s = account.billing_status
-        if (s === "active") return "active"
-        if (s === "past_due") return "past_due"
-        if (s === "suspended") return "suspended"
-        if (s === "trialing") return "trialing"
-        // Unknown account status — fall through to trial derivation.
-      }
-      if (trialEndsAt) {
-        const ends = new Date(trialEndsAt).getTime()
-        if (!Number.isNaN(ends)) {
-          return ends > now ? "trialing" : "trial_expired"
-        }
-      }
-      return "trial_expired"
-    }
-
-    const statusRank = (s: BillingOverviewStatus): number => {
-      switch (s) {
+  const sortedBillingTenants = useMemo(() => {
+    const rank = (status: string | null): number => {
+      switch (status) {
         case "past_due":
           return 0
         case "suspended":
           return 1
-        case "trial_expired":
-          return 2
         case "trialing":
-          return 3
+          return 2
         case "active":
+          return 3
+        case null:
           return 4
         default:
           return 5
       }
     }
-
-    const rows: BillingOverviewRow[] = []
-
-    for (const org of organizations) {
-      const orgLabs = labs.filter((l) => l.org_id === org.id && !l.is_archived)
-      const account = billingAccounts.find((a) => a.org_id === org.id)
-      const status = deriveStatus(account, org.trial_ends_at)
-      const dateIso =
-        status === "active"
-          ? account?.current_period_end ?? null
-          : org.trial_ends_at
-      rows.push({
-        key: `org:${org.id}`,
-        name: org.name,
-        type: "Org",
-        labCount: orgLabs.length,
-        status,
-        dateIso,
-        monthlyUsd: status === "active" ? orgLabs.length * 200 : null,
-      })
-    }
-
-    for (const lab of labs.filter((l) => l.org_id === null)) {
-      const account = billingAccounts.find((a) => a.lab_id === lab.id)
-      const status = deriveStatus(account, lab.trial_ends_at)
-      const dateIso =
-        status === "active"
-          ? account?.current_period_end ?? null
-          : lab.trial_ends_at
-      const labCount = lab.is_archived ? 0 : 1
-      rows.push({
-        key: `lab:${lab.id}`,
-        name: lab.name,
-        type: "Lab",
-        labCount,
-        status,
-        dateIso,
-        monthlyUsd: status === "active" ? labCount * 200 : null,
-      })
-    }
-
-    rows.sort((a, b) => {
-      const rank = statusRank(a.status) - statusRank(b.status)
-      if (rank !== 0) return rank
+    return [...billingTenants].sort((a, b) => {
+      const r = rank(a.billingStatus) - rank(b.billingStatus)
+      if (r !== 0) return r
       return a.name.localeCompare(b.name)
     })
-
-    return rows
-  }, [organizations, labs, billingAccounts])
+  }, [billingTenants])
 
   const trialCount = useMemo(
-    () => billingOverviewRows.filter((r) => r.status === "trialing").length,
-    [billingOverviewRows],
+    () => billingTenants.filter((r) => r.billingStatus === "trialing").length,
+    [billingTenants],
   )
 
   const expiringThisWeek = useMemo(() => {
     const now = new Date()
     const cutoff = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
-    return billingOverviewRows.filter((r) => {
-      if (r.status !== "trialing" || !r.dateIso) return false
-      const ends = new Date(r.dateIso)
+    return billingTenants.filter((r) => {
+      if (r.billingStatus !== "trialing" || !r.currentPeriodEnd) return false
+      const ends = new Date(r.currentPeriodEnd)
       return ends >= now && ends <= cutoff
     }).length
-  }, [billingOverviewRows])
+  }, [billingTenants])
 
   const activeCount = useMemo(
-    () => billingOverviewRows.filter((r) => r.status === "active").length,
-    [billingOverviewRows],
+    () => billingTenants.filter((r) => r.billingStatus === "active").length,
+    [billingTenants],
   )
 
-  function formatBillingDate(iso: string | null): string {
-    if (!iso) return "—"
-    try {
-      return new Date(iso).toLocaleDateString(undefined, { dateStyle: "medium" })
-    } catch {
-      return "—"
+  function anomalyKindLabel(kind: Anomaly["kind"]): string {
+    switch (kind) {
+      case "org_lab_billing_row":
+        return "Org-lab billing row"
+      case "orphan_billing_row":
+        return "Orphan billing row"
+      case "stale_unapplied_event":
+        return "Stale unapplied event"
+      case "period_end_passed":
+        return "Period end passed"
+      default:
+        return kind
     }
   }
 
-  function billingStatusBadgeClass(status: BillingOverviewStatus): string {
+  function tenantStatusLabel(status: string | null): string {
+    if (status === null) return "No billing account"
+    if (status === "past_due") return "Payment issue"
+    return status.replace(/_/g, " ")
+  }
+
+  function tenantStatusBadgeClass(status: string | null): string {
     switch (status) {
       case "active":
         return "bg-green-500/15 text-green-800 dark:text-green-400"
@@ -511,27 +493,24 @@ export default function SuperAdminPage() {
         return "bg-amber-500/15 text-amber-800 dark:text-amber-400"
       case "suspended":
         return "bg-red-500/15 text-red-800 dark:text-red-400"
-      case "trial_expired":
+      case null:
         return "bg-zinc-500/15 text-zinc-600 dark:text-zinc-400"
       default:
         return "bg-zinc-500/15 text-zinc-600 dark:text-zinc-400"
     }
   }
 
-  function billingStatusLabel(status: BillingOverviewStatus): string {
-    switch (status) {
-      case "past_due":
-        return "Payment issue"
-      case "trial_expired":
-        return "Trial expired"
-      default:
-        return status.replace("_", " ")
-    }
+  function truncateStripeId(id: string): string {
+    if (id.length <= 14) return id
+    return `${id.slice(0, 8)}…${id.slice(-4)}`
   }
 
-  function billingDateColumnLabel(status: BillingOverviewStatus): string {
-    if (status === "active") return "Renews"
-    return "Trial ends"
+  async function copyStripeId(id: string) {
+    try {
+      await navigator.clipboard.writeText(id)
+    } catch {
+      // Clipboard may be unavailable; title still exposes the full id.
+    }
   }
 
   const handleGenerateInvite = async () => {
@@ -1141,82 +1120,283 @@ export default function SuperAdminPage() {
 
         {/* Billing Overview */}
         <section className="rounded-2xl border border-border bg-card p-8 shadow-sm space-y-6">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-primary/10">
-              <CreditCard className="size-5 text-primary" aria-hidden />
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-primary/10">
+                <CreditCard className="size-5 text-primary" aria-hidden />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold">Billing Overview</h2>
+                <p className="text-xs text-muted-foreground">
+                  Subscription status from billing accounts (orgs + standalone labs),
+                  plus Stripe webhook history.
+                </p>
+                {billingGeneratedAt ? (
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Generated {formatRenewalDate(billingGeneratedAt) ?? "—"}
+                  </p>
+                ) : null}
+              </div>
             </div>
-            <div>
-              <h2 className="text-lg font-bold">Billing Overview</h2>
-              <p className="text-xs text-muted-foreground">
-                Live subscription status from billing accounts (orgs + standalone labs).
-              </p>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-5 space-y-1">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-amber-800 dark:text-amber-400">Total on Trial</p>
-              <p className="text-3xl font-black text-amber-700 dark:text-amber-400">{trialCount}</p>
-            </div>
-            <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-5 space-y-1">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-red-800 dark:text-red-400">Expiring This Week</p>
-              <p className="text-3xl font-black text-red-700 dark:text-red-400">{expiringThisWeek}</p>
-            </div>
-            <div className="rounded-xl border border-green-500/20 bg-green-500/5 p-5 space-y-1">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-green-800 dark:text-green-400">Total Active</p>
-              <p className="text-3xl font-black text-green-700 dark:text-green-400">{activeCount}</p>
-            </div>
+            <button
+              type="button"
+              onClick={() => void fetchBillingOverview()}
+              disabled={billingOverviewLoading}
+              className="h-10 px-4 rounded-xl border border-border text-sm font-bold hover:bg-muted/50 disabled:opacity-50 disabled:pointer-events-none inline-flex items-center justify-center gap-2 shrink-0"
+            >
+              {billingOverviewLoading ? (
+                <Loader2 className="size-4 animate-spin" aria-hidden />
+              ) : null}
+              Refresh
+            </button>
           </div>
 
-          {billingLoading && labsLoading ? (
+          {!billingOverviewError ? (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-5 space-y-1">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-amber-800 dark:text-amber-400">
+                  Total on Trial
+                </p>
+                <p className="text-3xl font-black text-amber-700 dark:text-amber-400">
+                  {billingOverviewLoading ? "—" : trialCount}
+                </p>
+              </div>
+              <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-5 space-y-1">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-red-800 dark:text-red-400">
+                  Expiring This Week
+                </p>
+                <p className="text-3xl font-black text-red-700 dark:text-red-400">
+                  {billingOverviewLoading ? "—" : expiringThisWeek}
+                </p>
+              </div>
+              <div className="rounded-xl border border-green-500/20 bg-green-500/5 p-5 space-y-1">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-green-800 dark:text-green-400">
+                  Total Active
+                </p>
+                <p className="text-3xl font-black text-green-700 dark:text-green-400">
+                  {billingOverviewLoading ? "—" : activeCount}
+                </p>
+              </div>
+            </div>
+          ) : null}
+
+          {billingOverviewLoading ? (
             <div className="flex items-center justify-center py-10">
               <Loader2 className="size-6 text-muted-foreground animate-spin" aria-hidden />
             </div>
-          ) : billingOverviewRows.length === 0 ? (
-            <p className="text-sm text-muted-foreground italic py-4">No billing tenants yet.</p>
-          ) : (
-            <div className="rounded-xl border border-border overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border bg-muted/30 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                      <th className="text-left px-4 py-3">Name</th>
-                      <th className="text-left px-4 py-3">Type</th>
-                      <th className="text-right px-4 py-3">Labs</th>
-                      <th className="text-left px-4 py-3">Status</th>
-                      <th className="text-left px-4 py-3">Trial ends / Renews</th>
-                      <th className="text-right px-4 py-3">$/month</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {billingOverviewRows.map((row) => (
-                      <tr key={row.key} className="border-b border-border last:border-0">
-                        <td className="px-4 py-3 font-bold text-foreground">{row.name}</td>
-                        <td className="px-4 py-3 text-muted-foreground">{row.type}</td>
-                        <td className="px-4 py-3 text-right font-medium">{row.labCount}</td>
-                        <td className="px-4 py-3">
-                          <span
-                            className={`inline-flex px-2.5 py-1 rounded-full text-xs font-bold capitalize ${billingStatusBadgeClass(row.status)}`}
-                          >
-                            {billingStatusLabel(row.status)}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground">
-                          <span className="text-[10px] font-bold uppercase tracking-widest mr-2">
-                            {billingDateColumnLabel(row.status)}
-                          </span>
-                          {formatBillingDate(row.dateIso)}
-                        </td>
-                        <td className="px-4 py-3 text-right font-medium">
-                          {row.monthlyUsd !== null
-                            ? `$${row.monthlyUsd.toLocaleString("en-US")}`
-                            : "—"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+          ) : billingOverviewError ? (
+            <div
+              role="alert"
+              className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-4 space-y-1"
+            >
+              <p className="text-sm font-bold text-destructive">
+                Billing overview could not be loaded.
+              </p>
+              <p className="text-xs text-destructive/90 font-mono">
+                HTTP {billingOverviewError.status || "—"} · code=
+                {billingOverviewError.code}
+              </p>
             </div>
+          ) : (
+            <>
+              <div
+                className={
+                  billingAnomalies.length === 0
+                    ? "rounded-xl border border-border bg-muted/20 px-4 py-3"
+                    : "rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 space-y-2"
+                }
+              >
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                  Anomalies
+                </p>
+                {billingAnomalies.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No billing anomalies detected.
+                  </p>
+                ) : (
+                  <ul className="space-y-2">
+                    {billingAnomalies.map((a, i) => (
+                      <li
+                        key={`${a.kind}-${i}`}
+                        className="text-sm text-amber-900 dark:text-amber-200"
+                      >
+                        <span className="font-bold">{anomalyKindLabel(a.kind)}</span>
+                        <span className="text-amber-800/80 dark:text-amber-200/80">
+                          {" "}
+                          — {a.detail}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              {sortedBillingTenants.length === 0 ? (
+                <p className="text-sm text-muted-foreground italic py-4">
+                  No billing tenants yet.
+                </p>
+              ) : (
+                <div className="rounded-xl border border-border overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-border bg-muted/30 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                          <th className="text-left px-4 py-3">Name</th>
+                          <th className="text-left px-4 py-3">Type</th>
+                          <th className="text-right px-4 py-3">Labs</th>
+                          <th className="text-left px-4 py-3">Status</th>
+                          <th className="text-left px-4 py-3">Current period end</th>
+                          <th className="text-right px-4 py-3">Expected $/mo</th>
+                          <th className="text-left px-4 py-3">Stripe customer</th>
+                          <th className="text-left px-4 py-3">Stripe subscription</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sortedBillingTenants.map((row) => (
+                          <tr key={row.key} className="border-b border-border last:border-0">
+                            <td className="px-4 py-3 font-bold text-foreground">
+                              {row.name}
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground">{row.type}</td>
+                            <td className="px-4 py-3 text-right font-medium">
+                              {row.labCount}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span
+                                className={`inline-flex px-2.5 py-1 rounded-full text-xs font-bold capitalize ${tenantStatusBadgeClass(row.billingStatus)}`}
+                              >
+                                {tenantStatusLabel(row.billingStatus)}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground">
+                              {formatRenewalDate(row.currentPeriodEnd) ?? "—"}
+                            </td>
+                            <td className="px-4 py-3 text-right font-medium">
+                              {row.expectedMonthlyUsd !== null
+                                ? `$${row.expectedMonthlyUsd.toLocaleString("en-US")}`
+                                : "—"}
+                            </td>
+                            <td className="px-4 py-3">
+                              {row.stripeCustomerId ? (
+                                <button
+                                  type="button"
+                                  title={row.stripeCustomerId}
+                                  onClick={() => void copyStripeId(row.stripeCustomerId!)}
+                                  className="font-mono text-xs text-left hover:underline"
+                                >
+                                  {truncateStripeId(row.stripeCustomerId)}
+                                </button>
+                              ) : (
+                                "—"
+                              )}
+                            </td>
+                            <td className="px-4 py-3">
+                              {row.stripeSubscriptionId ? (
+                                <button
+                                  type="button"
+                                  title={row.stripeSubscriptionId}
+                                  onClick={() => void copyStripeId(row.stripeSubscriptionId!)}
+                                  className="font-mono text-xs text-left hover:underline"
+                                >
+                                  {truncateStripeId(row.stripeSubscriptionId)}
+                                </button>
+                              ) : (
+                                "—"
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-3">
+                <div>
+                  <h3 className="text-sm font-bold">Stripe webhook activity</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Recent deliveries from processed_stripe_events (newest first).
+                  </p>
+                </div>
+                {billingEvents.length === 0 ? (
+                  <p className="text-sm text-muted-foreground italic py-2">
+                    No webhook events recorded yet.
+                  </p>
+                ) : (
+                  <div className="rounded-xl border border-border overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-border bg-muted/30 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                            <th className="text-left px-4 py-3">Received</th>
+                            <th className="text-left px-4 py-3">Event type</th>
+                            <th className="text-left px-4 py-3">Tenant</th>
+                            <th className="text-right px-4 py-3">Amount</th>
+                            <th className="text-left px-4 py-3">Applied</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {billingEvents.map((ev) => (
+                            <tr
+                              key={ev.eventId}
+                              className="border-b border-border last:border-0"
+                            >
+                              <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
+                                {formatRenewalDate(ev.receivedAt) ?? "—"}
+                              </td>
+                              <td className="px-4 py-3 font-mono text-xs">
+                                {ev.eventType}
+                              </td>
+                              <td className="px-4 py-3">
+                                {ev.tenantLabel === "Unresolved" ? (
+                                  <span className="text-muted-foreground">
+                                    Unresolved
+                                    {ev.stripeCustomerId ? (
+                                      <>
+                                        {" · "}
+                                        <button
+                                          type="button"
+                                          title={ev.stripeCustomerId}
+                                          onClick={() =>
+                                            void copyStripeId(ev.stripeCustomerId!)
+                                          }
+                                          className="font-mono text-xs hover:underline"
+                                        >
+                                          {truncateStripeId(ev.stripeCustomerId)}
+                                        </button>
+                                      </>
+                                    ) : null}
+                                  </span>
+                                ) : (
+                                  ev.tenantLabel
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-right font-medium">
+                                {ev.amountUsd !== null
+                                  ? `$${ev.amountUsd.toLocaleString("en-US")}`
+                                  : "—"}
+                              </td>
+                              <td className="px-4 py-3">
+                                {ev.appliedAt === null ? (
+                                  <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-bold bg-amber-500/15 text-amber-800 dark:text-amber-400">
+                                    Pending
+                                  </span>
+                                ) : (
+                                  <span className="text-muted-foreground">
+                                    {formatRenewalDate(ev.appliedAt) ?? "—"}
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
           )}
         </section>
 
