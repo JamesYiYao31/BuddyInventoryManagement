@@ -2,13 +2,16 @@
 
 ## Recent Sessions
 
-### Session: July 26–31, 2026 (latest) — Billing Owner-Resolution + Webhook Durability (Phases A, B1, C, D)
+### Session: July 26 – August 1, 2026 (latest) — Billing Owner-Resolution + Webhook Durability + Super-Admin Billing Overview (Phases A, B1, C, D, E)
 - **Headline:** Closed a FINANCIAL defect (org-lab manager Upgrade → second
-  `billing_accounts` row + second Stripe subscription) and hardened the
-  webhook so transient write failures can no longer lose billing state
-  permanently. Phases A (DB), B1 (server resolver), C (customer surfaces),
-  and D (webhook durability / F-1 + F-7) deployed and live-verified.
-  Quantity sync and super-admin overview remain open.
+  `billing_accounts` row + second Stripe subscription), hardened the webhook
+  so transient write failures can no longer lose billing state permanently,
+  and built the operator surface that would have made both visible from
+  inside the product: a super-admin billing overview with tenant state,
+  anomaly detection, and full webhook history. A–D deployed and
+  live-verified in production. E1/E2/E2a committed and verified on local dev
+  against the production database — **NOT YET PUSHED**. Quantity sync (F)
+  and checkout pre-flight (B2) remain open.
 - **Context:** Forensic audit
   `docs/audits/2026-07-26-billing-resolution-audit.md` (read-only; do not
   restate). Root cause: client surfaces AND both Stripe routes resolved
@@ -16,7 +19,10 @@
   `lab_id NULL` by CONSTRAINT `billing_owner_exactly_one`, so those lookups
   never matched.
 - **Commits (code):** `6ff8059` (A+B1+C surfaces + Intl renewal fix),
-  `765eee1` (D webhook durability + `formatRenewalDate` extract).
+  `765eee1` (D webhook durability + `formatRenewalDate` extract),
+  `dcbc9fb` (E1 route + model, E2 overview UI), `b1e457f` (E2a error-code
+  passthrough). **`dcbc9fb` and `b1e457f` are committed on `main` but NOT
+  pushed — origin/main is 2 behind.**
 
 - **Settled business model (canonical):**
   1. Standalone lab pays for itself; its manager may purchase and manage.
@@ -121,6 +127,163 @@
   click would have created a third row and a second Stripe subscription:
   Test Org billed $600/mo for 2 labs instead of $400.
 
+- **Phase E design decisions (settled this session):**
+  1. **Server route with the admin client.** The overview must show
+     `stripe_customer_id` / `stripe_subscription_id`, and those columns are
+     revoked from `authenticated` for EVERY client role including
+     super_admin. No client-side query can ever render them.
+  2. **Impossible/orphan billing rows go in a SEPARATE anomaly block**, not
+     as tenant rows. An empty block is itself a positive health signal.
+  3. **STRICT on read failure** (same direction as the write gate): a failed
+     load replaces the whole billing section; no derived status is ever
+     rendered in its place.
+  4. **Money column relabeled "Expected $/mo".** It is `labCount * 200` from
+     Buddy's own tables and by construction can detect neither over- nor
+     under-billing. Stripe-side reconciliation parked until real customers
+     exist (F territory).
+  5. **Webhook history on the same page**, below the tenant table: global,
+     newest-first, no filters (three tenants — filters are premature).
+     Amounts come from the STORED Stripe payload in
+     `processed_stripe_events` — Stripe's own number, no API call.
+  6. **`applied_at IS NULL` older than 15 minutes is an anomaly**
+     (`stale_unapplied_event`) — the only available detector for a webhook
+     attempt that died between claim and apply.
+
+- **Why E existed (two defects, NOT the same defect):**
+  1. The old overview fell back to deriving status from `trial_ends_at`
+     whenever the account row was absent — so a `billing_accounts` read
+     failure rendered EVERY tenant as trial/expired while the error message
+     landed under **All labs** (a different section), suppressed entirely if
+     `labsMsg` was already set. Silent-empty instance #4, on the operator's
+     own screen. CLOSED by strict failure (decision 3).
+  2. The lab loop's `org_id === null` filter is CORRECT under the settled
+     model (one org, one bill) and was deliberately KEPT. The actual defect:
+     a `billing_accounts` row keyed to an org-owned lab — impossible under
+     that model — was fetched into state, bound to nothing, and dropped
+     without a word. CLOSED by naming such rows as anomalies (decision 2),
+     not by rendering them as tenants.
+
+- **Phase E1 — server route + pure model (in `dcbc9fb`, live-verified):**
+  - **`lib/billing-overview-model.ts` (new, +380)** — pure functions, no
+    Supabase or Next imports, so `node --test` runs it without the
+    framework. Exports `buildTenantRows`, `findAnomalies`, `buildEventRows`,
+    `STALE_UNAPPLIED_EVENT_MS` (15 min, named constant).
+    - `buildTenantRows`: one row per org, one per lab with `org_id NULL`.
+      `billingStatus` comes ONLY from the `billing_accounts` row — null when
+      no row exists. NOTHING in the model derives status from
+      `trial_ends_at`.
+    - `findAnomalies` kinds: `org_lab_billing_row` (billing row keyed to an
+      org-owned lab), `orphan_billing_row` (row matching no loaded org/lab),
+      `stale_unapplied_event` (see decision 6), `period_end_passed`
+      (`active` but `current_period_end` in the past).
+    - `buildEventRows`: resolves tenant from the stored payload via
+      subscription id, customer id, or `metadata.billing_account_id`
+      (precedence not independently verified). Unresolvable → the literal
+      `"Unresolved"` — never a guess, never an empty string. `amountUsd`
+      null when absent/malformed — NEVER 0. `stripeCustomerId` extracted
+      per-event (added in E2) so unresolved rows stay actionable.
+  - **`app/api/super-admin/billing-overview/route.ts` (new, +137)** — GET
+    only. Bearer auth via `authenticateBearerRequest`; role and `is_active`
+    read from `profiles` via the admin client (never trusted from the JWT
+    alone). Requires `role === 'super_admin'` AND `is_active`. Reads
+    `organizations`, `labs`, `billing_accounts` INCLUDING the Stripe id
+    columns, and the latest 50 `processed_stripe_events` by `received_at`
+    desc. **Fail-closed:** ANY read error → 500 with an `error_code` and NO
+    partial body — the client can never receive a response that looks
+    complete but is missing a table.
+  - **Verified live:** 200 as super_admin; **403 as the Lab1 manager**. The
+    route reads with the service role, so RLS does not apply inside it —
+    that auth gate is the ONLY thing between a manager and the Stripe ids.
+
+- **Phase E2 — operator UI (in `dcbc9fb`, live-verified):**
+  - `app/super-admin/page.tsx`: billing section is now route-backed via the
+    Bearer pattern from `lib/create-checkout.ts`. `deriveStatus()` and the
+    `billingOverviewRows` useMemo DELETED outright — no fallback kept. The
+    browser-side `billing_accounts` query and state REMOVED (0b check
+    confirmed nothing else read them).
+  - **Anomaly block** above the tenant table, ALWAYS rendered. Empty state
+    is the literal line "No billing anomalies detected." — an absent block
+    would be ambiguous; an empty one is the signal that the check ran and
+    found nothing.
+  - **Tenant table:** Name, Type, Labs, Status, Current period end,
+    **Expected $/mo**, Stripe customer, Stripe subscription. Stripe ids
+    monospace, truncated, full value in `title`, click-to-copy.
+    `billingStatus` null → "No billing account" (NOT "trialing", NOT
+    blank). Null money and null dates → em dash, never `$0`.
+  - **Activity feed** (Stripe webhook history): Received, Event type,
+    Tenant, Amount, Applied. Newest first. `amountUsd` null → em dash.
+    `appliedAt` null → "Pending" (warning styling). `"Unresolved"` rendered
+    plainly with the raw `cus_…` id beside it — normal history, NOT an
+    error. Empty feed → "No webhook events recorded yet."
+  - **Strict failure:** any load error REPLACES the entire billing section
+    with an error state showing HTTP status + code. Never a derived status,
+    never an empty table, never "No billing tenants yet". Scoped to the
+    billing section — cannot suppress or be suppressed by `labsMsg`.
+  - KPI cards derive from the route's tenants array. Refresh button;
+    `generatedAt` displayed. All dates via `formatRenewalDate` (Phase C
+    helper) — no new `Intl` code written.
+
+- **Phase E2a — error-code passthrough (in `b1e457f`, live-verified):**
+  - Non-200 responses now surface the route's OWN code instead of the
+    generic fallback. Matters most for the 500 read-failure path, where
+    `error_code` is the only signal identifying WHICH admin read broke.
+  - **House style is `error_code`, not `code`** (matches `failureResponse`
+    in checkout). Added where missing: auth 401 → `not_authenticated` (in
+    the SHARED `lib/mfa-api-auth.ts` — additive only, both the
+    missing-Bearer and invalid-token paths, statuses unchanged; this helper
+    also fronts checkout, portal, and the MFA routes), profile-load 500 →
+    `profile_load_failed`, catch-all 500 → `internal_error`. Already
+    present: `actor_inactive`, `forbidden`, `read_failed`.
+  - `lib/billing-overview-error-code.ts` (new) — pure resolver; tests cover
+    body-with-code, body-without, non-JSON body, empty body.
+  - Client non-200 branch reads the body via `response.text()` + resolver.
+    A parse failure NEVER collapses into the thrown-fetch branch — the HTTP
+    status always displays.
+  - Thrown-fetch branch deliberately unchanged: `HTTP — · code=request_failed`
+    is CORRECT there — no response exists, so no status and no code exist.
+    Absence stays representable as absence.
+
+- **Live verification E (2026-07-31 / 08-01, local dev against the
+  production database):**
+  - `anomalies: []`. TestOrg → Org, 2 labs, active, Expected $400/mo
+    (the CORRECT price the audit said the org should pay). Oakwood →
+    standalone Lab, active, $200. Both rows show populated Stripe ids.
+  - **The Phase D replay is visible on screen:** `evt_1TuyJC…otbxIwWH`
+    received 2026-07-19, applied 2026-07-31 — the durability fix rendered
+    as data instead of a log line.
+  - Non-invoice events (subscription.updated, checkout.session.completed)
+    show em dash in Amount — not `$0`.
+  - Blocked request (DevTools) → section replaced by
+    "Billing overview could not be loaded. HTTP — · code=request_failed".
+  - Bad token → `HTTP 401 · code=not_authenticated` (route's own code
+    reaches the screen).
+  - **Timezone midnight-crossing observed and CORRECT:** invoices stored at
+    `17:15 UTC` / `16:38 UTC` on the 19th/18th render as Jul 20 / Jul 19
+    `(GMT+8)`. The Phase C timezone label is exactly what makes this
+    legible instead of a phantom date bug.
+
+- **Closed questions from E (do NOT reinvestigate):**
+  - `evt_1TuahdJVUm1zwdXYJbR7tNmf` renders "Unresolved · cus_UuPWv14j7pg1Tm",
+    $20. Confirmed by read-only SQL against `processed_stripe_events` +
+    `billing_accounts`: no billing row matches that customer and payload
+    `metadata` is `{}` — both resolver paths legitimately had nothing.
+    Dead history from an early $20 (2000-cent) test price. NOT a bug;
+    `buildEventRows` refused to guess, as designed.
+  - **Unresolved events are permanent, expected residue.**
+    `billing_accounts` has `ON DELETE RESTRICT` on `org_id` and `lab_id`,
+    so removing a tenant requires deleting its billing row first — which
+    orphans every event that tenant ever generated. Every future
+    offboarding will leave these. They render as normal history WITH the
+    raw customer id, deliberately.
+  - Oakwood carries THREE Stripe customers across its life
+    (`cus_Uuh2Z3m6yDLCOQ`, `cus_Uuh7yL20jQ8jRK`, current
+    `cus_UundkJjI5myS0k`) — residue of repeat test checkouts before the
+    fixes. Both old customers have a `customer.subscription.deleted`, so
+    neither still bills. Their events must have resolved via
+    `metadata.billing_account_id` (deduced: the row's unique
+    `stripe_customer_id` / `stripe_subscription_id` now hold the current
+    values, so id-matching cannot have hit). Sandbox only; nothing to do.
+
 - **SCHEMA CAPTURE (current):**
   Regenerated 2026-07-31 via `pg_dump --schema=public --schema-only` of
   production. Authoritative file:
@@ -163,23 +326,58 @@
   - Silent-empty remains the recurring failure mode (see Security Rules).
   - Schema dumps via Docker: direct Supabase DB host is IPv6-only here —
     see SCHEMA CAPTURE networking note (host relay or host-native pg_dump).
+  - API error bodies use **`error_code`**, not `code` — match
+    `failureResponse` house style everywhere.
+  - `git diff` shows NOTHING for untracked files — check `git status`
+    first; use the full new-file diff if needed.
+  - `node --test` counts test BLOCKS, not assertions — the pass count can
+    stay flat while coverage genuinely grows inside existing blocks.
+  - To exercise a non-200 API branch, use a **bad Bearer token**, not a
+    typo'd URL: a bad path returns Next's HTML 404, `.json()` throws, and
+    you end up testing the catch branch instead of the one you meant.
+  - A browser tab CANNOT send an `Authorization` header — Bearer-auth
+    routes cannot be tested by visiting the URL.
+  - Session token retrieval: it was **not** in `localStorage` under
+    `sb-*-auth-token` on this app. Most reliable method, independent of
+    storage format: DevTools → Network → any authenticated request →
+    Request Headers → copy the `Authorization: Bearer …` value.
+  - PowerShell strips surrounding double quotes inside commit message
+    BODIES (same family as the known `>>` UTF-16 issue). `b1e457f`'s body
+    has unquoted error-code names as a result — cosmetic, left as-is.
 
 - **Remaining phases (current plan):**
+  - **E** — **CLOSED** (E1 + E2 + E2a). Operator can now see tenant state,
+    anomalies, and full webhook history without opening Stripe. Push still
+    outstanding — see Current state.
+  - **E3** — open, NEW. `app/super-admin/labs/[id]/page.tsx` Billing tab
+    never queries `billing_accounts` at all — it shows `organizations.plan`
+    and "Stripe Integration Coming Soon", which is now false. Small, one
+    file.
   - **B2** — open. Pre-flight `already_subscribed` guard is self-defeating
     (reads the row checkout just inserted with hardcoded `trialing`, so it
-    can never fire). Stripe customer is re-created per purchase instead of
+    can never fire). Stripe customer re-created per purchase instead of
     reused. Unreachable from the UI after B1, but still open.
-  - **E** — open — **NEXT UP.** Super-admin billing overview excludes org
-    labs entirely, so no Buddy surface would show an org billing problem.
-    This week's defects were invisible from inside the product.
+    **E data corroborates this:** Oakwood's three customer ids over its
+    lifetime are direct evidence of per-purchase customer creation —
+    `stripe_customer_id` is UNIQUE on the row, so each purchase overwrote
+    the previous value.
   - **F** — open. Quantity computed once at checkout; org lab-count changes
     never adjust the bill. Prorate-vs-next-renewal decision pending.
+    NOTE: TestOrg's stored `invoice.paid` amount ($400) agreeing with the
+    derived Expected $/mo ($400) is coincidence on this dataset, not
+    reconciliation — real reconciliation against Stripe is still F's job.
   - **Parked:** standalone paying lab later joins an org; forward-only
     guard on `current_period_end`; billing alerting/emails (Vercel cron) —
-    the webhook now fails loudly to Stripe but nothing notifies James.
+    E gives a place to LOOK, but nothing yet notifies James unprompted.
+    **Doc drift:** `api-documentation.md` does not describe
+    `GET /api/super-admin/billing-overview` (added in E1) — folds into the
+    existing deferred api-documentation cleanup pass.
   - **2026-08-19:** both sandbox subscriptions renew — first-ever
-    production run of the renewal path. Check Stripe webhook deliveries
-    and Vercel logs that day.
+    production run of the renewal path. Check Stripe webhook deliveries and
+    Vercel logs, then confirm on the billing overview that both period-end
+    dates advanced and no `stale_unapplied_event` anomaly appeared.
+    **Requires the E commits to be pushed first** — the overview does not
+    exist on yourbuddyapp.com yet.
 
 - **Files (A + B1 + C + D):** `lib/resolve-billing-owner.ts`,
   `lib/resolve-billing-owner.test.ts`, `app/api/stripe/checkout/route.ts`,
@@ -190,14 +388,31 @@
   `lib/format-renewal-date.test.ts`, `app/api/stripe/webhook/route.ts`,
   `lib/stripe-subscription-account-resolution.ts`,
   `lib/stripe-subscription-account-resolution.test.ts`,
-  `database-scripts/schema-2026-07-31.sql`. Phase A +
-  `applied_at` are captured in that dump.
+  `database-scripts/schema-2026-07-31.sql`.
+- **Files (E1 + E2, `dcbc9fb`, 4 files, +1215/−213):**
+  `app/api/super-admin/billing-overview/route.ts` (+137, new),
+  `app/super-admin/page.tsx` (+393/−213 — derived: total minus the three
+  new files; confirmed via `git show --numstat dcbc9fb`),
+  `lib/billing-overview-model.ts` (+380, new),
+  `lib/billing-overview-model.test.ts` (+305, new).
+- **Files (E2a, `b1e457f`, 5 files, +87/−16; per-file figures are exact
+  changed-line totals from `--stat`, not +/− splits):**
+  `lib/mfa-api-auth.ts` (10 — SHARED helper, also fronts checkout, portal,
+  and the MFA routes; change additive, statuses unchanged),
+  `app/api/super-admin/billing-overview/route.ts` (4),
+  `app/super-admin/page.tsx` (23),
+  `lib/billing-overview-error-code.ts` (26, new),
+  `lib/billing-overview-error-code.test.ts` (40, new).
 
-- **Current state:** A + B1 + C + D live and verified. Org-lab Upgrade
-  path blocked server-side; customer surfaces RLS-scoped; webhook
-  claim/apply/`applied_at` durable. `tsc --noEmit` exit 0; `npm test`
-  30/30. Next: E (super-admin billing overview), then F / B2. Watch
-  2026-08-19 renewal.
+- **Current state:** A + B1 + C + D + E complete. Org-lab Upgrade path
+  blocked server-side; customer surfaces RLS-scoped; webhook
+  claim/apply/`applied_at` durable; super-admin has a first-class billing
+  surface (tenants, anomalies, webhook history) requiring no Stripe login.
+  `tsc --noEmit` exit 0; `npm test` **50/50** (30 at session start).
+  **OUTSTANDING: `git push` — `dcbc9fb` + `b1e457f` are local-only. All E
+  verification ran on local dev against the production database; nothing on
+  yourbuddyapp.com has the overview yet.** Next: E3, then F / B2. Watch
+  2026-08-19 renewal (after push).
 - **Correction (same day, 2026-07-31):** An early draft of the Key Technical /
   Security rules claimed Stripe routes gate role from the JWT while
   `resolveBillingOwner` re-reads `profiles` — presented as a deliberate
