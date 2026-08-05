@@ -2,7 +2,115 @@
 
 ## Recent Sessions
 
-### Session: July 26 – August 1, 2026 (latest) — Billing Owner-Resolution + Webhook Durability + Super-Admin Billing Overview (Phases A, B1, C, D, E)
+### Session: August 1–5, 2026 (latest) — E3: Super-Admin Detail Billing Tabs (Phases 1, 2, 2b, 3)
+
+- **Headline:** Both super-admin detail pages showed legacy
+  `organizations.plan` and a "Stripe Integration Coming Soon" chip. The
+  standalone-lab branch had the literal string `"trial"` hardcoded as its
+  status badge — Oakwood, active and paying, rendered as a trial on the
+  operator's own screen. Both tabs now read the billing-overview route.
+  `organizations.plan` has no UI readers left (derived — see schema note).
+- **Commit:** `e4465ed` (8 files, +972/−368; from `git show --numstat`).
+  Tests **50 → 62** vs the prior commit — Phase 1 +6
+  (`load-billing-overview.test.ts`), Phase 2b +6
+  (`billing-status-badge.test.ts`); both files NEW in this commit. The 56
+  midpoint existed only in the working tree; the commit message's
+  "56 prior" means pre-2b, not the prior commit. Subject line carries a
+  UTF-8 BOM from PowerShell `Out-File` — left as-is, cosmetic.
+
+- **Phase 1 — `lib/load-billing-overview.ts` (new, 80 lines):**
+  `fetchBillingOverview` extracted from `app/super-admin/page.tsx`.
+  Discriminated union `{ok:true;data}` | `{ok:false;status;code}`. NEVER
+  throws — the caller has no try/catch by design. Optional deps param
+  (`getSession`, `fetchFn`) for test injection, same shape as
+  `resolveBillingOwner`'s optional client; relative `.ts` imports + lazy
+  `import("./supabase.ts")` so `node --test` never loads Next.
+- **`app/super-admin/page.tsx` +9/−61 (net −52), spanning Phase 1 (body
+  replacement) AND Phase 2b (local Stripe-ID helper definitions deleted,
+  now imported). JSX call sites unchanged. The overview page got smaller
+  while gaining two more consumers of the same fetch.**
+
+- **Phase 2 — labs detail Billing tab:**
+  - **Branch on `lab.org_id` ALONE.** Old condition `lab?.org_id && org`
+    meant an org-owned lab whose ORG READ FAILED fell through to the
+    standalone branch and rendered the fake trial badge — a failed read
+    producing a confident wrong answer; silent-empty family. Missing org
+    is now its own explicit error state.
+  - Org-owned lab → `org:${lab.org_id}`, renders "Billed through {org}"
+    with a link. Standalone → `lab:${lab.id}`. **Org-owned labs have NO
+    `lab:` row by design** (`buildTenantRows` emits `lab:` rows only for
+    `org_id === null`) — never look for one.
+  - Missing row → "No billing row found for this {organization|lab}."
+    Explicit, never a guess.
+  - Renewal via `formatRenewalDate` (TZ-labeled), NOT the local
+    `formatDateOnly`. Null `expectedMonthlyUsd` → em dash, never `$0`
+    (`!== null`, so a genuine $0 stays distinguishable).
+  - **Separate loading flag and useEffect** — not in the existing
+    `Promise.all`, does not touch `dataLoading`. A failed billing read
+    cannot blank Overview, Members, or Invites.
+
+- **Phase 2b — trial rule + de-duplication:**
+  - Three states: countdown+bar only while a trial is live; "Trial ended
+    {date}" once lapsed; nothing once `active`/`past_due`/`suspended`.
+    `trialEnded` compares the raw end timestamp — NOT `daysRemaining`,
+    which clamps at 0 and cannot distinguish "ends today" from "ended in
+    March".
+  - **Cursor correctly overrode the spec:** I specified +30/+90 in both
+    branches; it kept them org-only because `handleExtendTrial` writes
+    `organizations.trial_ends_at` and requires an `org`. Following the
+    spec would have shipped a dead button on standalone labs.
+  - `truncateStripeId`/`copyStripeId` → `lib/stripe-id-display.ts`;
+    `billingStatusLabel` → `lib/billing-status-badge.ts`. Cursor had
+    copy-pasted local copies into the labs page; consolidated before the
+    org page made it three.
+
+- **Phase 3 — orgs detail Billing tab:** identical treatment. Overview
+  tab's Billing Summary card DELETED — two surfaces showing billing is
+  how they end up disagreeing.
+
+- **Known wording drift (deliberate):** detail pages show
+  `billingStatusLabel` ("Payment issue" for `past_due`); the main
+  overview's Status column still shows the raw string. Phase 2b
+  intentionally did not rewire `page.tsx`. Unify later if it grates.
+
+- **Verified in browser (local dev against the production DB — derived:
+  `e4465ed` is local-only, so the new UI could only render on local
+  dev):**
+  - Oakwood → Standalone lab, **Active**, `Aug 20, 2026 (GMT+8)`, $200,
+    1 lab, both Stripe ids copy. **No trial block.** (Before: "trial".)
+  - Test Org lab → "Billed through TestOrg", the ORG's Stripe ids;
+    blocked request on the labs page → tab shows the error line, other
+    tabs unaffected. (Itemized by James.)
+  - TestOrg org page → Active, trial block / progress bar / Coming Soon /
+    Manage Billing all gone; Overview card gone; link-through from the
+    lab page; org-page blocked-request path — covered by James's final
+    checklist sign-off ("build is clean, everything looks great") rather
+    than itemized.
+- **NOT verified (no data to exercise):** "No billing row found" and
+  "Organization details could not be loaded." Both compile; neither has
+  been seen render.
+
+- **Known gap, pre-existing:** a standalone lab has no UI to extend its
+  trial (`handleExtendTrial` requires an org). More visible now the
+  countdown is gone. Fix = new handler writing `labs.trial_ends_at`; own
+  work, not E3.
+- **Cosmetic:** the progress bar assumes a fixed 90 days, so an extended
+  trial reads "0% elapsed" at 194 days remaining. Renders only for
+  trialing tenants. Left as-is.
+- **Key lessons:** PowerShell `Out-File` prepends a UTF-8 BOM — commit
+  subjects written that way start with `efbbbf`; write via heredoc/`-F`
+  from a BOM-free source. Cursor's shell had no git identity; commit
+  authored via env vars matching prior commits.
+
+- **Current state:** E3 CLOSED. A–D live-verified in production. E pushed
+  at session start (deploy derived from push→Vercel); a production
+  spot-check of the E overview on yourbuddyapp.com is NOT yet recorded —
+  do before Aug 19. `e4465ed` local-only; after this doc commit `main` is
+  2 ahead — push both. Next: **F** (quantity sync — prorate-vs-next-
+  renewal decision needed first). B2 open. **2026-08-19:** both sandbox
+  renewals — first production run of the renewal path.
+
+### Session: July 26 – August 1, 2026 — Billing Owner-Resolution + Webhook Durability + Super-Admin Billing Overview (Phases A, B1, C, D, E)
 - **Headline:** Closed a FINANCIAL defect (org-lab manager Upgrade → second
   `billing_accounts` row + second Stripe subscription), hardened the webhook
   so transient write failures can no longer lose billing state permanently,
@@ -2274,15 +2382,18 @@ archived = manager clicked "Move to History"
 ### organizations
 ```
 id, name,
-plan (text, default 'trial'),  — LEGACY: superseded by billing_accounts.billing_status;
-  still read by /super-admin/orgs/[id] and /super-admin/labs/[id]
+plan (text, default 'trial'),  — LEGACY: superseded by
+  billing_accounts.billing_status; NO UI readers as of e4465ed (E3,
+  Aug 2026). Column retained in DB.
 trial_ends_at (timestamptz, default now() + 90 days),
 created_at, created_by (uuid → auth.users)
 ```
 - RLS enabled — super admin full access, org admin sees own org
-- plan: 'trial' | 'starter' | 'pro' | 'enterprise' — **LEGACY**; billing truth is
-  `billing_accounts.billing_status` (KPI cards no longer use `plan`; two
-  super-admin detail pages still read it for badges / +30/+90 trial-extend)
+- plan — **LEGACY**; billing truth is `billing_accounts.billing_status`.
+  As of `e4465ed` nothing in the UI reads `plan` (rg under
+  app/super-admin/ → none; session-start app-wide sweep had no other
+  hits — derived). The +30/+90 trial-extend never read `plan`; it writes
+  `organizations.trial_ends_at`.
 - `created_by` → auth.users ON DELETE **NO ACTION** (blocks user delete until
   org row removed or created_by reassigned)
 - `profiles.org_id` → organizations ON DELETE **RESTRICT** (org cannot be
