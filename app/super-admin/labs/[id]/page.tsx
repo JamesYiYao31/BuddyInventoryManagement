@@ -13,6 +13,14 @@ import { deactivatedSignOut } from "@/lib/active-session"
 import { resolveMfaGateRedirect } from "@/lib/mfa-gate"
 import { setUserActiveStatus, setUserActiveErrorMessage } from "@/lib/set-user-active"
 import { setUserRole, setUserRoleErrorMessage } from "@/lib/set-user-role"
+import { loadBillingOverview } from "@/lib/load-billing-overview"
+import type { TenantRow } from "@/lib/billing-overview-model"
+import { formatRenewalDate } from "@/lib/format-renewal-date"
+import {
+  billingStatusBadgeClass,
+  billingStatusLabel,
+} from "@/lib/billing-status-badge"
+import { truncateStripeId, copyStripeId } from "@/lib/stripe-id-display"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -52,7 +60,6 @@ type MemberRow = {
 type OrgDetail = {
   id: string
   name: string
-  plan: string
   created_at: string
   trial_ends_at: string | null
 }
@@ -220,6 +227,14 @@ export default function LabDetailPage() {
   // Billing extend busy
   const [extendBusy, setExtendBusy] = useState(false)
 
+  // Billing overview (separate from page dataLoading)
+  const [billingTenants, setBillingTenants] = useState<TenantRow[] | null>(null)
+  const [billingLoading, setBillingLoading] = useState(false)
+  const [billingError, setBillingError] = useState<{
+    status: number
+    code: string
+  } | null>(null)
+
   // Audit log retention
   const [retentionInput, setRetentionInput] = useState<string>("3")
   const [retentionBusy, setRetentionBusy] = useState(false)
@@ -300,7 +315,7 @@ export default function LabDetailPage() {
     if (labData.org_id) {
       const { data: orgData } = await supabase
         .from("organizations")
-        .select("id, name, plan, created_at, trial_ends_at")
+        .select("id, name, created_at, trial_ends_at")
         .eq("id", labData.org_id)
         .maybeSingle()
       setOrg(orgData as OrgDetail | null)
@@ -368,6 +383,25 @@ export default function LabDetailPage() {
     }
     void run()
   }, [authorized, fetchLab, fetchSettings, fetchMembers, fetchInvites])
+
+  const fetchBilling = useCallback(async () => {
+    setBillingLoading(true)
+    setBillingError(null)
+    const result = await loadBillingOverview()
+    if (!result.ok) {
+      setBillingError({ status: result.status, code: result.code })
+      setBillingTenants(null)
+    } else {
+      setBillingTenants(result.data.tenants)
+      setBillingError(null)
+    }
+    setBillingLoading(false)
+  }, [])
+
+  useEffect(() => {
+    if (!authorized) return
+    void fetchBilling()
+  }, [authorized, fetchBilling])
 
   // ── Actions ────────────────────────────────────────────────────────────────
 
@@ -604,15 +638,6 @@ export default function LabDetailPage() {
       : trialInfo && trialInfo.daysRemaining > 10
       ? "bg-amber-500"
       : "bg-red-500"
-
-  const planBadgeClass =
-    org?.plan === "trial"
-      ? "bg-amber-500/15 text-amber-800 dark:text-amber-400"
-      : org?.plan === "starter"
-      ? "bg-sky-500/15 text-sky-800 dark:text-sky-300"
-      : org?.plan === "pro"
-      ? "bg-violet-500/15 text-violet-800 dark:text-violet-300"
-      : "bg-indigo-500/15 text-indigo-800 dark:text-indigo-300"
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
@@ -897,184 +922,429 @@ export default function LabDetailPage() {
             {/* ── Billing ── */}
             {activeTab === "billing" && (
               <div className="rounded-2xl border border-border bg-card p-6 shadow-sm space-y-6">
-                {lab?.org_id && org ? (
-                  <>
-                    <div className="flex items-center gap-3">
-                      <span
-                        className={`inline-flex px-2.5 py-1 rounded-full text-xs font-bold capitalize ${planBadgeClass}`}
-                      >
-                        {org.plan}
-                      </span>
-                      <span className="text-sm text-muted-foreground">
-                        {org.name}
-                      </span>
-                    </div>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={() => void fetchBilling()}
+                    disabled={billingLoading}
+                    className="h-9 px-4 rounded-xl border border-border text-xs font-bold hover:bg-muted/50 disabled:opacity-50 disabled:pointer-events-none inline-flex items-center gap-2"
+                  >
+                    {billingLoading ? (
+                      <Loader2 className="size-3.5 animate-spin" aria-hidden />
+                    ) : null}
+                    Refresh
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => router.push("/super-admin")}
+                    className="text-xs font-bold text-primary hover:underline"
+                  >
+                    View full billing overview
+                  </button>
+                </div>
 
-                    <dl className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-                      <div>
-                        <dt className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                          Trial Start
-                        </dt>
-                        <dd className="mt-1 text-sm font-medium">
-                          {formatDateOnly(org.created_at)}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                          Trial End
-                        </dt>
-                        <dd className="mt-1 text-sm font-medium">
-                          {trialInfo
-                            ? formatDateOnly(trialInfo.trialEnd.toISOString())
-                            : "—"}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                          Days Remaining
-                        </dt>
-                        <dd
-                          className={`mt-1 text-2xl font-black ${daysRemainingColor}`}
-                        >
-                          {trialInfo?.daysRemaining ?? "—"}
-                        </dd>
-                      </div>
-                    </dl>
-
-                    {trialInfo && (
-                      <div className="space-y-1.5">
-                        <div className="h-2 rounded-full bg-muted overflow-hidden">
-                          <div
-                            className={`h-full rounded-full transition-all ${progressColor}`}
-                            style={{ width: `${trialInfo.pct}%` }}
-                          />
-                        </div>
-                        <p className="text-[10px] text-muted-foreground font-medium">
-                          {Math.round(trialInfo.pct)}% of 90-day trial elapsed
-                        </p>
-                      </div>
-                    )}
-
-                    <div className="flex flex-wrap gap-3">
-                      <button
-                        type="button"
-                        disabled={extendBusy}
-                        onClick={() => void handleExtendTrial(30)}
-                        className="h-9 px-4 rounded-xl border border-border text-xs font-bold hover:bg-muted/50 disabled:opacity-50 disabled:pointer-events-none inline-flex items-center gap-2"
-                      >
-                        {extendBusy && (
-                          <Loader2 className="size-3.5 animate-spin" />
-                        )}
-                        +30 Days
-                      </button>
-                      <button
-                        type="button"
-                        disabled={extendBusy}
-                        onClick={() => void handleExtendTrial(90)}
-                        className="h-9 px-4 rounded-xl border border-border text-xs font-bold hover:bg-muted/50 disabled:opacity-50 disabled:pointer-events-none inline-flex items-center gap-2"
-                      >
-                        {extendBusy && (
-                          <Loader2 className="size-3.5 animate-spin" />
-                        )}
-                        +90 Days
-                      </button>
-                      <button
-                        type="button"
-                        disabled
-                        className="h-9 px-4 rounded-xl border border-border text-xs font-bold opacity-40 inline-flex items-center gap-2 cursor-not-allowed"
-                      >
-                        Manage Billing
-                      </button>
-                      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold bg-zinc-500/10 text-zinc-500">
-                        Stripe Integration Coming Soon
-                      </span>
-                    </div>
-
-                    <p className="text-xs text-muted-foreground">
-                      Billing will be managed via Stripe.
+                {billingLoading ? (
+                  <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+                    <Loader2 className="size-5 animate-spin" aria-hidden />
+                    Loading billing…
+                  </div>
+                ) : billingError ? (
+                  <div
+                    role="alert"
+                    className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-4 space-y-1"
+                  >
+                    <p className="text-sm font-bold text-destructive">
+                      Billing could not be loaded.
                     </p>
-                  </>
-                ) : (
-                  (() => {
-                    const labTrial = computeLabTrialInfo(lab!)
-                    const labDaysColor =
-                      labTrial.daysRemaining > 30
-                        ? "text-green-700 dark:text-green-400"
-                        : labTrial.daysRemaining > 10
-                        ? "text-amber-700 dark:text-amber-400"
-                        : "text-red-700 dark:text-red-400"
-                    const labProgressColor =
-                      labTrial.daysRemaining > 30
-                        ? "bg-green-500"
-                        : labTrial.daysRemaining > 10
-                        ? "bg-amber-500"
-                        : "bg-red-500"
+                    <p className="text-xs text-destructive/90 font-mono">
+                      HTTP {billingError.status || "—"} · code={billingError.code}
+                    </p>
+                  </div>
+                ) : !lab ? (
+                  <p className="text-sm text-muted-foreground italic">
+                    Lab details could not be loaded.
+                  </p>
+                ) : lab.org_id ? (
+                  !org ? (
+                    <p className="text-sm text-destructive font-medium">
+                      Organization details could not be loaded.
+                    </p>
+                  ) : (() => {
+                    const row = billingTenants?.find(
+                      (t) => t.key === `org:${lab.org_id}`,
+                    )
+                    if (!row) {
+                      return (
+                        <p className="text-sm text-muted-foreground">
+                          No billing row found for this organization.
+                        </p>
+                      )
+                    }
+                    const showTrial =
+                      row.billingStatus === null ||
+                      row.billingStatus === "trialing"
+                    const trialEnded = trialInfo
+                      ? trialInfo.trialEnd.getTime() < Date.now()
+                      : false
+                    const showTrialCountdown = showTrial && !trialEnded
+                    const showExtendButtons = showTrial
                     return (
                       <>
+                        <div className="space-y-1">
+                          <p className="text-sm font-medium">
+                            Billed through{" "}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                router.push(`/super-admin/orgs/${org.id}`)
+                              }
+                              className="font-bold text-primary hover:underline"
+                            >
+                              {org.name}
+                            </button>
+                          </p>
+                        </div>
+
                         <div className="flex items-center gap-3">
-                          <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-bold capitalize bg-amber-500/15 text-amber-800 dark:text-amber-400">
-                            trial
-                          </span>
-                          <span className="text-sm text-muted-foreground">
-                            Single Lab
+                          <span
+                            className={`inline-flex px-2.5 py-1 rounded-full text-xs font-bold capitalize ${billingStatusBadgeClass(row.billingStatus)}`}
+                          >
+                            {billingStatusLabel(row.billingStatus)}
                           </span>
                         </div>
 
-                        <dl className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                        <dl className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                           <div>
                             <dt className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                              Trial Start
+                              Renewal
                             </dt>
                             <dd className="mt-1 text-sm font-medium">
-                              {formatDateOnly(labTrial.trialStart.toISOString())}
+                              {formatRenewalDate(row.currentPeriodEnd) ?? "—"}
                             </dd>
                           </div>
                           <div>
                             <dt className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                              Trial End
+                              Expected $/mo
                             </dt>
                             <dd className="mt-1 text-sm font-medium">
-                              {formatDateOnly(labTrial.trialEnd.toISOString())}
+                              {row.expectedMonthlyUsd !== null
+                                ? `$${row.expectedMonthlyUsd.toLocaleString("en-US")}`
+                                : "—"}
                             </dd>
                           </div>
                           <div>
                             <dt className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                              Days Remaining
+                              Labs covered
                             </dt>
-                            <dd className={`mt-1 text-2xl font-black ${labDaysColor}`}>
-                              {labTrial.daysRemaining}
+                            <dd className="mt-1 text-sm font-medium">
+                              {row.labCount}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                              Stripe customer
+                            </dt>
+                            <dd className="mt-1">
+                              {row.stripeCustomerId ? (
+                                <button
+                                  type="button"
+                                  title={row.stripeCustomerId}
+                                  onClick={() =>
+                                    void copyStripeId(row.stripeCustomerId!)
+                                  }
+                                  className="font-mono text-xs text-left hover:underline"
+                                >
+                                  {truncateStripeId(row.stripeCustomerId)}
+                                </button>
+                              ) : (
+                                "—"
+                              )}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                              Stripe subscription
+                            </dt>
+                            <dd className="mt-1">
+                              {row.stripeSubscriptionId ? (
+                                <button
+                                  type="button"
+                                  title={row.stripeSubscriptionId}
+                                  onClick={() =>
+                                    void copyStripeId(row.stripeSubscriptionId!)
+                                  }
+                                  className="font-mono text-xs text-left hover:underline"
+                                >
+                                  {truncateStripeId(row.stripeSubscriptionId)}
+                                </button>
+                              ) : (
+                                "—"
+                              )}
                             </dd>
                           </div>
                         </dl>
 
-                        <div className="space-y-1.5">
-                          <div className="h-2 rounded-full bg-muted overflow-hidden">
-                            <div
-                              className={`h-full rounded-full transition-all ${labProgressColor}`}
-                              style={{ width: `${labTrial.pct}%` }}
-                            />
-                          </div>
-                          <p className="text-[10px] text-muted-foreground font-medium">
-                            {Math.round(labTrial.pct)}% of 90-day trial elapsed
-                          </p>
-                        </div>
+                        {showTrialCountdown && trialInfo ? (
+                          <>
+                            <dl className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                              <div>
+                                <dt className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                                  Trial Start
+                                </dt>
+                                <dd className="mt-1 text-sm font-medium">
+                                  {formatDateOnly(org.created_at)}
+                                </dd>
+                              </div>
+                              <div>
+                                <dt className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                                  Trial End
+                                </dt>
+                                <dd className="mt-1 text-sm font-medium">
+                                  {formatDateOnly(
+                                    trialInfo.trialEnd.toISOString(),
+                                  )}
+                                </dd>
+                              </div>
+                              <div>
+                                <dt className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                                  Days Remaining
+                                </dt>
+                                <dd
+                                  className={`mt-1 text-2xl font-black ${daysRemainingColor}`}
+                                >
+                                  {trialInfo.daysRemaining}
+                                </dd>
+                              </div>
+                            </dl>
 
-                        <div className="flex flex-wrap items-center gap-3">
-                          <button
-                            type="button"
-                            disabled
-                            className="h-9 px-4 rounded-xl border border-border text-xs font-bold opacity-40 inline-flex items-center gap-2 cursor-not-allowed"
-                          >
-                            Manage Billing
-                          </button>
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold bg-zinc-500/10 text-zinc-500">
-                            Stripe Integration Coming Soon
-                          </span>
-                        </div>
+                            <div className="space-y-1.5">
+                              <div className="h-2 rounded-full bg-muted overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full transition-all ${progressColor}`}
+                                  style={{ width: `${trialInfo.pct}%` }}
+                                />
+                              </div>
+                              <p className="text-[10px] text-muted-foreground font-medium">
+                                {Math.round(trialInfo.pct)}% of 90-day trial
+                                elapsed
+                              </p>
+                            </div>
+                          </>
+                        ) : null}
+
+                        {showTrial && trialEnded && trialInfo ? (
+                          <p className="text-sm text-muted-foreground">
+                            Trial ended{" "}
+                            {formatDateOnly(trialInfo.trialEnd.toISOString())}
+                          </p>
+                        ) : null}
+
+                        {showExtendButtons ? (
+                          <div className="flex flex-wrap gap-3">
+                            <button
+                              type="button"
+                              disabled={extendBusy}
+                              onClick={() => void handleExtendTrial(30)}
+                              className="h-9 px-4 rounded-xl border border-border text-xs font-bold hover:bg-muted/50 disabled:opacity-50 disabled:pointer-events-none inline-flex items-center gap-2"
+                            >
+                              {extendBusy && (
+                                <Loader2 className="size-3.5 animate-spin" />
+                              )}
+                              +30 Days
+                            </button>
+                            <button
+                              type="button"
+                              disabled={extendBusy}
+                              onClick={() => void handleExtendTrial(90)}
+                              className="h-9 px-4 rounded-xl border border-border text-xs font-bold hover:bg-muted/50 disabled:opacity-50 disabled:pointer-events-none inline-flex items-center gap-2"
+                            >
+                              {extendBusy && (
+                                <Loader2 className="size-3.5 animate-spin" />
+                              )}
+                              +90 Days
+                            </button>
+                          </div>
+                        ) : null}
                       </>
                     )
                   })()
-                )}
+                ) : (() => {
+                  const row = billingTenants?.find(
+                    (t) => t.key === `lab:${lab.id}`,
+                  )
+                  if (!row) {
+                    return (
+                      <p className="text-sm text-muted-foreground">
+                        No billing row found for this lab.
+                      </p>
+                    )
+                  }
+                  const showTrial =
+                    row.billingStatus === null ||
+                    row.billingStatus === "trialing"
+                  const labTrial = showTrial
+                    ? computeLabTrialInfo(lab)
+                    : null
+                  const trialEnded = labTrial
+                    ? labTrial.trialEnd.getTime() < Date.now()
+                    : false
+                  const showTrialCountdown = showTrial && !trialEnded
+                  const labDaysColor =
+                    labTrial && labTrial.daysRemaining > 30
+                      ? "text-green-700 dark:text-green-400"
+                      : labTrial && labTrial.daysRemaining > 10
+                        ? "text-amber-700 dark:text-amber-400"
+                        : "text-red-700 dark:text-red-400"
+                  const labProgressColor =
+                    labTrial && labTrial.daysRemaining > 30
+                      ? "bg-green-500"
+                      : labTrial && labTrial.daysRemaining > 10
+                        ? "bg-amber-500"
+                        : "bg-red-500"
+                  return (
+                    <>
+                      <p className="text-sm text-muted-foreground font-medium">
+                        Standalone lab
+                      </p>
+
+                      <div className="flex items-center gap-3">
+                        <span
+                          className={`inline-flex px-2.5 py-1 rounded-full text-xs font-bold capitalize ${billingStatusBadgeClass(row.billingStatus)}`}
+                        >
+                          {billingStatusLabel(row.billingStatus)}
+                        </span>
+                      </div>
+
+                      <dl className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                        <div>
+                          <dt className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                            Renewal
+                          </dt>
+                          <dd className="mt-1 text-sm font-medium">
+                            {formatRenewalDate(row.currentPeriodEnd) ?? "—"}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                            Expected $/mo
+                          </dt>
+                          <dd className="mt-1 text-sm font-medium">
+                            {row.expectedMonthlyUsd !== null
+                              ? `$${row.expectedMonthlyUsd.toLocaleString("en-US")}`
+                              : "—"}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                            Labs covered
+                          </dt>
+                          <dd className="mt-1 text-sm font-medium">
+                            {row.labCount}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                            Stripe customer
+                          </dt>
+                          <dd className="mt-1">
+                            {row.stripeCustomerId ? (
+                              <button
+                                type="button"
+                                title={row.stripeCustomerId}
+                                onClick={() =>
+                                  void copyStripeId(row.stripeCustomerId!)
+                                }
+                                className="font-mono text-xs text-left hover:underline"
+                              >
+                                {truncateStripeId(row.stripeCustomerId)}
+                              </button>
+                            ) : (
+                              "—"
+                            )}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                            Stripe subscription
+                          </dt>
+                          <dd className="mt-1">
+                            {row.stripeSubscriptionId ? (
+                              <button
+                                type="button"
+                                title={row.stripeSubscriptionId}
+                                onClick={() =>
+                                  void copyStripeId(row.stripeSubscriptionId!)
+                                }
+                                className="font-mono text-xs text-left hover:underline"
+                              >
+                                {truncateStripeId(row.stripeSubscriptionId)}
+                              </button>
+                            ) : (
+                              "—"
+                            )}
+                          </dd>
+                        </div>
+                      </dl>
+
+                      {showTrialCountdown && labTrial ? (
+                        <>
+                          <dl className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                            <div>
+                              <dt className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                                Trial Start
+                              </dt>
+                              <dd className="mt-1 text-sm font-medium">
+                                {formatDateOnly(
+                                  labTrial.trialStart.toISOString(),
+                                )}
+                              </dd>
+                            </div>
+                            <div>
+                              <dt className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                                Trial End
+                              </dt>
+                              <dd className="mt-1 text-sm font-medium">
+                                {formatDateOnly(
+                                  labTrial.trialEnd.toISOString(),
+                                )}
+                              </dd>
+                            </div>
+                            <div>
+                              <dt className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                                Days Remaining
+                              </dt>
+                              <dd
+                                className={`mt-1 text-2xl font-black ${labDaysColor}`}
+                              >
+                                {labTrial.daysRemaining}
+                              </dd>
+                            </div>
+                          </dl>
+
+                          <div className="space-y-1.5">
+                            <div className="h-2 rounded-full bg-muted overflow-hidden">
+                              <div
+                                className={`h-full rounded-full transition-all ${labProgressColor}`}
+                                style={{ width: `${labTrial.pct}%` }}
+                              />
+                            </div>
+                            <p className="text-[10px] text-muted-foreground font-medium">
+                              {Math.round(labTrial.pct)}% of 90-day trial
+                              elapsed
+                            </p>
+                          </div>
+                        </>
+                      ) : null}
+
+                      {showTrial && trialEnded && labTrial ? (
+                        <p className="text-sm text-muted-foreground">
+                          Trial ended{" "}
+                          {formatDateOnly(labTrial.trialEnd.toISOString())}
+                        </p>
+                      ) : null}
+                    </>
+                  )
+                })()}
               </div>
             )}
 

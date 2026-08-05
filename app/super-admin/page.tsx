@@ -27,7 +27,8 @@ import { voluntarySignOut, deactivatedSignOut } from "@/lib/active-session"
 import { resolveMfaGateRedirect } from "@/lib/mfa-gate"
 import { recordSecurityEvent } from "@/lib/security-log"
 import { formatRenewalDate } from "@/lib/format-renewal-date"
-import { resolveBillingOverviewErrorCode } from "@/lib/billing-overview-error-code"
+import { loadBillingOverview } from "@/lib/load-billing-overview"
+import { truncateStripeId, copyStripeId } from "@/lib/stripe-id-display"
 import type {
   Anomaly,
   EventRow,
@@ -184,59 +185,19 @@ export default function SuperAdminPage() {
     setBillingOverviewLoading(true)
     setBillingOverviewError(null)
     try {
-      // Same bearer pattern as lib/create-checkout.ts (0a).
-      const {
-        data: { session },
-      } = await supabase.auth.getSession()
-      if (!session?.access_token) {
-        setBillingOverviewError({ status: 401, code: "not_authenticated" })
+      const result = await loadBillingOverview()
+      if (!result.ok) {
+        setBillingOverviewError({ status: result.status, code: result.code })
         setBillingTenants([])
         setBillingAnomalies([])
         setBillingEvents([])
         setBillingGeneratedAt(null)
         return
       }
-
-      const response = await fetch("/api/super-admin/billing-overview", {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
-      })
-
-      if (!response.ok) {
-        const bodyText = await response.text()
-        const code = resolveBillingOverviewErrorCode(bodyText)
-        setBillingOverviewError({
-          status: response.status,
-          code,
-        })
-        setBillingTenants([])
-        setBillingAnomalies([])
-        setBillingEvents([])
-        setBillingGeneratedAt(null)
-        return
-      }
-
-      const data = (await response.json().catch(() => ({}))) as {
-        tenants?: TenantRow[]
-        anomalies?: Anomaly[]
-        events?: EventRow[]
-        generatedAt?: string
-      }
-
-      setBillingTenants(Array.isArray(data.tenants) ? data.tenants : [])
-      setBillingAnomalies(Array.isArray(data.anomalies) ? data.anomalies : [])
-      setBillingEvents(Array.isArray(data.events) ? data.events : [])
-      setBillingGeneratedAt(
-        typeof data.generatedAt === "string" ? data.generatedAt : null,
-      )
-    } catch {
-      setBillingOverviewError({ status: 0, code: "request_failed" })
-      setBillingTenants([])
-      setBillingAnomalies([])
-      setBillingEvents([])
-      setBillingGeneratedAt(null)
+      setBillingTenants(result.data.tenants)
+      setBillingAnomalies(result.data.anomalies)
+      setBillingEvents(result.data.events)
+      setBillingGeneratedAt(result.data.generatedAt)
     } finally {
       setBillingOverviewLoading(false)
     }
@@ -496,19 +457,6 @@ export default function SuperAdminPage() {
         return "bg-zinc-500/15 text-zinc-600 dark:text-zinc-400"
       default:
         return "bg-zinc-500/15 text-zinc-600 dark:text-zinc-400"
-    }
-  }
-
-  function truncateStripeId(id: string): string {
-    if (id.length <= 14) return id
-    return `${id.slice(0, 8)}…${id.slice(-4)}`
-  }
-
-  async function copyStripeId(id: string) {
-    try {
-      await navigator.clipboard.writeText(id)
-    } catch {
-      // Clipboard may be unavailable; title still exposes the full id.
     }
   }
 
